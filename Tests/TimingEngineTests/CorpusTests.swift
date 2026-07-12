@@ -87,6 +87,23 @@ struct CorpusTests {
         #expect(report.corpusEvidenceDigest?.count == 64)
         #expect(report.pdkManifestDigest?.count == 64)
         #expect(report.pdkEvidence?.isComplete == true)
+
+        let availableWithoutCorrelation = TimingQualificationEvaluator().evaluate(
+            corpus: corpus,
+            pdk: pdk,
+            modeIDs: ["functional"],
+            cornerIDs: ["typical"],
+            externalOracle: TimingExternalOracleEvidence(
+                oracleID: "available-oracle",
+                status: .available,
+                executablePath: "/usr/bin/true",
+                details: "test fixture"
+            ),
+            externalCorrelation: nil,
+            pdkEvidence: pdkEvidence
+        )
+        #expect(availableWithoutCorrelation.decision == .blocked)
+        #expect(availableWithoutCorrelation.findings.contains("external_oracle_correlation_missing"))
     }
 
     @Test("external oracle correlation checks metrics and provenance")

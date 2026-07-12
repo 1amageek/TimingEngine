@@ -42,8 +42,8 @@ public struct TimingReferenceAnalyzer: Sendable {
                    let clockToQ = model.clockToQ ?? cell.arcs.first(where: { $0.fromPin == model.clockPin && $0.toPin == model.outputPin }) {
                     _ = clock
                     let load = netLoads[net] ?? constraints.defaultOutputLoad
-                    let rise = clockToQ.delay(for: .rise).lookup(inputSlew: constraints.defaultInputSlew, outputLoad: load)
-                    let fall = clockToQ.delay(for: .fall).lookup(inputSlew: constraints.defaultInputSlew, outputLoad: load)
+                    let rise = clockToQ.delay(for: .rise).lookup(inputSlew: 0, outputLoad: load)
+                    let fall = clockToQ.delay(for: .fall).lookup(inputSlew: 0, outputLoad: load)
                     let result = EdgePair(rise: rise, fall: fall)
                     cache[net] = result
                     return result
@@ -102,7 +102,12 @@ public struct TimingReferenceAnalyzer: Sendable {
         for port in design.ports where port.direction == .output || port.direction == .bidirectional {
             guard let outputDelay = constraints.outputDelays.first(where: { $0.port == port.name && $0.isMax }) else { continue }
             let data = try arrival(for: port.name)
-            setupSlacks.append(max(outputDelay.rise, outputDelay.fall) - max(data.late.rise, data.late.fall))
+            let externalDelay = max(outputDelay.rise, outputDelay.fall)
+            let required = outputDelay.clock
+                .flatMap { constraints.clock(named: $0) ?? constraints.clock(for: $0) }
+                .map { $0.period - externalDelay - $0.uncertainty }
+                ?? externalDelay
+            setupSlacks.append(required - max(data.late.rise, data.late.fall))
         }
         guard !setupSlacks.isEmpty || !holdSlacks.isEmpty else {
             throw TimingError.unsupportedSemantic(format: "Reference STA", semantic: "no constrained timing endpoints")

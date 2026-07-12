@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "processID": "sky130A",
+  "version": "c6d73a35f524070e85faff4a6a9eef49553ebc2b",
+  "displayName": "Sky130A Volare qualification fixture",
+  "assets": [
+    {
+      "assetID": "sky130_fd_sc_hd_tt_liberty",
+      "role": "liberty",
+      "path": "sky130_tt.lib",
+      "kind": "model",
+      "format": "LIBERTY",
+      "required": true,
+      "sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+      "byteCount": 12841637,
+      "cornerIDs": ["tt-025C-1v80"]
+    }
+  ],
+  "layers": [
+    { "layerID": "active", "name": "active", "number": 1, "purpose": "diffusion" }
+  ],
+  "devices": [
+    {
+      "deviceID": "sky130_fd_sc_hd_standard_cell",
+      "modelName": "sky130_fd_sc_hd",
+      "terminals": [
+        { "name": "A", "role": "input", "order": 0 },
+        { "name": "Y", "role": "output", "order": 1 },
+        { "name": "VPWR", "role": "bulk", "order": 2 },
+        { "name": "VGND", "role": "bulk", "order": 3 }
+      ]
+    }
+  ],
+  "corners": [
+    {
+      "cornerID": "tt-025C-1v80",
+      "pvt": {
+        "process": { "name": "tt", "nominal": true },
+        "voltage": 1.8,
+        "temperatureCelsius": 25.0
+      },
+      "assetIDs": ["sky130_fd_sc_hd_tt_liberty"],
+      "viewMappings": { "liberty": "sky130_fd_sc_hd_tt_liberty" }
+    }
+  ],
+  "crossViewMappings": [
+    {
+      "mappingID": "sky130-liberty-corner",
+      "view": "liberty",
+      "assetID": "sky130_fd_sc_hd_tt_liberty",
+      "deviceIDs": ["sky130_fd_sc_hd_standard_cell"],
+      "cornerIDs": ["tt-025C-1v80"]
+    }
+  ],
+  "metadata": {
+    "source": "local-volare",
+    "sourceRoot": "~/.volare/sky130A",
+    "library": "sky130_fd_sc_hd__tt_025C_1v80.lib"
+  }
+}

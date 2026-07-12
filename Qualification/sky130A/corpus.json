@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "suiteID": "sky130A-timingengine-qualification",
+  "processID": "sky130A",
+  "version": "c6d73a35f524070e85faff4a6a9eef49553ebc2b",
+  "cases": [
+    {
+      "caseID": "sky130-dfxtp-tt-functional",
+      "engine": "sta",
+      "description": "Sky130A standard-cell DFF setup and hold at TT 1.8 V 25 C.",
+      "expectedOutcome": "completed",
+      "designPath": "sky130_top.v",
+      "topDesignName": "top",
+      "libraryPaths": ["sky130_tt.lib"],
+      "constraintPath": "sky130.sdc",
+      "pdkManifestPath": "pdk.json",
+      "processID": "sky130A",
+      "pdkVersion": "c6d73a35f524070e85faff4a6a9eef49553ebc2b",
+      "modeIDs": ["functional"],
+      "cornerIDs": ["tt-025C-1v80"]
+    }
+  ]
+}

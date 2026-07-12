@@ -16,6 +16,28 @@ struct TimingCoreTests {
         #expect(library.cells["INV"]?.powerModel != nil)
     }
 
+    @Test("Liberty skips edge-specific arcs without inventing the missing edge")
+    func libertyPartialArc() throws {
+        let liberty = """
+        library (partial) {
+          time_unit : "1ns";
+          cell (INV) {
+            pin (A) { direction : input; }
+            pin (Y) {
+              direction : output;
+              timing () {
+                related_pin : "A";
+                cell_fall (t) { index_1 ("0.1"); index_2 ("0.0"); values ("1.0"); }
+              }
+            }
+          }
+        }
+        """
+
+        let library = try LibertyParser().parse(Data(liberty.utf8))
+        #expect(library.cells["INV"]?.arcs.isEmpty == true)
+    }
+
     @Test("SDC parses clocks, IO delays and path exceptions")
     func sdcParser() throws {
         let sdc = """
@@ -36,6 +58,21 @@ struct TimingCoreTests {
         let clockGroups = try SDCParser().parse(Data("set_clock_groups -asynchronous -group [get_clocks clk] -group [get_clocks aux]".utf8))
         #expect(clockGroups.clockGroups.first?.kind == .asynchronous)
         #expect(clockGroups.clockGroups.first?.groups == [["clk"], ["aux"]])
+    }
+
+    @Test("SDC accepts standard option-before-value port delays")
+    func sdcOptionBeforeValue() throws {
+        let sdc = """
+        create_clock -name clk -period 10 [get_ports clk]
+        set_input_delay -clock clk 1 [get_ports in]
+        set_output_delay -clock clk 2 -max [get_ports out]
+        """
+
+        let constraints = try SDCParser().parse(Data(sdc.utf8))
+        #expect(constraints.inputDelays.first?.rise == 1e-9)
+        #expect(constraints.inputDelays.first?.clock == "clk")
+        #expect(constraints.outputDelays.first?.rise == 2e-9)
+        #expect(constraints.outputDelays.first?.isMax == true)
     }
 
     @Test("SPEF preserves ground and coupling capacitance")

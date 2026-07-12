@@ -18,6 +18,7 @@ public struct TimingQualificationReport: Sendable, Hashable, Codable {
     public var requiredModeIDs: [String]
     public var requiredCornerIDs: [String]
     public var externalOracle: TimingExternalOracleEvidence
+    public var externalCorrelation: TimingCorrelationResult?
     public var pdkEvidence: TimingPDKQualificationEvidence?
     public var findings: [String]
 
@@ -32,6 +33,7 @@ public struct TimingQualificationReport: Sendable, Hashable, Codable {
         requiredModeIDs: [String],
         requiredCornerIDs: [String],
         externalOracle: TimingExternalOracleEvidence,
+        externalCorrelation: TimingCorrelationResult? = nil,
         pdkEvidence: TimingPDKQualificationEvidence? = nil,
         findings: [String]
     ) {
@@ -46,6 +48,7 @@ public struct TimingQualificationReport: Sendable, Hashable, Codable {
         self.requiredModeIDs = requiredModeIDs
         self.requiredCornerIDs = requiredCornerIDs
         self.externalOracle = externalOracle
+        self.externalCorrelation = externalCorrelation
         self.pdkEvidence = pdkEvidence
         self.findings = findings
     }
@@ -62,6 +65,7 @@ public struct TimingQualificationReport: Sendable, Hashable, Codable {
         case requiredModeIDs
         case requiredCornerIDs
         case externalOracle
+        case externalCorrelation
         case pdkEvidence
         case findings
     }
@@ -80,6 +84,7 @@ public struct TimingQualificationReport: Sendable, Hashable, Codable {
             requiredCornerIDs: try container.decodeIfPresent([String].self, forKey: .requiredCornerIDs) ?? [],
             externalOracle: try container.decodeIfPresent(TimingExternalOracleEvidence.self, forKey: .externalOracle)
                 ?? TimingExternalOracleEvidence(oracleID: "unknown", status: .notEvaluated, details: "No oracle evidence was retained."),
+            externalCorrelation: try container.decodeIfPresent(TimingCorrelationResult.self, forKey: .externalCorrelation),
             pdkEvidence: try container.decodeIfPresent(TimingPDKQualificationEvidence.self, forKey: .pdkEvidence),
             findings: try container.decodeIfPresent([String].self, forKey: .findings) ?? []
         )
@@ -98,6 +103,7 @@ public struct TimingQualificationReport: Sendable, Hashable, Codable {
         try container.encode(requiredModeIDs, forKey: .requiredModeIDs)
         try container.encode(requiredCornerIDs, forKey: .requiredCornerIDs)
         try container.encode(externalOracle, forKey: .externalOracle)
+        try container.encodeIfPresent(externalCorrelation, forKey: .externalCorrelation)
         try container.encodeIfPresent(pdkEvidence, forKey: .pdkEvidence)
         try container.encode(findings, forKey: .findings)
     }

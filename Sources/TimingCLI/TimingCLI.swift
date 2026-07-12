@@ -169,12 +169,21 @@ struct TimingCLI {
         }
         let modeIDs = option("--mode", in: values).map { [$0] } ?? []
         let cornerIDs = option("--corner", in: values).map { [$0] } ?? []
+        let externalCorrelation = try option("--correlation-report", in: values).map { path in
+            let data = try read(path: path)
+            do {
+                return try JSONDecoder().decode(TimingCorrelationResult.self, from: data)
+            } catch {
+                throw TimingError.parseFailure(format: "Timing correlation report", line: 1, message: error.localizedDescription)
+            }
+        }
         let report = TimingQualificationEvaluator().evaluate(
             corpus: corpus,
             pdk: pdk,
             modeIDs: modeIDs,
             cornerIDs: cornerIDs,
             externalOracle: externalOracle,
+            externalCorrelation: externalCorrelation,
             pdkEvidence: pdkEvidence
         )
         if let outputPath = option("--out", in: values) {

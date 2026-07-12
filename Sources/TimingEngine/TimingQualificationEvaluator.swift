@@ -12,6 +12,26 @@ public struct TimingQualificationEvaluator: TimingQualificationEvaluating {
         externalOracle: TimingExternalOracleEvidence,
         pdkEvidence: TimingPDKQualificationEvidence?
     ) -> TimingQualificationReport {
+        evaluate(
+            corpus: corpus,
+            pdk: pdk,
+            modeIDs: modeIDs,
+            cornerIDs: cornerIDs,
+            externalOracle: externalOracle,
+            externalCorrelation: nil,
+            pdkEvidence: pdkEvidence
+        )
+    }
+
+    public func evaluate(
+        corpus: TimingCorpusReport,
+        pdk: PDKReference,
+        modeIDs: [String],
+        cornerIDs: [String],
+        externalOracle: TimingExternalOracleEvidence,
+        externalCorrelation: TimingCorrelationResult?,
+        pdkEvidence: TimingPDKQualificationEvidence?
+    ) -> TimingQualificationReport {
         var findings: [String] = []
         let corpusEvidenceDigest: String?
         do {
@@ -34,6 +54,7 @@ public struct TimingQualificationEvaluator: TimingQualificationEvaluating {
                 modeIDs: modeIDs,
                 cornerIDs: cornerIDs,
                 externalOracle: externalOracle,
+                externalCorrelation: externalCorrelation,
                 pdkEvidence: pdkEvidence,
                 findings: findings,
                 corpusEvidenceDigest: corpusEvidenceDigest
@@ -50,6 +71,12 @@ public struct TimingQualificationEvaluator: TimingQualificationEvaluating {
             findings.append("pdk_evidence_missing")
         }
         if externalOracle.status != .available { findings.append("external_sta_oracle_unavailable") }
+        if let externalCorrelation {
+            if !externalCorrelation.passed { findings.append("external_oracle_correlation_failed") }
+            if externalCorrelation.oracleID != externalOracle.oracleID { findings.append("external_oracle_identity_mismatch") }
+        } else {
+            findings.append("external_oracle_correlation_missing")
+        }
         let decision: TimingQualificationReport.Decision
         if findings.contains("pdk_reference_invalid") || findings.contains("process_id_mismatch") {
             decision = .failed
@@ -65,6 +92,7 @@ public struct TimingQualificationEvaluator: TimingQualificationEvaluating {
             modeIDs: modeIDs,
             cornerIDs: cornerIDs,
             externalOracle: externalOracle,
+            externalCorrelation: externalCorrelation,
             pdkEvidence: pdkEvidence,
             findings: findings,
             corpusEvidenceDigest: corpusEvidenceDigest
@@ -78,6 +106,7 @@ public struct TimingQualificationEvaluator: TimingQualificationEvaluating {
         modeIDs: [String],
         cornerIDs: [String],
         externalOracle: TimingExternalOracleEvidence,
+        externalCorrelation: TimingCorrelationResult?,
         pdkEvidence: TimingPDKQualificationEvidence?,
         findings: [String],
         corpusEvidenceDigest: String?
@@ -93,6 +122,7 @@ public struct TimingQualificationEvaluator: TimingQualificationEvaluating {
             requiredModeIDs: modeIDs,
             requiredCornerIDs: cornerIDs,
             externalOracle: externalOracle,
+            externalCorrelation: externalCorrelation,
             pdkEvidence: pdkEvidence,
             findings: findings
         )

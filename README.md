@@ -19,7 +19,7 @@ flowchart LR
     Flow --> Review["Review / approve / resume"]
 ```
 
-Native implementation, retained replay and headless integration are available locally. External-oracle execution and process qualification remain explicit gates and are never inferred from native results alone.
+Native implementation, retained replay, headless integration and a reproducible Sky130A qualification profile are available locally. External-oracle execution and process qualification remain explicit evidence gates and are never inferred from native results alone.
 
 ## Products
 
@@ -30,6 +30,7 @@ Native implementation, retained replay and headless integration are available lo
 | `SignalIntegrityEngine` | Coupling-aware crosstalk analysis |
 | `TimingEngine` | Umbrella API, corpus replay, reference correlation and qualification decisions |
 | `timingengine` | Deterministic JSON CLI |
+| `opensta-oracle-adapter` | Bounded OpenSTA process adapter that emits the shared STA result envelope |
 
 ## Contract
 
@@ -74,11 +75,28 @@ swift run timingengine qualify --corpus-report /tmp/timing-corpus-report.json --
 # Correlate a completed external STA envelope against a native STA envelope
 swift run timingengine correlate-oracle --native-report native.json --oracle-report external.json --oracle-id opensta
 
+# Build the independent OpenSTA adapter
+swift build --product opensta-oracle-adapter
+
 # Inspect the declared capabilities and limitations
 swift run timingengine capabilities
 ```
 
-`run-corpus` returns `isValid: true` only when every retained case matches its expected outcome and diagnostics. `qualify` returns `blocked` when the required external oracle or process evidence is unavailable; this is an intentional safety gate.
+`run-corpus` returns `isValid: true` only when every retained case matches its expected outcome and diagnostics. `qualify` requires PDK evidence, an available external oracle and a passing correlation report; missing correlation is a blocking finding.
+
+## Sky130A process profile
+
+The checked-in profile under `Qualification/sky130A` records the Sky130A TT Liberty digest, one retained DFF corpus case and the exact process/corner identity. The Liberty file itself remains an external PDK asset and is not copied into this repository.
+
+When Volare Sky130A and an independent OpenSTA binary are available, run the complete local release audit:
+
+```bash
+OPENSTA_BIN=/path/to/sta \
+SKY130_ROOT="$HOME/.volare/sky130A" \
+./Scripts/qualify-sky130A.sh
+```
+
+The script produces native, external, correlation, corpus and qualification JSON artifacts under `.build/qualification/sky130A`. The external adapter retains the Liberty time unit and converts OpenSTA report values to SI seconds. The current native scalar reduction of Liberty hold constraints is correlated with a documented 1 ps tolerance for this profile; this is a release-profile tolerance, not a claim of foundry signoff equivalence.
 
 ## Workspace dependency model
 
@@ -92,7 +110,7 @@ The pinned revisions are intentionally immutable release inputs. Updating a depe
 perl -e 'alarm 30; exec @ARGV' swift test
 ```
 
-The current package verification is 18 tests in 5 suites. This Swift package has no configured Xcode test scheme; SwiftPM Testing is the authoritative local test command.
+The current package verification is 21 tests in 5 suites. This Swift package has no configured Xcode test scheme; SwiftPM Testing is the authoritative local test command.
 
 ## Xcircuite integration
 
@@ -106,8 +124,9 @@ The separate Xcircuite package provides `timing.sta` and `timing.signal-integrit
 | Retained corpus replay | Passed |
 | Local reference correlation | Passed |
 | PDK manifest and required asset evidence | Passed for the retained fixture |
-| External digital STA correlation | Blocked until an independent executable is supplied |
-| Foundry/process qualification | Blocked until process-specific corpus and oracle evidence are supplied |
+| External digital STA correlation | Passed for Sky130A with OpenSTA 3.1 and 1 ps tolerance |
+| Sky130A process-scoped qualification | Passed for the retained Volare profile and TT corpus case |
+| Foundry signoff equivalence | Not claimed; SPEF/signoff and broader PVT/library coverage remain separate gates |
 
 See [MILESTONES.md](MILESTONES.md), [CAPABILITY.md](CAPABILITY.md) and [GOAL_STATUS.md](GOAL_STATUS.md) for the evidence boundary and release criteria.
 

@@ -50,7 +50,7 @@
       "modeIDs": ["functional"],
       "cornerIDs": ["typical"],
       "requiresSignoff": true,
-      "expectedWorstSetupSlack": 0.0
+      "expectedWorstSetupSlack": 6e-9
     }
   ]
 }

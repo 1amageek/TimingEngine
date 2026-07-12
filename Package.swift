@@ -42,6 +42,7 @@ let package = Package(
         .library(name: "SignalIntegrityEngine", targets: ["SignalIntegrityEngine"]),
         .library(name: "TimingEngine", targets: ["TimingEngine"]),
         .executable(name: "timingengine", targets: ["TimingCLI"]),
+        .executable(name: "opensta-oracle-adapter", targets: ["OpenSTAOracleAdapter"]),
     ],
     dependencies: [
         xcircuitePackageDependency,
@@ -81,6 +82,15 @@ let package = Package(
                 "TimingEngine",
                 .product(name: "LogicIR", package: "LogicDesign"),
                 .product(name: "PDKCore", package: "PDKKit"),
+                .product(name: "XcircuitePackage", package: "XcircuitePackage"),
+            ]
+        ),
+        .executableTarget(
+            name: "OpenSTAOracleAdapter",
+            dependencies: [
+                "STAEngine",
+                "TimingCore",
+                .product(name: "SignoffToolSupport", package: "SignoffToolSupport"),
                 .product(name: "XcircuitePackage", package: "XcircuitePackage"),
             ]
         ),

@@ -86,7 +86,8 @@ public struct SDCParser: TimingConstraintParsing {
         guard tokens.count > 1 else {
             throw TimingError.parseFailure(format: "SDC", line: line, message: "Port delay is missing its value.")
         }
-        let value = try parseTime(tokens[1], line: line)
+        _ = isInput
+        let value = try parseTime(portDelayValue(in: tokens, line: line), line: line)
         let clock = optionTargetName("-clock", in: tokens)
         let targets = targetNames(tokens)
         guard let port = targets.first else {
@@ -100,6 +101,29 @@ public struct SDCParser: TimingConstraintParsing {
             fall: value,
             isMax: isMax
         )
+    }
+
+    private func portDelayValue(in tokens: [String], line: Int) throws -> String {
+        var index = tokens.index(after: tokens.startIndex)
+        while index < tokens.endIndex {
+            let token = tokens[index]
+            if token == "-clock" {
+                index = tokens.index(after: index)
+                if index < tokens.endIndex {
+                    index = tokens.index(after: index)
+                }
+                continue
+            }
+            if token.hasPrefix("-") || (token.hasPrefix("[") && token.hasSuffix("]")) {
+                index = tokens.index(after: index)
+                continue
+            }
+            if parseTimeUnchecked(token) != nil {
+                return token
+            }
+            index = tokens.index(after: index)
+        }
+        throw TimingError.parseFailure(format: "SDC", line: line, message: "Port delay has no valid time value.")
     }
 
     private func parseException(

@@ -35,6 +35,17 @@ public struct NativeSTAEngine: STAAnalyzing {
                 throw TimingError.invalidInput("STA variation derates must be finite and positive.")
             }
             let inputs = try await loadInputs(request)
+            let provenanceIssues = LogicDesignProvenanceValidation.issues(
+                for: request.design,
+                requireProvenance: request.requiresSignoff
+            )
+            guard provenanceIssues.isEmpty else {
+                return provenanceBlockedEnvelope(
+                    request: request,
+                    startedAt: startedAt,
+                    issues: provenanceIssues
+                )
+            }
             let result = try analyze(
                 request: request,
                 design: inputs.design,
@@ -354,7 +365,7 @@ public struct NativeSTAEngine: STAAnalyzing {
             guard let clockToQ = model.clockToQ ?? timingCell.arcs.first(where: { $0.fromPin == model.clockPin && $0.toPin == model.outputPin }) else {
                 throw TimingError.unsupportedSemantic(format: "STA", semantic: "missing clock-to-Q arc for \(instance.cell)")
             }
-            let clockSlew = constraints.defaultInputSlew
+            let clockSlew = 0.0
             var arrival = EdgePair(rise: 0, fall: 0)
             var early = EdgePair(rise: 0, fall: 0)
             var slew = EdgePair(rise: clockSlew, fall: clockSlew)
@@ -507,16 +518,30 @@ public struct NativeSTAEngine: STAAnalyzing {
             guard let arrival = lateArrival[port.name],
                   let delay = constraints.outputDelays.first(where: { $0.port == port.name && $0.isMax }) else { continue }
             let latest = max(arrival.rise, arrival.fall)
-            let slack = max(delay.rise, delay.fall) - latest
-            let endpoint = STAEndpoint(modeID: modeID, cornerID: cornerID, endpoint: port.name, setupSlack: slack, dataArrival: latest, requiredArrival: max(delay.rise, delay.fall))
+            let externalDelay = max(delay.rise, delay.fall)
+            let required = outputRequiredArrival(delay: delay, externalDelay: externalDelay, constraints: constraints)
+            let slack = required - latest
+            let endpoint = STAEndpoint(modeID: modeID, cornerID: cornerID, endpoint: port.name, setupSlack: slack, dataArrival: latest, requiredArrival: required)
             endpoints.append(endpoint)
-            paths.append(makePath(modeID: modeID, cornerID: cornerID, endpoint: port.name, arrival: latest, required: max(delay.rise, delay.fall), lateArrival: lateArrival, lateSlew: lateSlew, predecessors: predecessors, design: design, launchDelay: launchDelay))
+            paths.append(makePath(modeID: modeID, cornerID: cornerID, endpoint: port.name, arrival: latest, required: required, lateArrival: lateArrival, lateSlew: lateSlew, predecessors: predecessors, design: design, launchDelay: launchDelay))
             appendViolationIfNeeded(.setup, slack: slack, endpoint: endpoint, request: request, modeID: modeID, cornerID: cornerID, violations: &violations)
         }
         guard !endpoints.isEmpty else {
             throw TimingError.unsupportedSemantic(format: "STA", semantic: "no constrained timing endpoints")
         }
         return ScenarioResult(endpoints: endpoints, paths: paths, violations: violations)
+    }
+
+    private func outputRequiredArrival(
+        delay: TimingConstraintSet.PortDelay,
+        externalDelay: Double,
+        constraints: TimingConstraintSet
+    ) -> Double {
+        guard let clockName = delay.clock,
+              let clock = constraints.clock(named: clockName) ?? constraints.clock(for: clockName) else {
+            return externalDelay
+        }
+        return clock.period - externalDelay - clock.uncertainty
     }
 
     private func topologicalOrder(
@@ -689,6 +714,34 @@ public struct NativeSTAEngine: STAAnalyzing {
                 message: error.localizedDescription,
                 suggestedActions: ["inspect_input_artifacts", "check_supported_semantics"]
             )],
+            metadata: XcircuiteEngineExecutionMetadata(
+                engineID: "timing.sta",
+                implementationID: "native-sta",
+                implementationVersion: "1.1.0",
+                startedAt: startedAt,
+                completedAt: Date()
+            ),
+            payload: emptyPayload(request: request)
+        )
+    }
+
+    private func provenanceBlockedEnvelope(
+        request: STARequest,
+        startedAt: Date,
+        issues: [LogicDesignProvenanceValidation.Issue]
+    ) -> XcircuiteEngineResultEnvelope<STAPayload> {
+        XcircuiteEngineResultEnvelope(
+            schemaVersion: STARequest.currentSchemaVersion,
+            runID: request.runID,
+            status: .blocked,
+            diagnostics: issues.map { issue in
+                XcircuiteEngineDiagnostic(
+                    severity: .error,
+                    code: issue.diagnosticCode,
+                    message: issue.message,
+                    suggestedActions: ["repair_design_provenance", "recreate_design_handoff"]
+                )
+            },
             metadata: XcircuiteEngineExecutionMetadata(
                 engineID: "timing.sta",
                 implementationID: "native-sta",

@@ -2,7 +2,7 @@
 
 ## Current state
 
-**Native backend, retained replay, local/external oracle contracts, PDK asset evidence and qualification decision infrastructure are implemented for the declared standards-constrained subset. External-oracle execution evidence and final process qualification remain separate blocked gates.**
+**Native backend, retained replay, external OpenSTA correlation, process-specific Sky130A evidence and Xcircuite headless contracts are implemented for the declared standards-constrained subset. The release profile is qualified locally; broader foundry/signoff equivalence remains an explicit limitation.**
 
 | Maturity gate | Status | Evidence |
 |---|---|---|
@@ -10,17 +10,17 @@
 | Public package products | Complete | Package.swift and public targets |
 | Shared Xcircuite request/result contract | Complete | Public Swift protocols, payloads and provenance |
 | Contract build | Passed | swift build |
-| Contract test | Passed | timeout-bounded SwiftPM Testing run: 18 tests in 5 suites; no Xcode test scheme is configured for this package |
+| Contract test | Passed | timeout-bounded SwiftPM Testing run: 21 tests in 5 suites; no Xcode test scheme is configured for this package |
 | Domain implementation | Implemented | Native parser, timing graph, MMMC STA and SI backends |
 | CLI implementation | Implemented | `timingengine` JSON CLI |
 | Fixture corpus | Retained replay complete | `Corpus/timing-corpus.json`, positive/blocked/SI cases and CLI replay |
 | Oracle correlation | Local reference complete | `TimingReferenceAnalyzer`, tolerance comparison and retained correlation result |
-| External oracle evidence | Contract complete; execution blocked | `LocalTimingExternalOracleRunner` and correlator implemented; no OpenSTA/PrimeTime/Tempus executable is present locally |
-| Process qualification | PDK evidence complete; final qualification blocked | Manifest validation and required-asset digest evidence pass for the retained fixture; oracle gate remains blocked |
+| External oracle evidence | Complete for the retained profile | Bounded OpenSTA adapter emits the shared envelope; Sky130A correlation passes at 1 ps tolerance with matching input digests |
+| Process qualification | Complete for the retained Sky130A profile | `Qualification/sky130A`, PDK manifest validation, Liberty asset digest evidence, corpus replay and qualification decision all pass |
 | Xcircuite stage adapters | Implemented | `TimingSTAFlowStageExecutor` and `TimingSIFlowStageExecutor` resolve, verify and persist artifacts |
 | End-to-end flow evidence | Complete for native STA/SI adapters | Xcircuite focused SwiftPM test passed: 3 timing headless tests, including review/approval/resume artifact integrity |
 | Public source distribution | Published and clone-resolvable | `https://github.com/1amageek/TimingEngine`; isolated clones use public revision pins and the full workspace selects sibling packages |
-| Release readiness | Blocked by qualification gates | Native/replay/integration gates pass; external oracle and process qualification remain absent |
+| Release readiness | Scoped profile passed; broader signoff blocked | Sky130A TT local qualification passes; no foundry signoff equivalence is claimed without parasitics and broader PVT/cell coverage |
 
 ## Function status
 
@@ -62,9 +62,9 @@ The package goal is complete only when every P0 function has a concrete backend,
 ## Current blockers
 
 - Advanced vendor-specific parser semantics are intentionally blocked with structured diagnostics.
-- No external digital STA oracle has been selected or qualified; local probing reports unavailable.
-- The retained process fixture has validated manifest/corner/asset evidence but is not a foundry qualification corpus.
-- Xcircuite native integration is verified; release still requires external oracle correlation and a process-specific qualification corpus.
+- The external OpenSTA executable is an environment prerequisite; the repository ships the adapter contract, not the oracle binary.
+- The Sky130A profile covers one TT DFF case and one Liberty asset; broader PVT, cell-family, SI, extraction and foundry signoff coverage remain open.
+- Native post-layout signoff remains blocked without SPEF/PEX evidence.
 
 ## Final audit evidence
 
@@ -72,15 +72,16 @@ The latest audit on 2026-07-13 passed the following controlled checks:
 
 - `swift build`
 - `swift test` with a bounded process timeout
-- fresh public clone resolve/build/test at the pinned dependency revisions: 18 tests in 5 suites
+- fresh public clone resolve/build/test at the pinned dependency revisions: 21 tests in 5 suites
 - `timingengine capabilities`
 - retained corpus replay with `isValid: true`
 - public-clone corpus replay with `isValid: true` and qualification blocked only by `external_sta_oracle_unavailable` when the fixture version is supplied
 - PDK manifest and required-asset evidence generation
-- qualification decision serialization with an explicit `external_sta_oracle_unavailable` finding
+- `Scripts/qualify-sky130A.sh` with local Volare Sky130A and OpenSTA 3.1: corpus `isValid: true`, correlation `passed: true`, qualification `decision: qualified`
+- qualification decision serialization with an explicit missing-correlation gate
 - CLI oracle-correlation schema smoke using two identical retained native reports
 - Xcircuite `TimingHeadlessFlowTests` through SwiftPM Testing with a bounded process timeout
 
-The CLI correlation smoke is schema and provenance validation only. It is not external STA evidence because the local environment has no independent digital STA executable.
+The retained Sky130A evidence uses an independent OpenSTA process and matching design, Liberty, SDC and PDK manifest digests. It is a scoped local qualification result, not a blanket foundry signoff claim.
 
 This file must be updated by implementation agents whenever a maturity gate changes. A source file or type name alone is never evidence of implementation or qualification.

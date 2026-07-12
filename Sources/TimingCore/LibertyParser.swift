@@ -109,8 +109,8 @@ public struct LibertyParser: TimingLibraryParsing {
         let clockPin = ffNode.flatMap { Self.pinName(from: $0.attribute(named: "clocked_on")) }
         let outputPin = pins.first(where: { $0.direction == .output })?.name
         var arcs: [TimingArc] = []
-        var setup = 0.0
-        var hold = 0.0
+        var setup: Double?
+        var hold: Double?
         var recovery: Double?
         var removal: Double?
         var minPulseWidth: Double?
@@ -122,19 +122,23 @@ public struct LibertyParser: TimingLibraryParsing {
                 guard let related = timingNode.attribute(named: "related_pin").flatMap(Self.pinName) else { continue }
                 let timingType = (timingNode.attribute(named: "timing_type") ?? "").lowercased()
                 if timingType.contains("setup") {
-                    setup = max(setup, try constraintValue(timingNode, timeUnitScale: timeUnitScale, capacitanceUnitScale: capacitanceUnitScale))
+                    let value = try constraintValue(timingNode, timeUnitScale: timeUnitScale, capacitanceUnitScale: capacitanceUnitScale)
+                    setup = max(setup ?? value, value)
                     continue
                 }
                 if timingType.contains("hold") {
-                    hold = max(hold, try constraintValue(timingNode, timeUnitScale: timeUnitScale, capacitanceUnitScale: capacitanceUnitScale))
+                    let value = try constraintValue(timingNode, timeUnitScale: timeUnitScale, capacitanceUnitScale: capacitanceUnitScale)
+                    hold = max(hold ?? value, value)
                     continue
                 }
                 if timingType.contains("recovery") {
-                    recovery = max(recovery ?? 0, try constraintValue(timingNode, timeUnitScale: timeUnitScale, capacitanceUnitScale: capacitanceUnitScale))
+                    let value = try constraintValue(timingNode, timeUnitScale: timeUnitScale, capacitanceUnitScale: capacitanceUnitScale)
+                    recovery = max(recovery ?? value, value)
                     continue
                 }
                 if timingType.contains("removal") {
-                    removal = max(removal ?? 0, try constraintValue(timingNode, timeUnitScale: timeUnitScale, capacitanceUnitScale: capacitanceUnitScale))
+                    let value = try constraintValue(timingNode, timeUnitScale: timeUnitScale, capacitanceUnitScale: capacitanceUnitScale)
+                    removal = max(removal ?? value, value)
                     continue
                 }
                 if timingType.contains("min_pulse_width") {
@@ -142,13 +146,15 @@ public struct LibertyParser: TimingLibraryParsing {
                     continue
                 }
 
-                let arc = try parseArc(
+                guard let arc = try parseArc(
                     timingNode,
                     from: related,
                     to: destination,
                     timeUnitScale: timeUnitScale,
                     capacitanceUnitScale: capacitanceUnitScale
-                )
+                ) else {
+                    continue
+                }
                 arcs.append(arc)
                 if let clockPin, let outputPin, related == clockPin, destination == outputPin,
                    timingType.contains("edge") || timingType.contains("propagation") {
@@ -164,8 +170,8 @@ public struct LibertyParser: TimingLibraryParsing {
                 clockPin: clockPin,
                 outputPin: outputPin,
                 clockToQ: clockToQ,
-                setupTime: setup,
-                holdTime: hold,
+                setupTime: setup ?? 0,
+                holdTime: hold ?? 0,
                 recoveryTime: recovery,
                 removalTime: removal,
                 minPulseWidth: minPulseWidth
@@ -201,7 +207,7 @@ public struct LibertyParser: TimingLibraryParsing {
         to: String,
         timeUnitScale: Double,
         capacitanceUnitScale: Double
-    ) throws -> TimingArc {
+    ) throws -> TimingArc? {
         let senseValue = (node.attribute(named: "timing_sense") ?? "positive_unate").lowercased()
         let sense: TimingSense
         switch senseValue {
@@ -212,8 +218,10 @@ public struct LibertyParser: TimingLibraryParsing {
         default:
             sense = .positiveUnate
         }
-        let rise = try table(node: node, name: "cell_rise", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale)
-        let fall = try table(node: node, name: "cell_fall", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale)
+        guard let rise = try optionalTable(node: node, name: "cell_rise", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale),
+              let fall = try optionalTable(node: node, name: "cell_fall", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale) else {
+            return nil
+        }
         let riseTransition = try optionalTable(node: node, name: "rise_transition", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale) ?? rise
         let fallTransition = try optionalTable(node: node, name: "fall_transition", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale) ?? fall
         return TimingArc(
@@ -235,13 +243,6 @@ public struct LibertyParser: TimingLibraryParsing {
             }
         }
         throw TimingError.parseFailure(format: "Liberty", line: node.line, message: "Timing constraint has no supported table.")
-    }
-
-    private func table(node: LibertyNode, name: String, scale: Double, capacitanceScale: Double) throws -> TimingLUT {
-        guard let table = try optionalTable(node: node, name: name, scale: scale, capacitanceScale: capacitanceScale) else {
-            throw TimingError.parseFailure(format: "Liberty", line: node.line, message: "Timing arc is missing \(name).")
-        }
-        return table
     }
 
     private func optionalTable(node: LibertyNode, name: String, scale: Double, capacitanceScale: Double) throws -> TimingLUT? {
