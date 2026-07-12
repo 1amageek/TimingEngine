@@ -61,4 +61,5 @@ stateDiagram-v2
 
 - No external digital STA oracle is installed in the local environment.
 - No process-specific PDK timing corpus has been retained yet.
+- The public source repository still uses workspace-local path dependencies; standalone clone packaging is not release-ready.
 - The native backend must not be described as signoff-qualified until M3 and M4 evidence exists.

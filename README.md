@@ -80,6 +80,12 @@ swift run timingengine capabilities
 
 `run-corpus` returns `isValid: true` only when every retained case matches its expected outcome and diagnostics. `qualify` returns `blocked` when the required external oracle or process evidence is unavailable; this is an intentional safety gate.
 
+## Workspace dependency model
+
+TimingEngine is one package in the LSI multi-package workspace. Its current manifest intentionally uses sibling path dependencies for `XcircuitePackage`, `LogicDesign`, `PDKKit` and `SignoffToolSupport`, because those packages share the same canonical request, artifact and process-support contracts. Build and test the package from the LSI workspace with those sibling checkouts present.
+
+The GitHub repository is public source distribution, but an isolated clone does not yet resolve these local dependencies by itself. Converting the workspace dependencies to versioned public package URLs is a separate release-packaging milestone and is not silently substituted by vendoring or duplicating the contracts here.
+
 ## Test
 
 ```bash
