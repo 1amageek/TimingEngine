@@ -110,7 +110,7 @@ The pinned revisions are intentionally immutable release inputs. Updating a depe
 perl -e 'alarm 30; exec @ARGV' swift test
 ```
 
-The current package verification is 21 tests in 5 suites. This Swift package has no configured Xcode test scheme; SwiftPM Testing is the authoritative local test command.
+The public package verification is 20 tests in 5 suites. This Swift package has no configured Xcode test scheme; SwiftPM Testing is the authoritative local test command.
 
 ## Xcircuite integration
 

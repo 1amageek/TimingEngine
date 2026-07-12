@@ -10,7 +10,7 @@
 | Public package products | Complete | Package.swift and public targets |
 | Shared Xcircuite request/result contract | Complete | Public Swift protocols, payloads and provenance |
 | Contract build | Passed | swift build |
-| Contract test | Passed | timeout-bounded SwiftPM Testing run: 21 tests in 5 suites; no Xcode test scheme is configured for this package |
+| Contract test | Passed | timeout-bounded public-clone SwiftPM Testing run: 20 tests in 5 suites; no Xcode test scheme is configured for this package |
 | Domain implementation | Implemented | Native parser, timing graph, MMMC STA and SI backends |
 | CLI implementation | Implemented | `timingengine` JSON CLI |
 | Fixture corpus | Retained replay complete | `Corpus/timing-corpus.json`, positive/blocked/SI cases and CLI replay |
@@ -72,7 +72,7 @@ The latest audit on 2026-07-13 passed the following controlled checks:
 
 - `swift build`
 - `swift test` with a bounded process timeout
-- fresh public clone resolve/build/test at the pinned dependency revisions: 21 tests in 5 suites
+- fresh public clone resolve/build/test at the pinned dependency revisions: 20 tests in 5 suites
 - `timingengine capabilities`
 - retained corpus replay with `isValid: true`
 - public-clone corpus replay with `isValid: true` and qualification blocked only by `external_sta_oracle_unavailable` when the fixture version is supplied
