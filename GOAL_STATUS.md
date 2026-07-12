@@ -71,9 +71,11 @@ The package goal is complete only when every P0 function has a concrete backend,
 The latest audit on 2026-07-13 passed the following controlled checks:
 
 - `swift build`
-- `swift test` with a 60-second process timeout
+- `swift test` with a bounded process timeout
+- fresh public clone resolve/build/test at the pinned dependency revisions: 18 tests in 5 suites
 - `timingengine capabilities`
 - retained corpus replay with `isValid: true`
+- public-clone corpus replay with `isValid: true` and qualification blocked only by `external_sta_oracle_unavailable` when the fixture version is supplied
 - PDK manifest and required-asset evidence generation
 - qualification decision serialization with an explicit `external_sta_oracle_unavailable` finding
 - CLI oracle-correlation schema smoke using two identical retained native reports
