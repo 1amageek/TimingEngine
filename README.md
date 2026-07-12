@@ -82,9 +82,9 @@ swift run timingengine capabilities
 
 ## Workspace dependency model
 
-TimingEngine is one package in the LSI multi-package workspace. Its current manifest intentionally uses sibling path dependencies for `XcircuitePackage`, `LogicDesign`, `PDKKit` and `SignoffToolSupport`, because those packages share the same canonical request, artifact and process-support contracts. Build and test the package from the LSI workspace with those sibling checkouts present.
+TimingEngine is one package in the LSI multi-package workspace, but its manifest uses public revision-pinned dependencies for `XcircuitePackage`, `LogicDesign`, `PDKKit` and `SignoffToolSupport`. The same packages can therefore be used from the workspace or from an isolated public clone without duplicating canonical contracts.
 
-The GitHub repository is public source distribution, but an isolated clone does not yet resolve these local dependencies by itself. Converting the workspace dependencies to versioned public package URLs is a separate release-packaging milestone and is not silently substituted by vendoring or duplicating the contracts here.
+The pinned revisions are intentionally immutable release inputs. Updating a dependency is a deliberate manifest change followed by a fresh build, test and artifact audit.
 
 ## Test
 

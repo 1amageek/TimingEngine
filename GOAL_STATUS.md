@@ -19,7 +19,7 @@
 | Process qualification | PDK evidence complete; final qualification blocked | Manifest validation and required-asset digest evidence pass for the retained fixture; oracle gate remains blocked |
 | Xcircuite stage adapters | Implemented | `TimingSTAFlowStageExecutor` and `TimingSIFlowStageExecutor` resolve, verify and persist artifacts |
 | End-to-end flow evidence | Complete for native STA/SI adapters | Xcircuite focused Xcode test passed: 3 timing headless tests, including review/approval/resume artifact integrity |
-| Public source distribution | Published | `https://github.com/1amageek/TimingEngine`; isolated clone packaging remains a separate dependency-publication gate |
+| Public source distribution | Published and clone-resolvable | `https://github.com/1amageek/TimingEngine`; dependencies are public and revision-pinned |
 | Release readiness | Blocked by qualification gates | Native/replay/integration gates pass; external oracle and process qualification remain absent |
 
 ## Function status
@@ -65,7 +65,6 @@ The package goal is complete only when every P0 function has a concrete backend,
 - No external digital STA oracle has been selected or qualified; local probing reports unavailable.
 - The retained process fixture has validated manifest/corner/asset evidence but is not a foundry qualification corpus.
 - Xcircuite native integration is verified; release still requires external oracle correlation and a process-specific qualification corpus.
-- An isolated GitHub clone cannot resolve the current LSI sibling path dependencies; versioned public dependency publication remains before standalone package release.
 
 ## Final audit evidence
 
