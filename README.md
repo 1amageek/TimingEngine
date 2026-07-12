@@ -82,7 +82,7 @@ swift run timingengine capabilities
 
 ## Workspace dependency model
 
-TimingEngine is one package in the LSI multi-package workspace, but its manifest uses public revision-pinned dependencies for `XcircuitePackage`, `LogicDesign`, `PDKKit` and `SignoffToolSupport`. The same packages can therefore be used from the workspace or from an isolated public clone without duplicating canonical contracts.
+TimingEngine is one package in the LSI multi-package workspace. Its manifest selects sibling packages when the complete workspace is present, and otherwise uses public revision-pinned dependencies for `XcircuitePackage`, `LogicDesign`, `PDKKit` and `SignoffToolSupport`. This keeps workspace builds on one local package identity while allowing an isolated public clone to resolve the same immutable inputs.
 
 The pinned revisions are intentionally immutable release inputs. Updating a dependency is a deliberate manifest change followed by a fresh build, test and artifact audit.
 

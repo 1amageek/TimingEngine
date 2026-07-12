@@ -18,8 +18,8 @@
 | External oracle evidence | Contract complete; execution blocked | `LocalTimingExternalOracleRunner` and correlator implemented; no OpenSTA/PrimeTime/Tempus executable is present locally |
 | Process qualification | PDK evidence complete; final qualification blocked | Manifest validation and required-asset digest evidence pass for the retained fixture; oracle gate remains blocked |
 | Xcircuite stage adapters | Implemented | `TimingSTAFlowStageExecutor` and `TimingSIFlowStageExecutor` resolve, verify and persist artifacts |
-| End-to-end flow evidence | Complete for native STA/SI adapters | Xcircuite focused Xcode test passed: 3 timing headless tests, including review/approval/resume artifact integrity |
-| Public source distribution | Published and clone-resolvable | `https://github.com/1amageek/TimingEngine`; dependencies are public and revision-pinned |
+| End-to-end flow evidence | Complete for native STA/SI adapters | Xcircuite focused SwiftPM test passed: 3 timing headless tests, including review/approval/resume artifact integrity |
+| Public source distribution | Published and clone-resolvable | `https://github.com/1amageek/TimingEngine`; isolated clones use public revision pins and the full workspace selects sibling packages |
 | Release readiness | Blocked by qualification gates | Native/replay/integration gates pass; external oracle and process qualification remain absent |
 
 ## Function status
@@ -77,7 +77,7 @@ The latest audit on 2026-07-13 passed the following controlled checks:
 - PDK manifest and required-asset evidence generation
 - qualification decision serialization with an explicit `external_sta_oracle_unavailable` finding
 - CLI oracle-correlation schema smoke using two identical retained native reports
-- Xcircuite `TimingHeadlessFlowTests` through `xcodebuild test` with a bounded process timeout
+- Xcircuite `TimingHeadlessFlowTests` through SwiftPM Testing with a bounded process timeout
 
 The CLI correlation smoke is schema and provenance validation only. It is not external STA evidence because the local environment has no independent digital STA executable.
 
