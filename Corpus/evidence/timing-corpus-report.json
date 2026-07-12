@@ -1,0 +1,70 @@
+{
+  "caseResults" : [
+    {
+      "caseID" : "si-positive",
+      "expectedDiagnosticCodes" : [],
+      "expectedOutcome" : "completed",
+      "missingExpectedDiagnosticCodes" : [],
+      "observedDiagnosticCodes" : [],
+      "observedOutcome" : "completed",
+      "passed" : true,
+      "provenance" : {
+        "constraintDigest" : "dd64dc7bd4c284ee28a07247489f6b68f9ef4859c7719346850fc7f4c6eb5e8a",
+        "designDigest" : "16f391e77b8c7b589f10ec1014d22747ef32ec9719c642b05e9c0b4e945d5bb7",
+        "libraryDigests" : [],
+        "parasiticsDigest" : "245fe588e939ad9b06611cd326aba407b780a7d280b3e00c3f32868610d84ada",
+        "pdkDigest" : "d0b548ec009954ae9568645b30206b04e4cd1f5289f20af123644eee53ba4ae9"
+      }
+    },
+    {
+      "caseID" : "sta-blocked",
+      "expectedDiagnosticCodes" : ["STA_UNSUPPORTED_SEMANTIC"],
+      "expectedOutcome" : "blocked",
+      "missingExpectedDiagnosticCodes" : [],
+      "observedDiagnosticCodes" : ["STA_UNSUPPORTED_SEMANTIC"],
+      "observedOutcome" : "blocked",
+      "passed" : true,
+      "provenance" : {
+        "constraintDigest" : "a1150e0071a84985327704811c7b998fb9bd0b720c6113f13f8f2b72b2b5f760",
+        "designDigest" : "16f391e77b8c7b589f10ec1014d22747ef32ec9719c642b05e9c0b4e945d5bb7",
+        "libraryDigests" : ["f5e76419120d31ae3b2d0d35ba4a059d38206fcf6b3648c4a2393d0b8356dbf2"],
+        "pdkDigest" : "d0b548ec009954ae9568645b30206b04e4cd1f5289f20af123644eee53ba4ae9"
+      }
+    },
+    {
+      "caseID" : "sta-positive",
+      "correlation" : {
+        "diagnostics" : [],
+        "oracleID" : "timing.reference.scalar-v1",
+        "passed" : true,
+        "setupSlackDifference" : 0,
+        "status" : "passed",
+        "tolerance" : 1e-15
+      },
+      "expectedDiagnosticCodes" : [],
+      "expectedOutcome" : "completed",
+      "missingExpectedDiagnosticCodes" : [],
+      "nativeWorstSetupSlack" : 0,
+      "observedDiagnosticCodes" : [],
+      "observedOutcome" : "completed",
+      "passed" : true,
+      "provenance" : {
+        "constraintDigest" : "dd64dc7bd4c284ee28a07247489f6b68f9ef4859c7719346850fc7f4c6eb5e8a",
+        "designDigest" : "16f391e77b8c7b589f10ec1014d22747ef32ec9719c642b05e9c0b4e945d5bb7",
+        "libraryDigests" : ["f5e76419120d31ae3b2d0d35ba4a059d38206fcf6b3648c4a2393d0b8356dbf2"],
+        "parasiticsDigest" : "245fe588e939ad9b06611cd326aba407b780a7d280b3e00c3f32868610d84ada",
+        "pdkDigest" : "d0b548ec009954ae9568645b30206b04e4cd1f5289f20af123644eee53ba4ae9"
+      }
+    }
+  ],
+  "isValid" : true,
+  "limitations" : [
+    "Corpus success proves only the retained cases and declared implementation scope.",
+    "The scalar reference oracle is independent from the native graph propagation implementation but is not a foundry signoff tool.",
+    "External digital STA oracle availability is reported separately and is not assumed by this runner."
+  ],
+  "processID" : "fixture-process",
+  "schemaVersion" : 1,
+  "suiteID" : "timingengine-retained-fixture",
+  "version" : "1"
+}

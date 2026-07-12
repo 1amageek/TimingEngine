@@ -1,0 +1,22 @@
+library (fixture) {
+  time_unit : "1ns";
+  power_unit : "1uW";
+  capacitive_load_unit (1, pf);
+  cell (INV) {
+    area : 1;
+    cell_leakage_power : 0.1;
+    pin (A) { direction : input; capacitance : 0.01; }
+    pin (Y) {
+      direction : output;
+      function : "!A";
+      timing () {
+        related_pin : "A";
+        timing_sense : negative_unate;
+        cell_rise (t) { index_1 ("0.1"); index_2 ("0.0"); values ("1.0"); }
+        cell_fall (t) { index_1 ("0.1"); index_2 ("0.0"); values ("1.0"); }
+        rise_transition (t) { index_1 ("0.1"); index_2 ("0.0"); values ("0.1"); }
+        fall_transition (t) { index_1 ("0.1"); index_2 ("0.0"); values ("0.1"); }
+      }
+    }
+  }
+}

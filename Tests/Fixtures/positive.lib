@@ -1,0 +1,16 @@
+library (fixture) {
+  time_unit : "1ns";
+  capacitive_load_unit (1, pf);
+  cell (INV) {
+    pin (A) { direction : input; capacitance : 0.01; }
+    pin (Y) {
+      direction : output;
+      timing () {
+        related_pin : "A";
+        timing_sense : negative_unate;
+        cell_rise (t) { index_1 ("0.1"); index_2 ("0.0"); values ("1.0"); }
+        cell_fall (t) { index_1 ("0.1"); index_2 ("0.0"); values ("1.0"); }
+      }
+    }
+  }
+}

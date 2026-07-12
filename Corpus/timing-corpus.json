@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "suiteID": "timingengine-retained-fixture",
+  "processID": "fixture-process",
+  "version": "1",
+  "cases": [
+    {
+      "caseID": "si-positive",
+      "engine": "signalIntegrity",
+      "description": "Coupled SPEF is analyzed with an unbounded fixture threshold.",
+      "expectedOutcome": "completed",
+      "designPath": "fixtures/simple/design.json",
+      "topDesignName": "top",
+      "constraintPath": "fixtures/simple/constraints.sdc",
+      "pdkManifestPath": "fixtures/simple/pdk.json",
+      "processID": "fixture-process",
+      "pdkVersion": "1",
+      "parasiticsPath": "fixtures/simple/positive.spef",
+      "modeIDs": ["functional"]
+    },
+    {
+      "caseID": "sta-blocked",
+      "engine": "sta",
+      "description": "Unsupported clock-group semantics remain an explicit blocked result.",
+      "expectedOutcome": "blocked",
+      "expectedDiagnosticCodes": ["STA_UNSUPPORTED_SEMANTIC"],
+      "designPath": "fixtures/simple/design.json",
+      "topDesignName": "top",
+      "libraryPaths": ["fixtures/simple/library.lib"],
+      "constraintPath": "fixtures/simple/blocked.sdc",
+      "pdkManifestPath": "fixtures/simple/pdk.json",
+      "processID": "fixture-process",
+      "pdkVersion": "1",
+      "modeIDs": ["functional"],
+      "cornerIDs": ["typical"]
+    },
+    {
+      "caseID": "sta-positive",
+      "engine": "sta",
+      "description": "A deterministic combinational path produces a replayable setup result.",
+      "expectedOutcome": "completed",
+      "designPath": "fixtures/simple/design.json",
+      "topDesignName": "top",
+      "libraryPaths": ["fixtures/simple/library.lib"],
+      "constraintPath": "fixtures/simple/constraints.sdc",
+      "pdkManifestPath": "fixtures/simple/pdk.json",
+      "processID": "fixture-process",
+      "pdkVersion": "1",
+      "parasiticsPath": "fixtures/simple/positive.spef",
+      "modeIDs": ["functional"],
+      "cornerIDs": ["typical"],
+      "requiresSignoff": true,
+      "expectedWorstSetupSlack": 0.0
+    }
+  ]
+}

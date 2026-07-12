@@ -1,0 +1,38 @@
+{
+  "corpusEvidenceDigest" : "0a9d49484ef18f096f44590e24c069817554722592454d745f5674b5d288f0ac",
+  "corpusSuiteID" : "timingengine-retained-fixture",
+  "decision" : "blocked",
+  "externalOracle" : {
+    "details" : "No configured external digital STA executable was found in PATH.",
+    "oracleID" : "external-digital-sta",
+    "status" : "unavailable"
+  },
+  "findings" : ["external_sta_oracle_unavailable"],
+  "pdkDigest" : "d0b548ec009954ae9568645b30206b04e4cd1f5289f20af123644eee53ba4ae9",
+  "pdkEvidence" : {
+    "assets" : [
+      {
+        "assetID" : "liberty-view",
+        "byteCount" : 692,
+        "format" : "LIBERTY",
+        "observedDigest" : "f5e76419120d31ae3b2d0d35ba4a059d38206fcf6b3648c4a2393d0b8356dbf2",
+        "present" : true,
+        "relativePath" : "library.lib",
+        "required" : true
+      }
+    ],
+    "cornerIDs" : ["typical"],
+    "findings" : [],
+    "isComplete" : true,
+    "manifestDigest" : "d0b548ec009954ae9568645b30206b04e4cd1f5289f20af123644eee53ba4ae9",
+    "manifestIsValid" : true,
+    "processID" : "fixture-process",
+    "version" : "1"
+  },
+  "pdkManifestDigest" : "d0b548ec009954ae9568645b30206b04e4cd1f5289f20af123644eee53ba4ae9",
+  "pdkVersion" : "1",
+  "processID" : "fixture-process",
+  "requiredCornerIDs" : ["typical"],
+  "requiredModeIDs" : ["functional"],
+  "schemaVersion" : 1
+}

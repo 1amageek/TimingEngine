@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "topDesignName": "top",
+  "ports": [
+    {"name": "in", "direction": "input"},
+    {"name": "out", "direction": "output"}
+  ],
+  "instances": [
+    {"name": "U1", "cell": "INV", "connections": {"A": "in", "Y": "out"}}
+  ],
+  "nets": []
+}
