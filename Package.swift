@@ -5,26 +5,29 @@ import Foundation
 let workspaceRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
+let isFullLSIWorkspace = FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("Xcircuite/Package.swift").path
+)
 
-let xcircuitePackageDependency: Package.Dependency = FileManager.default.fileExists(
+let xcircuitePackageDependency: Package.Dependency = isFullLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("XcircuitePackage/Package.swift").path
 )
     ? .package(path: "../XcircuitePackage")
     : .package(url: "https://github.com/1amageek/XcircuitePackage.git", revision: "55b757efa6c906c30e829c2ca5b67566856dec6b")
 
-let logicDesignDependency: Package.Dependency = FileManager.default.fileExists(
+let logicDesignDependency: Package.Dependency = isFullLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("LogicDesign/Package.swift").path
 )
     ? .package(path: "../LogicDesign")
-    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "5daff0e5525f7bd03dacb2c90917cfa1c8d905f4")
+    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "49e793bffee45ca06c75975e278c1818cb1de753")
 
-let pdkKitDependency: Package.Dependency = FileManager.default.fileExists(
+let pdkKitDependency: Package.Dependency = isFullLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("PDKKit/Package.swift").path
 )
     ? .package(path: "../PDKKit")
-    : .package(url: "https://github.com/1amageek/PDKKit.git", revision: "dde2fa2e3463e4a750e670829c0a9cb1a0661da8")
+    : .package(url: "https://github.com/1amageek/PDKKit.git", revision: "b1b33ee2224e46e7f852fc58f58072f59f0a9498")
 
-let signoffToolSupportDependency: Package.Dependency = FileManager.default.fileExists(
+let signoffToolSupportDependency: Package.Dependency = isFullLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("SignoffToolSupport/Package.swift").path
 )
     ? .package(path: "../SignoffToolSupport")
