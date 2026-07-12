@@ -69,7 +69,7 @@ swift run timingengine run-sta --design design.json --library library.lib --cons
 swift run timingengine run-corpus --manifest Corpus/timing-corpus.json --root Corpus --out /tmp/timing-corpus-report.json
 
 # Evaluate the process qualification gate; unavailable external oracles remain blocked
-swift run timingengine qualify --corpus-report /tmp/timing-corpus-report.json --pdk-manifest Corpus/fixtures/simple/pdk.json --mode functional --corner typical
+swift run timingengine qualify --corpus-report /tmp/timing-corpus-report.json --pdk-manifest Corpus/fixtures/simple/pdk.json --pdk-version 1 --mode functional --corner typical
 
 # Correlate a completed external STA envelope against a native STA envelope
 swift run timingengine correlate-oracle --native-report native.json --oracle-report external.json --oracle-id opensta
