@@ -1,5 +1,4 @@
 import Foundation
-import LogicIR
 import PDKCore
 import TimingCore
 import XcircuitePackage
@@ -33,14 +32,6 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing {
                 _ = try constraintParser.parse(constraintsData, modeID: modeID)
             }
             let parasitics = try parasiticParser.parse(try await reader.read(request.parasitics))
-            let provenanceIssues = LogicDesignProvenanceValidation.issues(for: request.design)
-            guard provenanceIssues.isEmpty else {
-                return provenanceBlockedEnvelope(
-                    request: request,
-                    startedAt: startedAt,
-                    issues: provenanceIssues
-                )
-            }
             if parasitics.couplings.contains(where: { parasitics.network(named: $0.firstNet)?.resistance ?? 0 <= 0 }) {
                 throw TimingError.unsupportedSemantic(
                     format: "SPEF",
@@ -175,34 +166,6 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing {
                 message: error.localizedDescription,
                 suggestedActions: ["inspect_input_artifacts", "check_spef_coupling_data"]
             )],
-            metadata: XcircuiteEngineExecutionMetadata(
-                engineID: "timing.signal-integrity",
-                implementationID: "native-signal-integrity",
-                implementationVersion: "1.1.0",
-                startedAt: startedAt,
-                completedAt: Date()
-            ),
-            payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil)
-        )
-    }
-
-    private func provenanceBlockedEnvelope(
-        request: SignalIntegrityRequest,
-        startedAt: Date,
-        issues: [LogicDesignProvenanceValidation.Issue]
-    ) -> XcircuiteEngineResultEnvelope<SignalIntegrityPayload> {
-        XcircuiteEngineResultEnvelope(
-            schemaVersion: SignalIntegrityRequest.currentSchemaVersion,
-            runID: request.runID,
-            status: .blocked,
-            diagnostics: issues.map { issue in
-                XcircuiteEngineDiagnostic(
-                    severity: .error,
-                    code: issue.diagnosticCode,
-                    message: issue.message,
-                    suggestedActions: ["repair_design_provenance", "recreate_design_handoff"]
-                )
-            },
             metadata: XcircuiteEngineExecutionMetadata(
                 engineID: "timing.signal-integrity",
                 implementationID: "native-signal-integrity",
