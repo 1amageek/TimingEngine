@@ -132,12 +132,17 @@ public struct TimingConstraintSet: Sendable, Hashable, Codable {
     }
 
     public func clock(named name: String) -> Clock? {
-        clocks.first { $0.name == name } ?? generatedClocks.compactMap { generated in
-            guard generated.name == name,
-                  let master = clocks.first(where: { $0.name == generated.masterClock }) else { return nil }
-            let period = master.period * Double(generated.divideBy) / Double(generated.multiplyBy)
-            return Clock(name: generated.name, source: generated.source, period: period, uncertainty: master.uncertainty)
-        }.first
+        if let clock = clocks.first(where: { $0.name == name }) {
+            return clock
+        }
+
+        guard let generated = generatedClocks.first(where: { $0.name == name }),
+              let master = clocks.first(where: { $0.name == generated.masterClock }) else {
+            return nil
+        }
+
+        let period = master.period * Double(generated.divideBy) / Double(generated.multiplyBy)
+        return Clock(name: generated.name, source: generated.source, period: period, uncertainty: master.uncertainty)
     }
 
     public func clock(for source: String) -> Clock? {
