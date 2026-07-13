@@ -19,7 +19,7 @@ let logicDesignDependency: Package.Dependency = isFullLSIWorkspace && FileManage
     atPath: workspaceRoot.appendingPathComponent("LogicDesign/Package.swift").path
 )
     ? .package(path: "../LogicDesign")
-    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "49e793bffee45ca06c75975e278c1818cb1de753")
+    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "d6a22bc10cf3d8bea8e00b65c3c3f5aab38a5c8b")
 
 let pdkKitDependency: Package.Dependency = isFullLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("PDKKit/Package.swift").path
