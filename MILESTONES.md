@@ -25,7 +25,7 @@ flowchart LR
 | M2 | Retained corpus | Positive, negative, blocked, and SI cases are versioned with a manifest and deterministic CLI/test replay artifacts | Complete |
 | M3 | Independent oracle correlation | Scalar reference and external-process adapters compare identical payloads with explicit slack, mode, corner and provenance tolerances | Complete for Sky130A/OpenSTA 3.1; 1 ps tolerance is retained in the evidence |
 | M4 | Process qualification | PDK manifest validity, required asset digests, corner/mode matrix, corpus pass rate and oracle evidence produce a retained qualification decision | Complete for the checked-in Sky130A TT profile; not foundry signoff equivalence |
-| M5 | Xcircuite headless integration | Timing STA and SI stages execute through typed flow inputs, persist artifacts, expose review gates, and support resume/replay | Complete for the TimingEngine Foundation contract; external package adapter migration is separate |
+| M5 | Runtime integration seam | Timing STA and SI stages accept typed Foundation inputs and return auditable domain results for flow persistence and review | Complete for the TimingEngine Foundation contract; persistence and resume are runtime responsibilities |
 | M6 | Release gate | Package builds, focused tests, CLI replay, corpus replay, qualification decision, and integration evidence all pass | Scoped Sky130A profile passed; broader signoff profile remains open |
 
 ## Gate policy
@@ -62,4 +62,4 @@ stateDiagram-v2
 - The external OpenSTA binary remains an environment prerequisite and is not distributed by this package.
 - The retained process profile is intentionally narrow: one Sky130A TT Liberty and one DFF case.
 - The native backend must not be described as foundry signoff-qualified; SPEF/PEX and broader PVT/library evidence remain required.
-- External Xcircuite stage executors may retain a deprecated compatibility envelope during the workspace migration; the canonical TimingEngine service, corpus, CLI and OpenSTA paths already consume Foundation results.
+- Runtime flow executors own persistence, approval and resume; TimingEngine exposes only the canonical Foundation protocol and domain results.

@@ -9,12 +9,6 @@ let isFullLSIWorkspace = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("Xcircuite/Package.swift").path
 )
 
-let xcircuitePackageDependency: Package.Dependency = isFullLSIWorkspace && FileManager.default.fileExists(
-    atPath: workspaceRoot.appendingPathComponent("XcircuitePackage/Package.swift").path
-)
-    ? .package(path: "../XcircuitePackage")
-    : .package(url: "https://github.com/1amageek/XcircuitePackage.git", revision: "55b757efa6c906c30e829c2ca5b67566856dec6b")
-
 let logicDesignDependency: Package.Dependency = isFullLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("LogicDesign/Package.swift").path
 )
@@ -51,7 +45,7 @@ let package = Package(
         .executable(name: "opensta-oracle-adapter", targets: ["OpenSTAOracleAdapter"]),
     ],
     dependencies: [
-        xcircuitePackageDependency,
+        .package(path: "../DesignFlowKernel"),
         logicDesignDependency,
         pdkKitDependency,
         signoffToolSupportDependency,
@@ -62,13 +56,13 @@ let package = Package(
             name: "TimingCore",
             dependencies: [
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
-                .product(name: "XcircuitePackage", package: "XcircuitePackage")
+                .product(name: "DesignFlowKernel", package: "DesignFlowKernel")
             ]
         ),
         .target(
             name: "STAEngine",
             dependencies: [
-                .product(name: "XcircuitePackage", package: "XcircuitePackage"),
+                .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 "TimingCore",
                 .product(name: "LogicIR", package: "LogicDesign"),
@@ -78,7 +72,7 @@ let package = Package(
         .target(
             name: "SignalIntegrityEngine",
             dependencies: [
-                .product(name: "XcircuitePackage", package: "XcircuitePackage"),
+                .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 "TimingCore",
                 .product(name: "LogicIR", package: "LogicDesign"),
@@ -92,7 +86,7 @@ let package = Package(
                 "STAEngine",
                 "SignalIntegrityEngine",
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
-                .product(name: "XcircuitePackage", package: "XcircuitePackage"),
+                .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
                 .product(name: "SignoffToolSupport", package: "SignoffToolSupport"),
             ]
         ),
@@ -105,7 +99,7 @@ let package = Package(
                 "TimingEngine",
                 .product(name: "LogicIR", package: "LogicDesign"),
                 .product(name: "PDKCore", package: "PDKKit"),
-                .product(name: "XcircuitePackage", package: "XcircuitePackage"),
+                .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
             ]
         ),
         .executableTarget(
@@ -114,7 +108,7 @@ let package = Package(
                 "STAEngine",
                 "TimingCore",
                 .product(name: "SignoffToolSupport", package: "SignoffToolSupport"),
-                .product(name: "XcircuitePackage", package: "XcircuitePackage"),
+                .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
             ]
         ),
         .testTarget(

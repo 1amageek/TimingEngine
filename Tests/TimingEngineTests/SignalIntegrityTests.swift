@@ -1,16 +1,17 @@
+import CircuiteFoundation
 import Foundation
-import LogicIR
-import PDKCore
 import SignalIntegrityEngine
 import Testing
 import TimingCore
-import XcircuitePackage
 
 @Suite("Native signal integrity")
 struct SignalIntegrityTests {
     @Test("reports coupling violations from SPEF")
     func reportsCrosstalk() async throws {
-        let spef = Data("""
+        let designData = Data("{}".utf8)
+        let constraintsData = Data("create_clock -name clk -period 10ns [get_ports clk]".utf8)
+        let pdkData = Data("{}".utf8)
+        let spefData = Data("""
         *SPEF "IEEE 1481-1998"
         *CAP_UNIT 1 PF
         *RES_UNIT 1 OHM
@@ -22,38 +23,51 @@ struct SignalIntegrityTests {
         1 victim aggressor 100
         *END
         """.utf8)
+        let design = try artifact(path: "design.json", data: designData, kind: .netlist, format: .json)
+        let constraints = try artifact(path: "constraints.sdc", data: constraintsData, kind: .constraints, format: .sdc)
+        let pdk = try artifact(path: "pdk.json", data: pdkData, kind: .technology, format: .json)
+        let parasitics = try artifact(path: "parasitics.spef", data: spefData, kind: .parasitics, format: .spef)
         let reader = InMemoryTimingArtifactReader(artifacts: [
-            "pdk.json": Data("{}".utf8),
-            "constraints.sdc": Data("create_clock -name clk -period 10ns [get_ports clk]".utf8),
-            "design.json": Data("{}".utf8),
-            "parasitics.spef": spef,
+            "design.json": designData,
+            "constraints.sdc": constraintsData,
+            "pdk.json": pdkData,
+            "parasitics.spef": spefData
         ])
-        let request = SignalIntegrityRequest(
+        let request = SignalIntegrityFoundationRequest(
             runID: "si-run",
-            inputs: [],
-            design: LogicDesignReference(
-                artifact: XcircuiteFileReference(path: "design.json", kind: .netlist, format: .json),
-                topDesignName: "top",
-                designDigest: "design"
-            ),
-            constraints: TimingConstraintReference(
-                artifact: XcircuiteFileReference(path: "constraints.sdc", kind: .constraint, format: .sdc),
-                modeIDs: ["functional"]
-            ),
-            pdk: PDKReference(
-                manifest: XcircuiteFileReference(path: "pdk.json", kind: .technology, format: .json),
-                processID: "test",
-                version: "1",
-                digest: "pdk"
-            ),
-            parasitics: XcircuiteFileReference(path: "parasitics.spef", kind: .parasitic, format: .spef),
+            design: design,
+            topDesignName: "top",
+            constraints: constraints,
+            requestedModeIDs: ["functional"],
+            pdkManifest: pdk,
+            processID: "test",
+            pdkVersion: "1",
+            parasitics: parasitics,
             maxDeltaDelay: 1e-12,
             maxNoiseRatio: 0.5
         )
-        let envelope = try await LegacyNativeSignalIntegrityEngine(reader: reader).execute(request)
-        #expect(envelope.status == .completed)
-        #expect(envelope.payload.violationCount == 1)
-        #expect(envelope.payload.worstDeltaDelay != nil)
-        #expect(envelope.diagnostics.first?.code == "SI_CROSSTALK_VIOLATION")
+        let result = try await NativeSignalIntegrityEngine(reader: reader).execute(request)
+        #expect(result.status == .completed)
+        #expect(result.payload.violationCount == 1)
+        #expect(result.payload.worstDeltaDelay != nil)
+        #expect(result.diagnostics.contains { $0.code.rawValue == "timing.signal_integrity.si_crosstalk_violation" })
+    }
+
+    private func artifact(
+        path: String,
+        data: Data,
+        kind: ArtifactKind,
+        format: ArtifactFormat
+    ) throws -> ArtifactReference {
+        ArtifactReference(
+            locator: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: path),
+                role: .input,
+                kind: kind,
+                format: format
+            ),
+            digest: try SHA256ContentDigester().digest(data: data, using: .sha256),
+            byteCount: UInt64(data.count)
+        )
     }
 }

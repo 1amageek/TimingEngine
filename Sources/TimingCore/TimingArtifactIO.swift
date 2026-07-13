@@ -1,7 +1,7 @@
 import CryptoKit
 import CircuiteFoundation
 import Foundation
-import XcircuitePackage
+import DesignFlowKernel
 
 /// Reads immutable artifacts addressed by the canonical Foundation contract.
 public protocol TimingArtifactReading: Sendable {
@@ -20,24 +20,7 @@ public protocol TimingArtifactStoring: Sendable {
     ) async throws -> ArtifactReference
 }
 
-/// Compatibility-only reader for the retired Xcircuite artifact contract.
-@available(*, deprecated, message: "Use TimingArtifactReading with ArtifactReference.")
-public protocol LegacyTimingArtifactReading: Sendable {
-    func read(_ reference: XcircuiteFileReference) async throws -> Data
-}
-
-/// Compatibility-only store for the retired Xcircuite artifact contract.
-@available(*, deprecated, message: "Use TimingArtifactStoring with ArtifactReference.")
-public protocol LegacyTimingArtifactStoring: Sendable {
-    func store(
-        _ data: Data,
-        artifactID: String,
-        runID: String,
-        format: XcircuiteFileFormat
-    ) async throws -> XcircuiteFileReference
-}
-
-public struct FileSystemTimingArtifactReader: TimingArtifactReading, LegacyTimingArtifactReading {
+public struct FileSystemTimingArtifactReader: TimingArtifactReading {
     public let workspaceRoot: URL?
 
     public init(workspaceRoot: URL? = nil) {
@@ -56,13 +39,6 @@ public struct FileSystemTimingArtifactReader: TimingArtifactReading, LegacyTimin
         }
         let data = try readData(at: url, expectedByteCount: reference.byteCount, expectedDigest: reference.digest.hexadecimalValue)
         return data
-    }
-
-    @available(*, deprecated, message: "Use read(_: ArtifactReference).")
-    public func read(_ reference: XcircuiteFileReference) async throws -> Data {
-        let url = URL(filePath: reference.path)
-        let expectedByteCount = reference.byteCount.map { UInt64(max(0, $0)) }
-        return try readData(at: url, expectedByteCount: expectedByteCount, expectedDigest: reference.sha256)
     }
 
     private func readData(
@@ -89,7 +65,7 @@ public struct FileSystemTimingArtifactReader: TimingArtifactReading, LegacyTimin
     }
 }
 
-public struct FileSystemTimingArtifactStore: TimingArtifactStoring, LegacyTimingArtifactStoring {
+public struct FileSystemTimingArtifactStore: TimingArtifactStoring {
     public var outputDirectory: URL
 
     public init(outputDirectory: URL) {
@@ -137,6 +113,7 @@ public struct FileSystemTimingArtifactStore: TimingArtifactStoring, LegacyTiming
                 id: resolvedArtifactID,
                 locator: ArtifactLocator(
                     location: try ArtifactLocation(fileURL: url),
+                    role: .output,
                     kind: kind,
                     format: format
                 ),
@@ -147,33 +124,6 @@ public struct FileSystemTimingArtifactStore: TimingArtifactStoring, LegacyTiming
         } catch {
             throw TimingError.artifactWriteFailed(path: url.path(percentEncoded: false), message: error.localizedDescription)
         }
-    }
-
-    @available(*, deprecated, message: "Use store(_:artifactID:runID:kind:format:producer:).")
-    public func store(
-        _ data: Data,
-        artifactID: String,
-        runID: String,
-        format: XcircuiteFileFormat
-    ) async throws -> XcircuiteFileReference {
-        let foundationFormat = try ArtifactFormat(rawValue: format.rawValue.lowercased().replacingOccurrences(of: "_", with: "-"))
-        let foundationReference = try await store(
-            data,
-            artifactID: try ArtifactID(rawValue: artifactID),
-            runID: runID,
-            kind: .report,
-            format: foundationFormat,
-            producer: nil
-        )
-        return XcircuiteFileReference(
-            artifactID: foundationReference.id.rawValue,
-            path: try foundationReference.locator.location.resolvedFileURL().path(percentEncoded: false),
-            kind: .report,
-            format: format,
-            sha256: foundationReference.digest.hexadecimalValue,
-            byteCount: Int64(foundationReference.byteCount),
-            producedByRunID: runID
-        )
     }
 
     private func validatePathComponent(_ value: String, label: String) throws {
@@ -187,7 +137,7 @@ public struct FileSystemTimingArtifactStore: TimingArtifactStoring, LegacyTiming
     }
 }
 
-public struct InMemoryTimingArtifactReader: TimingArtifactReading, LegacyTimingArtifactReading {
+public struct InMemoryTimingArtifactReader: TimingArtifactReading {
     public var artifacts: [String: Data]
 
     public init(artifacts: [String: Data]) {
@@ -213,12 +163,4 @@ public struct InMemoryTimingArtifactReader: TimingArtifactReading, LegacyTimingA
         return data
     }
 
-    @available(*, deprecated, message: "Use read(_: ArtifactReference).")
-    public func read(_ reference: XcircuiteFileReference) async throws -> Data {
-        let keys = [reference.path, URL(filePath: reference.path).lastPathComponent]
-        guard let data = keys.lazy.compactMap({ artifacts[$0] }).first else {
-            throw TimingError.artifactReadFailed(path: reference.path, message: "No in-memory artifact was registered.")
-        }
-        return data
-    }
 }

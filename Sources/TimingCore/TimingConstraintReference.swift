@@ -1,13 +1,14 @@
 import Foundation
-import XcircuitePackage
+import CircuiteFoundation
+import DesignFlowKernel
 
 @available(*, deprecated, message: "Use ArtifactReference directly in Foundation requests.")
 public struct LegacyTimingConstraintReference: Sendable, Hashable, Codable {
-    public var artifact: XcircuiteFileReference
+    public var artifact: ArtifactReference
     public var modeIDs: [String]
 
     public init(
-        artifact: XcircuiteFileReference,
+        artifact: ArtifactReference,
         modeIDs: [String]
     ) {
         self.artifact = artifact

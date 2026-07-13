@@ -1,15 +1,5 @@
 # TimingEngine Interface Contract
 
-## Legacy compatibility shape (deprecated)
-
-```swift
-public protocol DomainExecuting: Sendable {
-    func execute(
-        _ request: DomainRequest
-    ) async throws -> XcircuiteEngineResultEnvelope<DomainPayload>
-}
-```
-
 The canonical public shape is:
 
 ```swift
@@ -19,7 +9,9 @@ where Request == STAFoundationRequest, Output == STAExecutionResult {}
 
 Requests carry a Foundation schema version, run ID and verified `ArtifactReference` values. Domain results conform independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`; payloads contain domain metrics, while evidence and diagnostics remain inspectable without a universal result envelope.
 
-The legacy `XcircuiteEngineResultEnvelope` shape is confined to deprecated compatibility adapters. The canonical service, corpus runner, CLI and OpenSTA adapter exchange Foundation requests and domain results directly.
+There is no compatibility envelope or adapter layer. The canonical service,
+corpus runner, CLI and OpenSTA process integration exchange Foundation requests
+and domain results directly.
 
 The `TimingEngine` umbrella product exposes these seams through
 `TimingEngineService.sta`, `TimingEngineService.signalIntegrity`,
@@ -52,11 +44,11 @@ Umbrella API, corpus replay, reference correlation and qualification decisions.
 - Preserve cancellation as `cancelled`.
 - Do not swallow parser, process or persistence failures.
 
-## Xcircuite adapter
+## Runtime integration
 
-The adapter must:
+An integrating runtime must:
 
-1. resolve project-relative references through XcircuitePackage;
+1. resolve project-relative references at its own workspace boundary;
 2. verify input digests;
 3. evaluate ToolQualification requirements;
 4. invoke the injected engine protocol;
@@ -65,4 +57,5 @@ The adapter must:
 7. attach design, PDK and tool provenance;
 8. leave approval and resume handling to DesignFlowKernel.
 
-The adapter migration must preserve the run ID, input digests, output artifact digests and structured diagnostics when it switches from the legacy envelope to the Foundation result types.
+The runtime preserves the run ID, input digests, output artifact digests and
+structured diagnostics while passing between flow stages.

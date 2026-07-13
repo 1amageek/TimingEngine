@@ -1,22 +1,22 @@
 import Foundation
-import XcircuitePackage
+import DesignFlowKernel
 import LogicIR
 import TimingCore
 import PDKCore
 
 @available(*, deprecated, message: "Use STAFoundationRequest for all new executions.")
-public struct LegacySTARequest: XcircuiteEngineRequest {
+public struct LegacySTARequest: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1
 
     public var schemaVersion: Int
     public var runID: String
-    public var inputs: [XcircuiteFileReference]
+    public var inputs: [ArtifactReference]
 
     public var design: LogicDesignReference
     public var libraries: [TimingLibraryReference]
     public var constraints: TimingConstraintReference
     public var pdk: PDKReference
-    public var parasitics: XcircuiteFileReference?
+    public var parasitics: ArtifactReference?
     public var requestedModeIDs: [String]
     public var requestedCornerIDs: [String]
     public var analysisKinds: [STAAnalysisKind]
@@ -26,12 +26,12 @@ public struct LegacySTARequest: XcircuiteEngineRequest {
 
     public init(
         runID: String,
-        inputs: [XcircuiteFileReference],
+        inputs: [ArtifactReference],
         design: LogicDesignReference,
         libraries: [TimingLibraryReference],
         constraints: TimingConstraintReference,
         pdk: PDKReference,
-        parasitics: XcircuiteFileReference? = nil,
+        parasitics: ArtifactReference? = nil,
         requestedModeIDs: [String] = [],
         requestedCornerIDs: [String] = [],
         analysisKinds: [STAAnalysisKind] = [.setup, .hold],

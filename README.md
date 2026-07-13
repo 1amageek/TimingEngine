@@ -55,14 +55,9 @@ and `NativeSignalIntegrityEngine`. `TimingEngineService.sta` and
 `TimingEngineService.signalIntegrity` expose those seams from the umbrella
 product, and `TimingEngineAPI` provides Foundation-native factory methods.
 
-`NativeSTAFoundationEngine`, `NativeSignalIntegrityFoundationEngine`, the
-Xcircuite request types, and the Xcircuite artifact overloads are retained only
-as explicitly deprecated compatibility APIs. They are not selected by the
-service, corpus runner, CLI, or OpenSTA adapter.
-
-The existing `XcircuiteEngineResultEnvelope` path remains only in the explicit
-legacy compatibility layer while the workspace migrates package by package. It
-is not used by the canonical service, corpus runner, CLI, or OpenSTA adapter.
+The native engines implement the Foundation protocols directly. There is no
+universal result envelope or artifact adapter in this package; callers exchange
+domain results and Foundation evidence explicitly.
 
 ## Contract
 
@@ -74,8 +69,8 @@ Foundation-facing execution uses:
 - immutable `ArtifactReference` inputs and outputs;
 - explicit blocked, failed and cancelled states.
 
-The retained Xcircuite request/envelope contract is deprecated and confined to
-compatibility adapters during the package-by-package migration.
+Legacy flow requests are owned by the consuming runtime during migration; this
+package exposes only the Foundation request and domain-result contracts.
 
 External oracle requests use a bounded process runner. Missing executables, launch failures, timeouts, non-zero exits and invalid Foundation results remain structured diagnostics rather than hanging or being treated as correlation evidence.
 
@@ -138,7 +133,11 @@ The script produces native, external, correlation, corpus and qualification JSON
 
 ## Workspace dependency model
 
-TimingEngine is one package in the LSI multi-package workspace. Its manifest selects sibling packages when the complete workspace is present, and otherwise uses public revision-pinned dependencies for `XcircuitePackage`, `LogicDesign`, `PDKKit` and `SignoffToolSupport`. This keeps workspace builds on one local package identity while allowing an isolated public clone to resolve the same immutable inputs.
+TimingEngine is one package in the LSI multi-package workspace. Its manifest
+selects sibling packages when the complete workspace is present and uses
+revision-pinned dependencies for standalone clones. Timing flow and project
+storage remain outside this package; only Foundation artifacts cross the
+boundary.
 
 The pinned revisions are intentionally immutable release inputs. Updating a dependency is a deliberate manifest change followed by a fresh build, test and artifact audit.
 
@@ -155,7 +154,10 @@ authoritative local test command.
 
 ## Xcircuite integration
 
-The separate Xcircuite package provides `timing.sta` and `timing.signal-integrity` stage adapters. They resolve and digest-check project inputs, consume the Foundation-native results from this package, expose flow gates, and preserve timing artifacts through human approval and resume. A deprecated envelope projection remains available only for the package-by-package workspace migration.
+The Xcircuite runtime may provide `timing.sta` and `timing.signal-integrity`
+flow stages. It resolves and digest-checks project inputs, invokes the
+Foundation-native protocols in this package, and persists returned artifacts.
+Flow gates, approval and resume are owned by the runtime and DesignFlowKernel.
 
 ## Release status
 

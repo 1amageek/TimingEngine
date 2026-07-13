@@ -3,7 +3,7 @@ import Foundation
 import STAEngine
 import SignoffToolSupport
 import TimingCore
-import XcircuitePackage
+import DesignFlowKernel
 
 public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
     public init() {}
@@ -91,7 +91,7 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
         } catch {
             do {
                 let legacy = try JSONDecoder().decode(
-                    XcircuiteEngineResultEnvelope<STAPayload>.self,
+                    STAExecutionResult.self,
                     from: Data(stdout.utf8)
                 )
                 guard legacy.runID == request.runID else {
@@ -103,7 +103,9 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
                         diagnostic: "external_oracle_run_id_mismatch"
                     )
                 }
-                var diagnostics = legacy.diagnostics.map(\.code)
+                var diagnostics: [String] = legacy.diagnostics.map { diagnostic in
+                    diagnostic.code.rawValue
+                }
                 if legacy.status != .completed {
                     diagnostics.append("external_oracle_result_not_completed")
                 }
@@ -155,19 +157,6 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
 
     private func externalStatus(
         for status: TimingExecutionStatus
-    ) -> TimingExternalOracleResult.Status {
-        switch status {
-        case .completed:
-            return .completed
-        case .blocked:
-            return .blocked
-        case .failed, .cancelled:
-            return .failed
-        }
-    }
-
-    private func externalStatus(
-        for status: XcircuiteEngineExecutionStatus
     ) -> TimingExternalOracleResult.Status {
         switch status {
         case .completed:

@@ -1,31 +1,31 @@
 import Foundation
-import XcircuitePackage
+import DesignFlowKernel
 import LogicIR
 import TimingCore
 import PDKCore
 
 @available(*, deprecated, message: "Use SignalIntegrityFoundationRequest for all new executions.")
-public struct LegacySignalIntegrityRequest: XcircuiteEngineRequest {
+public struct LegacySignalIntegrityRequest: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1
 
     public var schemaVersion: Int
     public var runID: String
-    public var inputs: [XcircuiteFileReference]
+    public var inputs: [ArtifactReference]
 
     public var design: LogicDesignReference
     public var constraints: TimingConstraintReference
     public var pdk: PDKReference
-    public var parasitics: XcircuiteFileReference
+    public var parasitics: ArtifactReference
     public var maxDeltaDelay: Double
     public var maxNoiseRatio: Double
 
     public init(
         runID: String,
-        inputs: [XcircuiteFileReference],
+        inputs: [ArtifactReference],
         design: LogicDesignReference,
         constraints: TimingConstraintReference,
         pdk: PDKReference,
-        parasitics: XcircuiteFileReference,
+        parasitics: ArtifactReference,
         maxDeltaDelay: Double = Double.greatestFiniteMagnitude,
         maxNoiseRatio: Double = Double.greatestFiniteMagnitude
     ) {

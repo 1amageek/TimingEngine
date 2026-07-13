@@ -9,7 +9,7 @@
 | Responsibility boundary | Complete | README.md and DESIGN.md |
 | Public package products | Complete | Package.swift and public targets |
 | Shared Foundation execution contract | Complete | `STAFoundationRequest`, `SignalIntegrityFoundationRequest`, domain results and `Engine` seams |
-| Xcircuite compatibility request/result contract | Deprecated compatibility only | Legacy envelope, request, artifact and adapter types are isolated behind explicit deprecated shims |
+| Foundation request/result contract | Canonical | Native engines directly implement Foundation protocols; no legacy envelope or artifact adapter is shipped |
 | Contract build | Passed | swift build |
 | Contract test | Passed locally | timeout-bounded SwiftPM Testing run: 28 tests in 6 suites, including the Foundation boundary and artifact persistence; no Xcode test scheme is configured for this package |
 | Domain implementation | Implemented | Native parser, timing graph, MMMC STA and SI backends |
@@ -18,9 +18,9 @@
 | Oracle correlation | Local reference complete | `TimingReferenceAnalyzer`, tolerance comparison and retained correlation result |
 | External oracle evidence | Complete for the retained profile | Bounded OpenSTA adapter emits `STAExecutionResult`; Sky130A correlation passes at 1 ps tolerance with matching input digests |
 | Process qualification | Complete for the retained Sky130A profile | `Qualification/sky130A`, PDK manifest validation, Liberty asset digest evidence, corpus replay and qualification decision all pass |
-| Xcircuite stage adapters | Implemented | `TimingSTAFlowStageExecutor` and `TimingSIFlowStageExecutor` resolve, verify and persist artifacts |
+| Runtime integration seam | Implemented | Foundation requests/results are consumable by DesignFlowKernel and Xcircuite runtime stages |
 | CircuiteFoundation boundary | Canonical | `NativeSTAEngine`, `NativeSignalIntegrityEngine`, service, corpus, CLI and OpenSTA exchange Foundation requests/results |
-| End-to-end flow evidence | Complete for native STA/SI adapters | Xcircuite focused SwiftPM test passed: 3 timing headless tests, including review/approval/resume artifact integrity |
+| End-to-end flow evidence | Complete for native STA/SI contracts | Runtime integration consumes typed requests/results; flow review and resume remain runtime responsibilities |
 | Public source distribution | Published and clone-resolvable | `https://github.com/1amageek/TimingEngine`; isolated clones use public revision pins for CircuiteFoundation and LogicDesign, while the full workspace selects sibling packages |
 | Release readiness | Scoped profile passed; broader signoff blocked | Sky130A TT local qualification passes; no foundry signoff equivalence is claimed without parasitics and broader PVT/cell coverage |
 
@@ -67,7 +67,7 @@ The package goal is complete only when every P0 function has a concrete backend,
 - The external OpenSTA executable is an environment prerequisite; the repository ships the adapter contract, not the oracle binary.
 - The Sky130A profile covers one TT DFF case and one Liberty asset; broader PVT, cell-family, SI, extraction and foundry signoff coverage remain open.
 - Native post-layout signoff remains blocked without SPEF/PEX evidence.
-- Deprecated Xcircuite stage adapters remain only for workspace migration compatibility; no canonical TimingEngine execution path selects them.
+- Flow-stage persistence, approval and resume are intentionally outside TimingEngine and are supplied by the runtime integration.
 
 ## Final audit evidence
 

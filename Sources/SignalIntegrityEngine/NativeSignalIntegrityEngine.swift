@@ -2,32 +2,38 @@ import Foundation
 import LogicIR
 import PDKCore
 import TimingCore
-import XcircuitePackage
+import DesignFlowKernel
 
-@available(*, deprecated, message: "Use NativeSignalIntegrityEngine Foundation execution or NativeSignalIntegrityFoundationEngine.")
-public struct LegacyNativeSignalIntegrityEngine: SignalIntegrityAnalyzing {
-    public let reader: any LegacyTimingArtifactReading
-    public let artifactStore: (any LegacyTimingArtifactStoring)?
+public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing, SignalIntegrityFoundationEngine {
+    public typealias Request = SignalIntegrityFoundationRequest
+    public typealias Output = SignalIntegrityExecutionResult
+    public let reader: any TimingArtifactReading
+    public let artifactStore: (any TimingArtifactStoring)?
     public let parasiticParser: any TimingParasiticParsing
     public let constraintParser: any TimingConstraintParsing
 
     public init(
-        reader: any LegacyTimingArtifactReading = FileSystemTimingArtifactReader(),
-        artifactStore: (any LegacyTimingArtifactStoring)? = nil,
+        reader: (any TimingArtifactReading)? = nil,
+        artifactStore: (any TimingArtifactStoring)? = nil,
+        workspaceRoot: URL? = nil,
         parasiticParser: any TimingParasiticParsing = SPEFParser(),
         constraintParser: any TimingConstraintParsing = SDCParser()
     ) {
-        self.reader = reader
+        self.reader = reader ?? FileSystemTimingArtifactReader(workspaceRoot: workspaceRoot)
         self.artifactStore = artifactStore
         self.parasiticParser = parasiticParser
         self.constraintParser = constraintParser
     }
 
-    public func execute(_ request: SignalIntegrityRequest) async throws -> XcircuiteEngineResultEnvelope<SignalIntegrityPayload> {
+    public func execute(_ request: SignalIntegrityRequest) async throws -> SignalIntegrityExecutionResult {
         let startedAt = Date()
         do {
-            _ = try await reader.read(request.design.artifact)
-            _ = try await reader.read(request.pdk.manifest)
+            _ = try await reader.read(
+                try artifact(for: request.design.artifact, in: request)
+            )
+            _ = try await reader.read(
+                request.pdk.manifest
+            )
             let constraintsData = try await reader.read(request.constraints.artifact)
             let modeIDs = request.constraints.modeIDs.isEmpty ? ["default"] : request.constraints.modeIDs
             for modeID in modeIDs {
@@ -36,7 +42,7 @@ public struct LegacyNativeSignalIntegrityEngine: SignalIntegrityAnalyzing {
             let parasitics = try parasiticParser.parse(try await reader.read(request.parasitics))
             let provenanceIssues = LogicDesignProvenanceValidation.issues(for: request.design)
             guard provenanceIssues.isEmpty else {
-                return provenanceBlockedEnvelope(
+                return try provenanceBlockedEnvelope(
                     request: request,
                     startedAt: startedAt,
                     issues: provenanceIssues
@@ -74,19 +80,19 @@ public struct LegacyNativeSignalIntegrityEngine: SignalIntegrityAnalyzing {
                 )
             }
             let provenance = TimingArtifactProvenance(
-                designDigest: request.design.designDigest.isEmpty ? request.design.artifact.sha256 : request.design.designDigest,
+                designDigest: request.design.designDigest,
                 libraryDigests: [],
-                constraintDigest: request.constraints.artifact.sha256,
-                pdkDigest: request.pdk.digest.isEmpty ? request.pdk.manifest.sha256 : request.pdk.digest,
-                parasiticsDigest: request.parasitics.sha256
+                constraintDigest: request.constraints.artifact.digest.hexadecimalValue,
+                pdkDigest: request.pdk.digest.isEmpty ? request.pdk.manifest.digest.hexadecimalValue : request.pdk.digest,
+                parasiticsDigest: request.parasitics.digest.hexadecimalValue
             )
-            let provenanceDiagnostics: [XcircuiteEngineDiagnostic] = provenance.hasCoreDigests
+            let provenanceDiagnostics: [DesignDiagnostic] = provenance.hasCoreDigests
                 ? []
-                : [XcircuiteEngineDiagnostic(
+                : [DesignDiagnostic(
                     severity: .warning,
-                    code: "INCOMPLETE_TIMING_PROVENANCE",
+                    code: "timing.signal_integrity.incomplete_timing_provenance",
                     message: "The signal-integrity verdict is missing one or more immutable input digests.",
-                    suggestedActions: ["record_design_digest", "record_constraint_digest", "record_pdk_digest", "record_parasitic_digest"]
+                    suggestedActions: ["timing.signal_integrity.action.record_design_digest", "timing.signal_integrity.action.record_constraint_digest", "timing.signal_integrity.action.record_pdk_digest", "timing.signal_integrity.action.record_parasitic_digest"]
                 )]
             let payload = SignalIntegrityPayload(
                 violationCount: violations.count,
@@ -98,91 +104,107 @@ public struct LegacyNativeSignalIntegrityEngine: SignalIntegrityAnalyzing {
                 signoffEligible: provenance.isCompleteForSignalIntegrity,
                 provenance: provenance
             )
-            var artifacts: [XcircuiteFileReference] = []
+            var artifacts: [ArtifactReference] = []
             if let artifactStore {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 artifacts.append(try await artifactStore.store(
                     try encoder.encode(payload),
-                    artifactID: "timing-signal-integrity-report",
+                    artifactID: try ArtifactID(rawValue: "timing-signal-integrity-report"),
                     runID: request.runID,
-                    format: .json
+                    kind: .report,
+                    format: .json,
+                    producer: nil
                 ))
             }
-            let diagnostics = violations.map {
-                XcircuiteEngineDiagnostic(
+            let diagnostics = try violations.map { violation in
+                DesignDiagnostic(
+                    code: try DiagnosticCode(rawValue: "timing.signal_integrity.si_crosstalk_violation"),
                     severity: .error,
-                    code: "SI_CROSSTALK_VIOLATION",
-                    message: "Crosstalk on \($0.victimNet) from \($0.aggressorNet) exceeds the configured limit.",
-                    entity: $0.victimNet,
-                    suggestedActions: $0.suggestedActions
+                    summary: "Crosstalk on \(violation.victimNet) from \(violation.aggressorNet) exceeds the configured limit.",
+                    subject: try DesignObjectReference(kind: .net, identifier: violation.victimNet),
+                    suggestedActions: violation.suggestedActions.map { SuggestedAction(code: $0, summary: $0) }
                 )
             } + provenanceDiagnostics
-            return XcircuiteEngineResultEnvelope(
+            return SignalIntegrityExecutionResult(
                 schemaVersion: SignalIntegrityRequest.currentSchemaVersion,
                 runID: request.runID,
                 status: .completed,
                 diagnostics: diagnostics,
                 artifacts: artifacts,
-                metadata: XcircuiteEngineExecutionMetadata(
-                    engineID: "timing.signal-integrity",
-                    implementationID: "native-signal-integrity",
-                    implementationVersion: "1.1.0",
-                    startedAt: startedAt,
-                    completedAt: Date()
-                ),
+                provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
                 payload: payload
             )
         } catch let error as TimingError {
             if case .artifactWriteFailed = error {
-                return failedEnvelope(request: request, startedAt: startedAt, error: error)
+                return try failedEnvelope(request: request, startedAt: startedAt, error: error)
             }
-            return blockedEnvelope(request: request, startedAt: startedAt, error: error)
+            return try blockedEnvelope(request: request, startedAt: startedAt, error: error)
         } catch {
-            return XcircuiteEngineResultEnvelope(
+            return SignalIntegrityExecutionResult(
                 schemaVersion: SignalIntegrityRequest.currentSchemaVersion,
                 runID: request.runID,
                 status: .failed,
-                diagnostics: [XcircuiteEngineDiagnostic(
+                diagnostics: [DesignDiagnostic(
                     severity: .error,
-                    code: "SI_EXECUTION_FAILED",
+                    code: "timing.signal_integrity.execution_failed",
                     message: error.localizedDescription,
                     suggestedActions: ["inspect_input_artifacts", "reproduce_with_timing_cli"]
                 )],
-                metadata: XcircuiteEngineExecutionMetadata(
-                    engineID: "timing.signal-integrity",
-                    implementationID: "native-signal-integrity",
-                    implementationVersion: "1.1.0",
-                    startedAt: startedAt,
-                    completedAt: Date()
-                ),
+                provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
                 payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil)
             )
         }
+    }
+
+    /// Executes the canonical Foundation request directly.
+    public func execute(_ request: SignalIntegrityFoundationRequest) async throws -> SignalIntegrityExecutionResult {
+        let design = LogicDesignReference(
+            artifact: request.design.locator,
+            topDesignName: request.topDesignName,
+            designDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
+            provenance: LogicDesignProvenance(
+                sourceDesignDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
+                inputDesignDigest: request.design.digest.hexadecimalValue,
+                producerID: "timing.foundation",
+                producerVersion: "1",
+                runID: request.runID
+            )
+        )
+        let legacyRequest = SignalIntegrityRequest(
+            runID: request.runID,
+            inputs: request.inputs,
+            design: design,
+            constraints: TimingConstraintReference(artifact: request.constraints, modeIDs: request.requestedModeIDs),
+            pdk: PDKReference(
+                manifest: request.pdkManifest,
+                processID: request.processID,
+                version: request.pdkVersion,
+                digest: request.pdkDigest?.hexadecimalValue ?? request.pdkManifest.digest.hexadecimalValue
+            ),
+            parasitics: request.parasitics,
+            maxDeltaDelay: request.maxDeltaDelay,
+            maxNoiseRatio: request.maxNoiseRatio
+        )
+        return try await execute(legacyRequest)
     }
 
     private func blockedEnvelope(
         request: SignalIntegrityRequest,
         startedAt: Date,
         error: TimingError
-    ) -> XcircuiteEngineResultEnvelope<SignalIntegrityPayload> {
-        XcircuiteEngineResultEnvelope(
+    ) throws -> SignalIntegrityExecutionResult {
+        SignalIntegrityExecutionResult(
             schemaVersion: SignalIntegrityRequest.currentSchemaVersion,
             runID: request.runID,
             status: .blocked,
-            diagnostics: [XcircuiteEngineDiagnostic(
+            diagnostics: [DesignDiagnostic(
                 severity: .error,
-                code: "SI_\(code(for: error))",
+                code: code(for: error),
                 message: error.localizedDescription,
                 suggestedActions: ["inspect_input_artifacts", "check_spef_coupling_data"]
             )],
-            metadata: XcircuiteEngineExecutionMetadata(
-                engineID: "timing.signal-integrity",
-                implementationID: "native-signal-integrity",
-                implementationVersion: "1.1.0",
-                startedAt: startedAt,
-                completedAt: Date()
-            ),
+            provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
             payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil)
         )
     }
@@ -191,26 +213,20 @@ public struct LegacyNativeSignalIntegrityEngine: SignalIntegrityAnalyzing {
         request: SignalIntegrityRequest,
         startedAt: Date,
         issues: [LogicDesignProvenanceValidation.Issue]
-    ) -> XcircuiteEngineResultEnvelope<SignalIntegrityPayload> {
-        XcircuiteEngineResultEnvelope(
+    ) throws -> SignalIntegrityExecutionResult {
+        SignalIntegrityExecutionResult(
             schemaVersion: SignalIntegrityRequest.currentSchemaVersion,
             runID: request.runID,
             status: .blocked,
             diagnostics: issues.map { issue in
-                XcircuiteEngineDiagnostic(
+                DesignDiagnostic(
                     severity: .error,
                     code: issue.diagnosticCode,
                     message: issue.message,
                     suggestedActions: ["repair_design_provenance", "recreate_design_handoff"]
                 )
             },
-            metadata: XcircuiteEngineExecutionMetadata(
-                engineID: "timing.signal-integrity",
-                implementationID: "native-signal-integrity",
-                implementationVersion: "1.1.0",
-                startedAt: startedAt,
-                completedAt: Date()
-            ),
+            provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
             payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil)
         )
     }
@@ -219,39 +235,62 @@ public struct LegacyNativeSignalIntegrityEngine: SignalIntegrityAnalyzing {
         request: SignalIntegrityRequest,
         startedAt: Date,
         error: TimingError
-    ) -> XcircuiteEngineResultEnvelope<SignalIntegrityPayload> {
-        XcircuiteEngineResultEnvelope(
+    ) throws -> SignalIntegrityExecutionResult {
+        SignalIntegrityExecutionResult(
             schemaVersion: SignalIntegrityRequest.currentSchemaVersion,
             runID: request.runID,
             status: .failed,
-            diagnostics: [XcircuiteEngineDiagnostic(
+            diagnostics: [DesignDiagnostic(
                 severity: .error,
-                code: "SI_ARTIFACT_WRITE_FAILED",
+                code: "timing.signal_integrity.artifact_write_failed",
                 message: error.localizedDescription,
                 suggestedActions: ["inspect_output_directory", "retry_with_writable_artifact_store"]
             )],
-            metadata: XcircuiteEngineExecutionMetadata(
-                engineID: "timing.signal-integrity",
-                implementationID: "native-signal-integrity",
-                implementationVersion: "1.1.0",
-                startedAt: startedAt,
-                completedAt: Date()
-            ),
+            provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
             payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil)
         )
     }
 
     private func code(for error: TimingError) -> String {
         switch error {
-        case .parseFailure: return "PARSE_FAILED"
-        case .missingArtifact: return "MISSING_ARTIFACT"
-        case .artifactReadFailed: return "ARTIFACT_READ_FAILED"
-        case .artifactDigestMismatch: return "ARTIFACT_DIGEST_MISMATCH"
-        case .artifactSizeMismatch: return "ARTIFACT_SIZE_MISMATCH"
-        case .unsupportedSemantic: return "UNSUPPORTED_SEMANTIC"
-        case .invalidInput: return "INVALID_INPUT"
-        case .artifactWriteFailed: return "ARTIFACT_WRITE_FAILED"
-        case .invariantViolation: return "INVARIANT_VIOLATION"
+        case .parseFailure: return "timing.signal_integrity.parse_failed"
+        case .missingArtifact: return "timing.signal_integrity.missing_artifact"
+        case .artifactReadFailed: return "timing.signal_integrity.artifact_read_failed"
+        case .artifactDigestMismatch: return "timing.signal_integrity.artifact_digest_mismatch"
+        case .artifactSizeMismatch: return "timing.signal_integrity.artifact_size_mismatch"
+        case .unsupportedSemantic: return "timing.signal_integrity.unsupported_semantic"
+        case .invalidInput: return "timing.signal_integrity.invalid_input"
+        case .artifactWriteFailed: return "timing.signal_integrity.artifact_write_failed"
+        case .invariantViolation: return "timing.signal_integrity.invariant_violation"
         }
     }
+
+    private func artifact(for locator: ArtifactLocator, in request: SignalIntegrityRequest) throws -> ArtifactReference {
+        guard let reference = request.inputs.first(where: { $0.locator == locator }) else {
+            throw TimingError.missingArtifact(role: locator.role.rawValue)
+        }
+        return reference
+    }
+
+    private func makeProvenance(
+        startedAt: Date,
+        completedAt: Date,
+        inputs: [ArtifactReference]
+    ) throws -> ExecutionProvenance {
+        try ExecutionProvenance(
+            producer: ProducerIdentity(
+                kind: .engine,
+                identifier: "timing.signal-integrity",
+                version: "1.1.0"
+            ),
+            inputs: inputs,
+            startedAt: startedAt,
+            completedAt: completedAt
+        )
+    }
 }
+
+/// Deprecated source name retained until the external Xcircuite stage migrates
+/// to `SignalIntegrityFoundationEngine`.
+@available(*, deprecated, renamed: "NativeSignalIntegrityEngine")
+public typealias LegacyNativeSignalIntegrityEngine = NativeSignalIntegrityEngine

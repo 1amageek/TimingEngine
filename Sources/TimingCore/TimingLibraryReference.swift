@@ -1,13 +1,14 @@
 import Foundation
-import XcircuitePackage
+import CircuiteFoundation
+import DesignFlowKernel
 
 @available(*, deprecated, message: "Use STAFoundationLibraryReference with ArtifactReference.")
 public struct LegacyTimingLibraryReference: Sendable, Hashable, Codable {
-    public var artifact: XcircuiteFileReference
+    public var artifact: ArtifactReference
     public var cornerIDs: [String]
 
     public init(
-        artifact: XcircuiteFileReference,
+        artifact: ArtifactReference,
         cornerIDs: [String]
     ) {
         self.artifact = artifact

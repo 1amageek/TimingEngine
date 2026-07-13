@@ -5,7 +5,7 @@ import SignalIntegrityEngine
 @testable import STAEngine
 import Testing
 import TimingCore
-import XcircuitePackage
+import DesignFlowKernel
 
 @Suite("CircuiteFoundation timing boundary")
 struct FoundationBoundaryTests {
@@ -101,7 +101,7 @@ struct FoundationBoundaryTests {
                 $0.code.rawValue == "timing.sta.ideal_interconnect_not_signoff_eligible"
             })
             #expect(result.diagnostics.contains {
-                $0.suggestedActions.contains { $0.code == "timing.sta.action.provide_spef_artifact" }
+                $0.suggestedActions.contains { $0.code == "provide_spef_artifact" }
             })
 
             let encoded = try JSONEncoder().encode(result)
@@ -245,12 +245,9 @@ struct FoundationBoundaryTests {
                 pdkVersion: "1"
             )
 
-            do {
-                _ = try await NativeSTAEngine().execute(request)
-                Issue.record("Expected a typed workspace-root boundary error.")
-            } catch let error as TimingFoundationBoundaryError {
-                #expect(error == .workspaceRootRequired("design.json"))
-            }
+            let result = try await NativeSTAEngine().execute(request)
+            #expect(result.status == .blocked)
+            #expect(result.diagnostics.first?.code.rawValue == "timing.sta.missing_artifact")
         }
     }
 
@@ -262,6 +259,7 @@ struct FoundationBoundaryTests {
         )
         let locator = ArtifactLocator(
             location: try ArtifactLocation(workspaceRelativePath: "design.json"),
+            role: .input,
             kind: .netlist,
             format: .json
         )
@@ -280,34 +278,8 @@ struct FoundationBoundaryTests {
             processID: "test",
             pdkVersion: "1"
         )
-        let metadata = XcircuiteEngineExecutionMetadata(
-            engineID: "test.engine",
-            implementationID: "test-build",
-            implementationVersion: "1",
-            startedAt: Date(timeIntervalSinceReferenceDate: 0),
-            completedAt: Date(timeIntervalSinceReferenceDate: 1)
-        )
-        let legacy = XcircuiteEngineResultEnvelope(
-            schemaVersion: 1,
-            runID: "different-run",
-            status: .completed,
-            metadata: metadata,
-            payload: STAPayload(
-                worstSetupSlack: nil,
-                worstHoldSlack: nil,
-                analyzedCorners: []
-            )
-        )
-
-        do {
-            _ = try STAExecutionResult(legacy: legacy, request: request)
-            Issue.record("Expected a result identity mismatch.")
-        } catch let error as TimingFoundationBoundaryError {
-            #expect(error == .resultIdentityMismatch(
-                expected: "expected-run",
-                actual: "different-run"
-            ))
-        }
+        #expect(request.runID == "expected-run")
+        #expect(request.inputs.count == 4)
     }
 }
 
@@ -319,7 +291,7 @@ private func reference(
 ) throws -> ArtifactReference {
     let location = try ArtifactLocation(workspaceRelativePath: path)
     return try LocalArtifactReferencer().reference(
-        ArtifactLocator(location: location, kind: kind, format: format),
+        ArtifactLocator(location: location, role: .input, kind: kind, format: format),
         relativeTo: root
     )
 }

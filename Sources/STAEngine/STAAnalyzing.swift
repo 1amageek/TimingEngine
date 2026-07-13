@@ -1,5 +1,5 @@
 import Foundation
-import XcircuitePackage
+import DesignFlowKernel
 import LogicIR
 import TimingCore
 import PDKCore
@@ -8,7 +8,7 @@ import PDKCore
 public protocol LegacySTAAnalyzing: Sendable {
     func execute(
         _ request: STARequest
-    ) async throws -> XcircuiteEngineResultEnvelope<STAPayload>
+    ) async throws -> STAExecutionResult
 }
 
 @available(*, deprecated, message: "Use STAFoundationEngine for all new executions.")

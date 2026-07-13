@@ -25,9 +25,9 @@ TimingEngine protocols and result schemas
                  ↓
 native or external-tool backends
                  ↓
-Xcircuite stage adapters
+Runtime integration through Foundation protocols
                  ↓
-DesignFlowKernel and .xcircuite artifacts
+DesignFlowKernel and runtime-owned artifacts
 ```
 
 Backends may depend on lower-level data packages. This package must never import `Xcircuite` or `circuit-studio`.
@@ -54,4 +54,6 @@ flowchart LR
     Result --> Artifacts["ArtifactReference[]"]
 ```
 
-Domain payloads remain owned by TimingEngine. Evidence, artifact identity and diagnostic vocabulary come from CircuiteFoundation, so an Agent or human reviewer can inspect execution provenance without depending on UI state. The existing Xcircuite envelope is retained only inside the explicit compatibility adapter until the Xcircuite stage executors are migrated.
+Domain payloads remain owned by TimingEngine. Evidence, artifact identity and
+diagnostic vocabulary come from CircuiteFoundation, so an Agent or human
+reviewer can inspect execution provenance without depending on UI state.

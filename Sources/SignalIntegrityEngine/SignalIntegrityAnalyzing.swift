@@ -1,5 +1,5 @@
 import Foundation
-import XcircuitePackage
+import DesignFlowKernel
 import LogicIR
 import TimingCore
 import PDKCore
@@ -8,7 +8,7 @@ import PDKCore
 public protocol LegacySignalIntegrityAnalyzing: Sendable {
     func execute(
         _ request: SignalIntegrityRequest
-    ) async throws -> XcircuiteEngineResultEnvelope<SignalIntegrityPayload>
+    ) async throws -> SignalIntegrityExecutionResult
 }
 
 @available(*, deprecated, message: "Use SignalIntegrityFoundationEngine for all new executions.")
