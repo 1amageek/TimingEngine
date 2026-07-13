@@ -37,7 +37,7 @@ let circuiteFoundationDependency: Package.Dependency = FileManager.default.fileE
     atPath: workspaceRoot.appendingPathComponent("CircuiteFoundation/Package.swift").path
 )
     ? .package(path: "../CircuiteFoundation")
-    : .package(url: "https://github.com/1amageek/CircuiteFoundation.git", revision: "d1a38b80ab0fa6d32d8c27ff9e1dbe4f716855fa")
+    : .package(url: "https://github.com/1amageek/CircuiteFoundation.git", revision: "8b5b1427280415e8acb3789cb364284b906f6cab")
 
 let package = Package(
     name: "TimingEngine",
