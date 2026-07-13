@@ -145,7 +145,7 @@ The pinned revisions are intentionally immutable release inputs. Updating a depe
 perl -e 'alarm 30; exec @ARGV' swift test
 ```
 
-The current workspace verification is 26 tests in 6 suites, including the
+The public clone verification is 26 tests in 6 suites, including the
 CircuiteFoundation STA/SI boundary and artifact-integrity tests. This Swift
 package has no configured Xcode test scheme; SwiftPM Testing is the
 authoritative local test command.

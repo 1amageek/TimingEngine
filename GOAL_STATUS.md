@@ -21,7 +21,7 @@
 | Xcircuite stage adapters | Implemented | `TimingSTAFlowStageExecutor` and `TimingSIFlowStageExecutor` resolve, verify and persist artifacts |
 | CircuiteFoundation boundary | Implemented | Foundation artifact references, evidence manifests and structured diagnostics are exposed by native STA/SI engines |
 | End-to-end flow evidence | Complete for native STA/SI adapters | Xcircuite focused SwiftPM test passed: 3 timing headless tests, including review/approval/resume artifact integrity |
-| Public source distribution | Previous revision published; Foundation boundary pending publication | `https://github.com/1amageek/TimingEngine`; isolated clones use public revision pins and the full workspace selects sibling packages |
+| Public source distribution | Published and clone-resolvable | `https://github.com/1amageek/TimingEngine`; isolated clones use public revision pins for CircuiteFoundation and LogicDesign, while the full workspace selects sibling packages |
 | Release readiness | Scoped profile passed; broader signoff blocked | Sky130A TT local qualification passes; no foundry signoff equivalence is claimed without parasitics and broader PVT/cell coverage |
 
 ## Function status
@@ -68,7 +68,6 @@ The package goal is complete only when every P0 function has a concrete backend,
 - The Sky130A profile covers one TT DFF case and one Liberty asset; broader PVT, cell-family, SI, extraction and foundry signoff coverage remain open.
 - Native post-layout signoff remains blocked without SPEF/PEX evidence.
 - Current Xcircuite stage adapters still invoke the retained legacy envelope contract; migrating those adapters to consume Foundation-native results is the next integration milestone.
-- The Foundation boundary changes in this working tree are not yet included in the public clone; a fresh isolated-clone audit is required after the migration commit is published.
 
 ## Final audit evidence
 
@@ -76,8 +75,7 @@ The latest audit on 2026-07-13 passed the following controlled checks:
 
 - `swift build`
 - `swift test` with a bounded process timeout
-- previous fresh public clone resolve/build/test at the pinned dependency revisions: 20 tests in 5 suites
-- current local Foundation boundary resolve/build/test: 26 tests in 6 suites
+- fresh public clone resolve/build/test at the pinned dependency revisions: 26 tests in 6 suites, including the Foundation boundary
 - `timingengine capabilities`
 - retained corpus replay with `isValid: true`
 - public-clone corpus replay with `isValid: true` and qualification blocked only by `external_sta_oracle_unavailable` when the fixture version is supplied
