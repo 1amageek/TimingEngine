@@ -16,6 +16,7 @@
 | Correlation | Independent scalar reference analyzer plus external-process envelope adapter with explicit metric, mode, corner and provenance checks | `TimingReferenceAnalyzer`, `TimingExternalOracleCorrelator`, `LocalTimingExternalOracleRunner` |
 | Qualification | PDK manifest validation, required-asset digest evidence, corner/mode matrix and corpus/oracle gate | `LocalTimingPDKQualificationEvidenceBuilder`, `TimingQualificationEvaluator`, `TimingQualificationReport` |
 | Xcircuite | Headless `timing.sta` and `timing.signal-integrity` adapters with digest verification and result artifact persistence | `TimingSTAFlowStageExecutor`, `TimingSIFlowStageExecutor` |
+| CircuiteFoundation | Foundation-native STA/SI requests and results with verified artifact references, execution evidence and typed diagnostics | `STAFoundationEngine`, `SignalIntegrityFoundationEngine`, `STAExecutionResult`, `SignalIntegrityExecutionResult` |
 
 ## Explicit limitations
 
@@ -25,3 +26,4 @@
 - The independent scalar reference oracle is implemented for the retained subset; no external digital STA executable is available locally, so external correlation and process qualification remain blocked.
 - External oracle execution accepts a fixed executable path and argument array, enforces a request timeout with process-tree cleanup, and requires a completed `XcircuiteEngineResultEnvelope<STAPayload>` on stdout; availability is not treated as correlation evidence.
 - Qualification remains a separate ToolQualification evidence state and must be established per PDK/process/corner.
+- The current Xcircuite stage adapters retain the legacy envelope at their invocation boundary for compatibility; the native engine-facing contract is already Foundation-native and the adapter migration remains open.

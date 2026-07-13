@@ -32,15 +32,47 @@ Native implementation, retained replay, headless integration and a reproducible 
 | `timingengine` | Deterministic JSON CLI |
 | `opensta-oracle-adapter` | Bounded OpenSTA process adapter that emits the shared STA result envelope |
 
+## CircuiteFoundation boundary
+
+New engine consumers use `CircuiteFoundation` as the cross-domain contract. The
+STA and signal-integrity products expose Foundation-native requests and
+domain-owned results without introducing another universal result envelope:
+
+```mermaid
+flowchart LR
+    Artifacts["ArtifactReference[]"] --> Request["STAFoundationRequest\nor SignalIntegrityFoundationRequest"]
+    Request --> Engine["Engine protocol"]
+    Engine --> Result["STAExecutionResult\nor SignalIntegrityExecutionResult"]
+    Result --> Evidence["EvidenceManifest"]
+    Result --> Diagnostics["DesignDiagnostic[]"]
+```
+
+Every Foundation result separately conforms to `ArtifactProducing`,
+`DiagnosticReporting` and `EvidenceProviding`. Artifact promotion validates
+the location, SHA-256 digest and byte count; relative locations require an
+explicit workspace root. The native Foundation adapters are
+`NativeSTAFoundationEngine` and `NativeSignalIntegrityFoundationEngine`.
+`TimingEngineService.foundationSTA` and
+`TimingEngineService.foundationSignalIntegrity` expose the same seams from the
+umbrella product, and `TimingEngineAPI` provides factory methods for them.
+
+The existing `XcircuiteEngineResultEnvelope` path remains for the current
+Xcircuite stage adapters while the workspace migrates package by package. It is
+an explicit compatibility boundary and is not used by the new Foundation
+protocols.
+
 ## Contract
 
-Every executing product uses:
+Foundation-facing execution uses:
 
-- a `Codable`, `Hashable`, `Sendable` request conforming to `XcircuiteEngineRequest`;
-- `XcircuiteEngineResultEnvelope<Payload>` for status, diagnostics, artifacts and execution metadata;
+- a `Codable`, `Hashable`, `Sendable` request with a `SchemaVersion` and verified `ArtifactReference` inputs;
+- a domain result conforming independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`;
 - protocol-first dependency injection;
-- immutable `XcircuiteFileReference` inputs and outputs;
+- immutable `ArtifactReference` inputs and outputs;
 - explicit blocked, failed and cancelled states.
+
+The retained Xcircuite request/envelope contract is used only by the current
+stage adapters during the package-by-package migration.
 
 External oracle requests use a bounded process runner. Missing executables, launch failures, timeouts, non-zero exits and invalid result envelopes remain structured diagnostics rather than hanging or being treated as correlation evidence.
 
@@ -78,6 +110,9 @@ swift run timingengine correlate-oracle --native-report native.json --oracle-rep
 # Build the independent OpenSTA adapter
 swift build --product opensta-oracle-adapter
 
+# Foundation-native requests are constructed from verified ArtifactReference
+# values and executed through STAFoundationEngine or SignalIntegrityFoundationEngine.
+
 # Inspect the declared capabilities and limitations
 swift run timingengine capabilities
 ```
@@ -110,7 +145,10 @@ The pinned revisions are intentionally immutable release inputs. Updating a depe
 perl -e 'alarm 30; exec @ARGV' swift test
 ```
 
-The public package verification is 20 tests in 5 suites. This Swift package has no configured Xcode test scheme; SwiftPM Testing is the authoritative local test command.
+The current workspace verification is 26 tests in 6 suites, including the
+CircuiteFoundation STA/SI boundary and artifact-integrity tests. This Swift
+package has no configured Xcode test scheme; SwiftPM Testing is the
+authoritative local test command.
 
 ## Xcircuite integration
 

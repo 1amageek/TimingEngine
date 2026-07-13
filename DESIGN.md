@@ -19,6 +19,8 @@ This package owns the schemas and engine protocols listed in its public products
 ```text
 standard artifacts / canonical references
                  ↓
+CircuiteFoundation artifact / evidence boundary
+                 ↓
 TimingEngine protocols and result schemas
                  ↓
 native or external-tool backends
@@ -37,3 +39,19 @@ Kernel availability, corpus validation, oracle correlation, process-scoped quali
 ## Artifact requirements
 
 All outputs are immutable run artifacts with format, digest, producer metadata and the input design/PDK revision needed to reproduce the result.
+
+## CircuiteFoundation boundary
+
+Native STA and signal-integrity execution uses CircuiteFoundation as the public cross-domain boundary:
+
+```mermaid
+flowchart LR
+    Inputs["Verified ArtifactReference inputs"] --> Request["Foundation request"]
+    Request --> Engine["Engine<Request, Output>"]
+    Engine --> Result["Foundation domain result"]
+    Result --> Evidence["EvidenceManifest"]
+    Result --> Diagnostics["DesignDiagnostic[]"]
+    Result --> Artifacts["ArtifactReference[]"]
+```
+
+Domain payloads remain owned by TimingEngine. Evidence, artifact identity and diagnostic vocabulary come from CircuiteFoundation, so an Agent or human reviewer can inspect execution provenance without depending on UI state. The existing Xcircuite envelope is retained only inside the explicit compatibility adapter until the Xcircuite stage executors are migrated.

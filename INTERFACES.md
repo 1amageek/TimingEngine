@@ -1,6 +1,6 @@
 # TimingEngine Interface Contract
 
-## Common shape
+## Legacy compatibility shape
 
 ```swift
 public protocol DomainExecuting: Sendable {
@@ -10,7 +10,20 @@ public protocol DomainExecuting: Sendable {
 }
 ```
 
-Requests carry a schema version, run ID and typed artifact references. Payloads contain domain metrics only. Diagnostics and artifacts belong to the shared envelope.
+The Foundation-native public shape is:
+
+```swift
+public protocol STAFoundationEngine: Engine
+where Request == STAFoundationRequest, Output == STAExecutionResult {}
+```
+
+Requests carry a Foundation schema version, run ID and verified `ArtifactReference` values. Domain results conform independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`; payloads contain domain metrics, while evidence and diagnostics remain inspectable without a universal result envelope.
+
+The legacy `XcircuiteEngineResultEnvelope` shape remains only at the current Xcircuite adapter boundary and is promoted into Foundation results before the Foundation-facing engine returns.
+
+The `TimingEngine` umbrella product exposes these seams through
+`TimingEngineService.foundationSTA`, `TimingEngineService.foundationSignalIntegrity`,
+`TimingEngineAPI.makeFoundationSTA` and `TimingEngineAPI.makeFoundationSignalIntegrity`.
 
 ## Products
 
@@ -33,7 +46,7 @@ Umbrella API, corpus replay, reference correlation and qualification decisions.
 
 ## Error contract
 
-- Throw only when execution cannot produce a valid result envelope.
+- Throw only when execution cannot produce a valid Foundation result.
 - Represent design findings and failed checks as typed diagnostics and a completed domain payload.
 - Represent missing prerequisites or insufficient semantics as `blocked`.
 - Preserve cancellation as `cancelled`.
@@ -51,3 +64,5 @@ The adapter must:
 6. map diagnostics and status to FlowStageResult;
 7. attach design, PDK and tool provenance;
 8. leave approval and resume handling to DesignFlowKernel.
+
+The adapter migration must preserve the run ID, input digests, output artifact digests and structured diagnostics when it switches from the legacy envelope to the Foundation result types.

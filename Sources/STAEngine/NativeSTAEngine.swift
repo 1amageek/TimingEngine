@@ -35,6 +35,17 @@ public struct NativeSTAEngine: STAAnalyzing {
                 throw TimingError.invalidInput("STA variation derates must be finite and positive.")
             }
             let inputs = try await loadInputs(request)
+            let provenanceIssues = LogicDesignProvenanceValidation.issues(
+                for: request.design,
+                requireProvenance: request.requiresSignoff
+            )
+            guard provenanceIssues.isEmpty else {
+                return provenanceBlockedEnvelope(
+                    request: request,
+                    startedAt: startedAt,
+                    issues: provenanceIssues
+                )
+            }
             let result = try analyze(
                 request: request,
                 design: inputs.design,
@@ -703,6 +714,34 @@ public struct NativeSTAEngine: STAAnalyzing {
                 message: error.localizedDescription,
                 suggestedActions: ["inspect_input_artifacts", "check_supported_semantics"]
             )],
+            metadata: XcircuiteEngineExecutionMetadata(
+                engineID: "timing.sta",
+                implementationID: "native-sta",
+                implementationVersion: "1.1.0",
+                startedAt: startedAt,
+                completedAt: Date()
+            ),
+            payload: emptyPayload(request: request)
+        )
+    }
+
+    private func provenanceBlockedEnvelope(
+        request: STARequest,
+        startedAt: Date,
+        issues: [LogicDesignProvenanceValidation.Issue]
+    ) -> XcircuiteEngineResultEnvelope<STAPayload> {
+        XcircuiteEngineResultEnvelope(
+            schemaVersion: STARequest.currentSchemaVersion,
+            runID: request.runID,
+            status: .blocked,
+            diagnostics: issues.map { issue in
+                XcircuiteEngineDiagnostic(
+                    severity: .error,
+                    code: issue.diagnosticCode,
+                    message: issue.message,
+                    suggestedActions: ["repair_design_provenance", "recreate_design_handoff"]
+                )
+            },
             metadata: XcircuiteEngineExecutionMetadata(
                 engineID: "timing.sta",
                 implementationID: "native-sta",

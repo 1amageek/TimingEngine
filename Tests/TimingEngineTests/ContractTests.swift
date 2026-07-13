@@ -10,5 +10,7 @@ struct ContractTests {
     func contractVersion() {
         #expect(TimingEngineAPI.contractVersion == 1)
         #expect(TimingEngineService().corpus is LocalTimingCorpusRunner)
+        #expect(TimingEngineService().foundationSTA is NativeSTAFoundationEngine)
+        #expect(TimingEngineService().foundationSignalIntegrity is NativeSignalIntegrityFoundationEngine)
     }
 }

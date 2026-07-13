@@ -33,6 +33,12 @@ let signoffToolSupportDependency: Package.Dependency = isFullLSIWorkspace && Fil
     ? .package(path: "../SignoffToolSupport")
     : .package(url: "https://github.com/1amageek/SignoffToolSupport.git", revision: "777adc160544043a803c986f4822e6ab06b4dfa8")
 
+let circuiteFoundationDependency: Package.Dependency = FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("CircuiteFoundation/Package.swift").path
+)
+    ? .package(path: "../CircuiteFoundation")
+    : .package(url: "https://github.com/1amageek/CircuiteFoundation.git", revision: "d1a38b80ab0fa6d32d8c27ff9e1dbe4f716855fa")
+
 let package = Package(
     name: "TimingEngine",
     platforms: [.macOS(.v26)],
@@ -49,19 +55,35 @@ let package = Package(
         logicDesignDependency,
         pdkKitDependency,
         signoffToolSupportDependency,
+        circuiteFoundationDependency,
     ],
     targets: [
         .target(
             name: "TimingCore",
-            dependencies: [.product(name: "XcircuitePackage", package: "XcircuitePackage")]
+            dependencies: [
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
+                .product(name: "XcircuitePackage", package: "XcircuitePackage")
+            ]
         ),
         .target(
             name: "STAEngine",
-            dependencies: [.product(name: "XcircuitePackage", package: "XcircuitePackage"), "TimingCore", .product(name: "LogicIR", package: "LogicDesign"), .product(name: "PDKCore", package: "PDKKit")]
+            dependencies: [
+                .product(name: "XcircuitePackage", package: "XcircuitePackage"),
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
+                "TimingCore",
+                .product(name: "LogicIR", package: "LogicDesign"),
+                .product(name: "PDKCore", package: "PDKKit")
+            ]
         ),
         .target(
             name: "SignalIntegrityEngine",
-            dependencies: [.product(name: "XcircuitePackage", package: "XcircuitePackage"), "TimingCore", .product(name: "LogicIR", package: "LogicDesign"), .product(name: "PDKCore", package: "PDKKit")]
+            dependencies: [
+                .product(name: "XcircuitePackage", package: "XcircuitePackage"),
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
+                "TimingCore",
+                .product(name: "LogicIR", package: "LogicDesign"),
+                .product(name: "PDKCore", package: "PDKKit")
+            ]
         ),
         .target(
             name: "TimingEngine",
@@ -69,6 +91,7 @@ let package = Package(
                 "TimingCore",
                 "STAEngine",
                 "SignalIntegrityEngine",
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 .product(name: "XcircuitePackage", package: "XcircuitePackage"),
                 .product(name: "SignoffToolSupport", package: "SignoffToolSupport"),
             ]
@@ -96,7 +119,13 @@ let package = Package(
         ),
         .testTarget(
             name: "TimingEngineTests",
-            dependencies: ["TimingCore", "STAEngine", "SignalIntegrityEngine", "TimingEngine"]
+            dependencies: [
+                "TimingCore",
+                "STAEngine",
+                "SignalIntegrityEngine",
+                "TimingEngine",
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation")
+            ]
         ),
     ]
 )

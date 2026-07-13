@@ -27,7 +27,7 @@ Provide standard-constrained, multi-corner timing and signal-integrity analysis 
 
 - Public execution surfaces are protocol-first, Sendable and dependency-injected.
 - Requests and payloads are Codable, Hashable and schema-versioned.
-- Inputs and outputs use immutable XcircuiteFileReference artifacts.
+- Foundation-facing inputs and outputs use immutable `ArtifactReference` values with verified locations, digests and byte counts. The legacy `XcircuiteFileReference` shape is confined to the current compatibility adapter.
 - Diagnostics contain a stable code, severity, affected entity and suggested actions.
 - Unsupported semantics and missing prerequisites produce blocked results.
 - Native and external-tool backends conform to identical request and payload schemas.

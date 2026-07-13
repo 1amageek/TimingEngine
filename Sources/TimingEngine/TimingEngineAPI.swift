@@ -1,3 +1,4 @@
+@_exported import CircuiteFoundation
 import Foundation
 import SignalIntegrityEngine
 import STAEngine
@@ -39,5 +40,17 @@ public enum TimingEngineAPI {
         artifactStore: (any TimingArtifactStoring)? = nil
     ) -> NativeSignalIntegrityEngine {
         NativeSignalIntegrityEngine(reader: reader, artifactStore: artifactStore)
+    }
+
+    public static func makeFoundationSTA(
+        workspaceRoot: URL? = nil
+    ) -> any STAFoundationEngine {
+        NativeSTAFoundationEngine(workspaceRoot: workspaceRoot)
+    }
+
+    public static func makeFoundationSignalIntegrity(
+        workspaceRoot: URL? = nil
+    ) -> any SignalIntegrityFoundationEngine {
+        NativeSignalIntegrityFoundationEngine(workspaceRoot: workspaceRoot)
     }
 }

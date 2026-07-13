@@ -158,7 +158,13 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
         let designReference = LogicDesignReference(
             artifact: design,
             topDesignName: corpusCase.topDesignName,
-            designDigest: design.sha256 ?? ""
+            designDigest: design.sha256 ?? "",
+            provenance: LogicDesignProvenance(
+                sourceDesignDigest: design.sha256 ?? "",
+                producerID: "timing-corpus-fixture",
+                producerVersion: "1.0.0",
+                runID: runID
+            )
         )
         let constraintReference = TimingConstraintReference(
             artifact: constraint,
