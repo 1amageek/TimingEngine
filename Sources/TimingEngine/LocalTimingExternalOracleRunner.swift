@@ -1,6 +1,8 @@
+import CircuiteFoundation
 import Foundation
 import STAEngine
 import SignoffToolSupport
+import TimingCore
 import XcircuitePackage
 
 public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
@@ -59,38 +61,121 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
             )
         }
         do {
-            let envelope = try JSONDecoder().decode(XcircuiteEngineResultEnvelope<STAPayload>.self, from: Data(stdout.utf8))
-            guard envelope.status == .completed else {
-                return TimingExternalOracleResult(
-                    runID: request.runID,
-                    oracleID: request.oracleID,
-                    status: .blocked,
+            let result = try decodeFoundationResult(stdout)
+            guard result.schemaVersion == .v1 else {
+                throw TimingError.invalidInput("Unsupported external STA result schema version.")
+            }
+            guard result.runID == request.runID else {
+                return invalidResult(
+                    request: request,
                     exitCode: exitCode,
                     stdout: stdout,
                     stderr: stderr,
-                    payload: envelope.payload,
-                    diagnostics: ["external_oracle_result_not_completed"]
+                    diagnostic: "external_oracle_run_id_mismatch"
                 )
+            }
+            var diagnostics = result.diagnostics.map { $0.code.rawValue }
+            if result.status != .completed {
+                diagnostics.append("external_oracle_result_not_completed")
             }
             return TimingExternalOracleResult(
                 runID: request.runID,
                 oracleID: request.oracleID,
-                status: .completed,
+                status: externalStatus(for: result.status),
                 exitCode: exitCode,
                 stdout: stdout,
                 stderr: stderr,
-                payload: envelope.payload
+                payload: result.payload,
+                diagnostics: diagnostics
             )
         } catch {
-            return TimingExternalOracleResult(
-                runID: request.runID,
-                oracleID: request.oracleID,
-                status: .failed,
-                exitCode: exitCode,
-                stdout: stdout,
-                stderr: stderr,
-                diagnostics: ["external_oracle_output_invalid"]
-            )
+            do {
+                let legacy = try JSONDecoder().decode(
+                    XcircuiteEngineResultEnvelope<STAPayload>.self,
+                    from: Data(stdout.utf8)
+                )
+                guard legacy.runID == request.runID else {
+                    return invalidResult(
+                        request: request,
+                        exitCode: exitCode,
+                        stdout: stdout,
+                        stderr: stderr,
+                        diagnostic: "external_oracle_run_id_mismatch"
+                    )
+                }
+                var diagnostics = legacy.diagnostics.map(\.code)
+                if legacy.status != .completed {
+                    diagnostics.append("external_oracle_result_not_completed")
+                }
+                return TimingExternalOracleResult(
+                    runID: request.runID,
+                    oracleID: request.oracleID,
+                    status: externalStatus(for: legacy.status),
+                    exitCode: exitCode,
+                    stdout: stdout,
+                    stderr: stderr,
+                    payload: legacy.payload,
+                    diagnostics: diagnostics
+                )
+            } catch {
+                return TimingExternalOracleResult(
+                    runID: request.runID,
+                    oracleID: request.oracleID,
+                    status: .failed,
+                    exitCode: exitCode,
+                    stdout: stdout,
+                    stderr: stderr,
+                    diagnostics: ["external_oracle_output_invalid"]
+                )
+            }
+        }
+    }
+
+    private func decodeFoundationResult(_ stdout: String) throws -> STAExecutionResult {
+        try JSONDecoder().decode(STAExecutionResult.self, from: Data(stdout.utf8))
+    }
+
+    private func invalidResult(
+        request: TimingExternalOracleRequest,
+        exitCode: Int32,
+        stdout: String,
+        stderr: String,
+        diagnostic: String
+    ) -> TimingExternalOracleResult {
+        TimingExternalOracleResult(
+            runID: request.runID,
+            oracleID: request.oracleID,
+            status: .failed,
+            exitCode: exitCode,
+            stdout: stdout,
+            stderr: stderr,
+            diagnostics: [diagnostic]
+        )
+    }
+
+    private func externalStatus(
+        for status: TimingExecutionStatus
+    ) -> TimingExternalOracleResult.Status {
+        switch status {
+        case .completed:
+            return .completed
+        case .blocked:
+            return .blocked
+        case .failed, .cancelled:
+            return .failed
+        }
+    }
+
+    private func externalStatus(
+        for status: XcircuiteEngineExecutionStatus
+    ) -> TimingExternalOracleResult.Status {
+        switch status {
+        case .completed:
+            return .completed
+        case .blocked:
+            return .blocked
+        case .failed, .cancelled:
+            return .failed
         }
     }
 

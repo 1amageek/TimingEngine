@@ -4,7 +4,8 @@ import LogicIR
 import TimingCore
 import PDKCore
 
-public struct SignalIntegrityRequest: XcircuiteEngineRequest {
+@available(*, deprecated, message: "Use SignalIntegrityFoundationRequest for all new executions.")
+public struct LegacySignalIntegrityRequest: XcircuiteEngineRequest {
     public static let currentSchemaVersion = 1
 
     public var schemaVersion: Int
@@ -39,3 +40,6 @@ public struct SignalIntegrityRequest: XcircuiteEngineRequest {
         self.maxNoiseRatio = maxNoiseRatio
     }
 }
+
+@available(*, deprecated, message: "Use SignalIntegrityFoundationRequest for all new executions.")
+public typealias SignalIntegrityRequest = LegacySignalIntegrityRequest

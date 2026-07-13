@@ -13,7 +13,7 @@
 | SDF | Imports and exports cell I/O delay annotations | `SDFParser`, `SDFWriter`, round-trip test |
 | Developer surface | Typed API, deterministic JSON CLI, positive and negative fixtures, structured diagnostics | `timingengine`, tests |
 | Evidence | Manifest-driven retained corpus, blocked/negative cases, provenance-bound results and replay report | `Corpus/timing-corpus.json`, `LocalTimingCorpusRunner` |
-| Correlation | Independent scalar reference analyzer plus external-process envelope adapter with explicit metric, mode, corner and provenance checks | `TimingReferenceAnalyzer`, `TimingExternalOracleCorrelator`, `LocalTimingExternalOracleRunner` |
+| Correlation | Independent scalar reference analyzer plus external-process Foundation-result adapter with explicit metric, mode, corner and provenance checks | `TimingReferenceAnalyzer`, `TimingExternalOracleCorrelator`, `LocalTimingExternalOracleRunner` |
 | Qualification | PDK manifest validation, required-asset digest evidence, corner/mode matrix and corpus/oracle gate | `LocalTimingPDKQualificationEvidenceBuilder`, `TimingQualificationEvaluator`, `TimingQualificationReport` |
 | Xcircuite | Headless `timing.sta` and `timing.signal-integrity` adapters with digest verification and result artifact persistence | `TimingSTAFlowStageExecutor`, `TimingSIFlowStageExecutor` |
 | CircuiteFoundation | Foundation-native STA/SI requests and results with verified artifact references, execution evidence and typed diagnostics | `STAFoundationEngine`, `SignalIntegrityFoundationEngine`, `STAExecutionResult`, `SignalIntegrityExecutionResult` |
@@ -24,6 +24,6 @@
 - The native STA backend is not process-qualified and does not claim foundry signoff.
 - Statistical OCV, AOCV/POCV correlation, waveform-resolved crosstalk noise and CCS/ECSM remain outside the native subset.
 - The independent scalar reference oracle is implemented for the retained subset; no external digital STA executable is available locally, so external correlation and process qualification remain blocked.
-- External oracle execution accepts a fixed executable path and argument array, enforces a request timeout with process-tree cleanup, and requires a completed `XcircuiteEngineResultEnvelope<STAPayload>` on stdout; availability is not treated as correlation evidence.
+- External oracle execution accepts a fixed executable path and argument array, enforces a request timeout with process-tree cleanup, validates the returned run ID, and requires a completed `STAExecutionResult` on stdout. A deprecated Xcircuite envelope is accepted only as a compatibility fallback; availability is not treated as correlation evidence.
 - Qualification remains a separate ToolQualification evidence state and must be established per PDK/process/corner.
-- The current Xcircuite stage adapters retain the legacy envelope at their invocation boundary for compatibility; the native engine-facing contract is already Foundation-native and the adapter migration remains open.
+- External Xcircuite stage adapters may retain the legacy envelope at their invocation boundary during workspace migration; the canonical TimingEngine service, corpus, CLI and OpenSTA paths are Foundation-native.

@@ -3,54 +3,83 @@ import Foundation
 import SignalIntegrityEngine
 import STAEngine
 import TimingCore
-import XcircuitePackage
 
 public enum TimingEngineAPI {
     public static let contractVersion = 1
     public static let implementationVersion = "1.1.0"
 
     public static let nativeCapabilities = [
-        XcircuiteEngineCapability(
+        TimingEngineCapability(
             engineID: "timing.sta",
             contractVersion: contractVersion,
-            supportedInputFormats: [.liberty, .sdc, .spef, .json, .verilog],
-            supportedOutputFormats: [.json, .sdf],
-            features: ["liberty-parsing", "sdc-parsing", "timing-graph", "mmmc-setup-hold", "recovery-removal", "pulse-width", "derate-ocv", "path-groups", "clock-groups", "provenance-digests", "repair-candidates"],
+            supportedInputFormats: [.liberty, .json, .verilog, sdcFormat, .spef],
+            supportedOutputFormats: [.json],
+            features: ["foundation-request", "liberty-parsing", "sdc-parsing", "timing-graph", "mmmc-setup-hold", "recovery-removal", "pulse-width", "derate-ocv", "path-groups", "clock-groups", "provenance-digests", "artifact-persistence", "repair-candidates"],
             limitations: ["advanced-statistical-ocv", "process-qualified-signoff"]
         ),
-        XcircuiteEngineCapability(
+        TimingEngineCapability(
             engineID: "timing.signal-integrity",
             contractVersion: contractVersion,
-            supportedInputFormats: [.spef, .sdc],
+            supportedInputFormats: [.json, .verilog, sdcFormat, .spef],
             supportedOutputFormats: [.json],
-            features: ["coupling-capacitance", "delta-delay", "noise-ratio", "provenance-digests"],
+            features: ["foundation-request", "coupling-capacitance", "delta-delay", "noise-ratio", "provenance-digests", "artifact-persistence"],
             limitations: ["waveform-resolved-noise", "process-qualified-signoff"]
         ),
     ]
 
     public static func makeNativeSTA(
         reader: any TimingArtifactReading = FileSystemTimingArtifactReader(),
-        artifactStore: (any TimingArtifactStoring)? = nil
+        artifactStore: (any TimingArtifactStoring)? = nil,
+        workspaceRoot: URL? = nil
     ) -> NativeSTAEngine {
-        NativeSTAEngine(reader: reader, artifactStore: artifactStore)
+        NativeSTAEngine(
+            reader: reader,
+            artifactStore: artifactStore,
+            workspaceRoot: workspaceRoot
+        )
     }
 
     public static func makeNativeSignalIntegrity(
         reader: any TimingArtifactReading = FileSystemTimingArtifactReader(),
-        artifactStore: (any TimingArtifactStoring)? = nil
+        artifactStore: (any TimingArtifactStoring)? = nil,
+        workspaceRoot: URL? = nil
     ) -> NativeSignalIntegrityEngine {
-        NativeSignalIntegrityEngine(reader: reader, artifactStore: artifactStore)
+        NativeSignalIntegrityEngine(
+            reader: reader,
+            artifactStore: artifactStore,
+            workspaceRoot: workspaceRoot
+        )
     }
 
     public static func makeFoundationSTA(
+        reader: any TimingArtifactReading = FileSystemTimingArtifactReader(),
+        artifactStore: (any TimingArtifactStoring)? = nil,
         workspaceRoot: URL? = nil
     ) -> any STAFoundationEngine {
-        NativeSTAFoundationEngine(workspaceRoot: workspaceRoot)
+        NativeSTAEngine(
+            reader: reader,
+            artifactStore: artifactStore,
+            workspaceRoot: workspaceRoot
+        )
     }
 
     public static func makeFoundationSignalIntegrity(
+        reader: any TimingArtifactReading = FileSystemTimingArtifactReader(),
+        artifactStore: (any TimingArtifactStoring)? = nil,
         workspaceRoot: URL? = nil
     ) -> any SignalIntegrityFoundationEngine {
-        NativeSignalIntegrityFoundationEngine(workspaceRoot: workspaceRoot)
+        NativeSignalIntegrityEngine(
+            reader: reader,
+            artifactStore: artifactStore,
+            workspaceRoot: workspaceRoot
+        )
     }
+
+    private static let sdcFormat: ArtifactFormat = {
+        do {
+            return try ArtifactFormat(rawValue: "sdc")
+        } catch {
+            preconditionFailure("The canonical SDC artifact format is invalid.")
+        }
+    }()
 }

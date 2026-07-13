@@ -1,7 +1,8 @@
 import Foundation
 import XcircuitePackage
 
-public struct TimingLibraryReference: Sendable, Hashable, Codable {
+@available(*, deprecated, message: "Use STAFoundationLibraryReference with ArtifactReference.")
+public struct LegacyTimingLibraryReference: Sendable, Hashable, Codable {
     public var artifact: XcircuiteFileReference
     public var cornerIDs: [String]
 
@@ -13,3 +14,6 @@ public struct TimingLibraryReference: Sendable, Hashable, Codable {
         self.cornerIDs = cornerIDs
     }
 }
+
+@available(*, deprecated, message: "Use STAFoundationLibraryReference with ArtifactReference.")
+public typealias TimingLibraryReference = LegacyTimingLibraryReference

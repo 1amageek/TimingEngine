@@ -1,7 +1,8 @@
 import Foundation
 import XcircuitePackage
 
-public struct TimingConstraintReference: Sendable, Hashable, Codable {
+@available(*, deprecated, message: "Use ArtifactReference directly in Foundation requests.")
+public struct LegacyTimingConstraintReference: Sendable, Hashable, Codable {
     public var artifact: XcircuiteFileReference
     public var modeIDs: [String]
 
@@ -13,3 +14,6 @@ public struct TimingConstraintReference: Sendable, Hashable, Codable {
         self.modeIDs = modeIDs
     }
 }
+
+@available(*, deprecated, message: "Use ArtifactReference directly in Foundation requests.")
+public typealias TimingConstraintReference = LegacyTimingConstraintReference

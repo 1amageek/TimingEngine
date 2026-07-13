@@ -1,8 +1,8 @@
+import CircuiteFoundation
 import Foundation
 import SignoffToolSupport
 import STAEngine
 import TimingCore
-import XcircuitePackage
 
 @main
 struct OpenSTAOracleAdapter {
@@ -13,14 +13,14 @@ struct OpenSTAOracleAdapter {
         } catch {
             let runID = option("--run-id", in: arguments) ?? "opensta-oracle-run"
             do {
-                try emit(failureEnvelope(runID: runID, code: "OPENSTA_ADAPTER_INPUT_INVALID", message: error.localizedDescription))
+                try emit(failureResult(runID: runID, code: "OPENSTA_ADAPTER_INPUT_INVALID", message: error.localizedDescription))
             } catch {
                 print("{\"status\":\"failed\",\"message\":\"opensta oracle adapter failed\"}")
             }
         }
     }
 
-    private static func execute(arguments: [String]) async throws -> XcircuiteEngineResultEnvelope<STAPayload> {
+    private static func execute(arguments: [String]) async throws -> STAExecutionResult {
         let runID = option("--run-id", in: arguments) ?? "opensta-oracle-run"
         let oracleID = option("--oracle-id", in: arguments) ?? "opensta-3.1"
         let staPath = try required("--sta", in: arguments)
@@ -40,19 +40,21 @@ struct OpenSTAOracleAdapter {
             kind: .netlist,
             format: designFormat(for: designPath)
         )
-        let libraryReference = try referenceBuilder.makeReference(path: libraryPath, kind: .timingLibrary, format: .liberty)
-        let constraintReference = try referenceBuilder.makeReference(path: constraintsPath, kind: .constraint, format: .sdc)
-        let pdkReference = try referenceBuilder.makeReference(path: pdkPath, kind: .technology, format: .json)
+        let libraryReference = try referenceBuilder.makeReference(path: libraryPath, kind: try ArtifactKind(rawValue: "timing.library"), format: .liberty)
+        let constraintReference = try referenceBuilder.makeReference(path: constraintsPath, kind: CircuiteFoundation.ArtifactKind.constraints, format: try ArtifactFormat(rawValue: "sdc"))
+        let pdkReference = try referenceBuilder.makeReference(path: pdkPath, kind: CircuiteFoundation.ArtifactKind.technology, format: .json)
         let parasiticsReference = try spefPath.map {
-            try referenceBuilder.makeReference(path: $0, kind: .parasitic, format: .spef)
+            try referenceBuilder.makeReference(path: $0, kind: CircuiteFoundation.ArtifactKind.parasitics, format: .spef)
         }
         let provenance = TimingArtifactProvenance(
-            designDigest: designReference.sha256,
-            libraryDigests: libraryReference.sha256.map { [$0] } ?? [],
-            constraintDigest: constraintReference.sha256,
-            pdkDigest: option("--pdk-digest", in: arguments) ?? pdkReference.sha256,
-            parasiticsDigest: parasiticsReference?.sha256
+            designDigest: designReference.digest.hexadecimalValue,
+            libraryDigests: [libraryReference.digest.hexadecimalValue],
+            constraintDigest: constraintReference.digest.hexadecimalValue,
+            pdkDigest: option("--pdk-digest", in: arguments) ?? pdkReference.digest.hexadecimalValue,
+            parasiticsDigest: parasiticsReference?.digest.hexadecimalValue
         )
+        let inputs = [designReference, libraryReference, constraintReference, pdkReference]
+            + (parasiticsReference.map { [$0] } ?? [])
         let timeUnitScale = try libertyTimeUnitScale(path: libraryPath)
         let startedAt = Date()
         let scriptURL = try makeScript(
@@ -64,48 +66,59 @@ struct OpenSTAOracleAdapter {
             top: top,
             spefPath: spefPath
         )
+        let scriptReference = try referenceBuilder.makeReference(
+            path: scriptURL.path(percentEncoded: false),
+            kind: .evidence,
+            format: try ArtifactFormat(rawValue: "tcl")
+        )
         let process = Process()
         process.executableURL = URL(filePath: staPath)
         process.arguments = ["-exit", scriptURL.path(percentEncoded: false)]
         process.currentDirectoryURL = scriptURL.deletingLastPathComponent()
 
         do {
-            let result = try await TimedProcessRunner(timeoutSeconds: timeoutSeconds).run(process: process)
+            let processResult = try await TimedProcessRunner(timeoutSeconds: timeoutSeconds).run(process: process)
             let payload = makePayload(
-                stdout: result.standardOutput,
+                stdout: processResult.standardOutput,
                 modeID: modeID,
                 cornerID: cornerID,
                 provenance: provenance,
                 hasParasitics: parasiticsReference != nil,
                 timeUnitScale: timeUnitScale
             )
-            let diagnostics = diagnostics(from: result.standardError)
-            guard result.exitCode == 0 else {
-                return envelope(
+            let diagnostics = diagnostics(from: processResult.standardError)
+            guard processResult.exitCode == 0 else {
+                return try result(
                     runID: runID,
                     status: .failed,
                     diagnostics: diagnostics + [diagnostic(
                         severity: .error,
                         code: "OPENSTA_NONZERO_EXIT",
-                        message: "OpenSTA exited with status \(result.exitCode).",
+                        message: "OpenSTA exited with status \(processResult.exitCode).",
                         suggestedActions: ["inspect_opensta_stderr", "reproduce_with_generated_tcl"]
                     )],
                     payload: payload,
                     startedAt: startedAt,
-                    oracleID: oracleID
+                    oracleID: oracleID,
+                    inputs: inputs,
+                    designRevision: designReference.digest,
+                    artifacts: [scriptReference]
                 )
             }
-            let reportDiagnostics = reportDiagnostics(for: payload, stderr: result.standardError)
-            return envelope(
+            let reportDiagnostics = reportDiagnostics(for: payload, stderr: processResult.standardError)
+            return try result(
                 runID: runID,
                 status: reportDiagnostics.isEmpty ? .completed : .blocked,
                 diagnostics: diagnostics + reportDiagnostics,
                 payload: payload,
                 startedAt: startedAt,
-                oracleID: oracleID
+                oracleID: oracleID,
+                inputs: inputs,
+                designRevision: designReference.digest,
+                artifacts: [scriptReference]
             )
         } catch let error as TimedProcessError {
-            return envelope(
+            return try result(
                 runID: runID,
                 status: .failed,
                 diagnostics: [diagnostic(
@@ -116,7 +129,10 @@ struct OpenSTAOracleAdapter {
                 )],
                 payload: emptyPayload(modeID: modeID, cornerID: cornerID, provenance: provenance, hasParasitics: parasiticsReference != nil),
                 startedAt: startedAt,
-                oracleID: oracleID
+                oracleID: oracleID,
+                inputs: inputs,
+                designRevision: designReference.digest,
+                artifacts: [scriptReference]
             )
         }
     }
@@ -170,7 +186,7 @@ struct OpenSTAOracleAdapter {
                 continue
             }
             guard currentSection == section, let range = line.range(of: "slack (") else { continue }
-            let candidate = line[..<range.lowerBound]
+            let candidate = line[range.upperBound...]
                 .split(whereSeparator: \.isWhitespace)
                 .last
                 .map(String.init)
@@ -181,8 +197,8 @@ struct OpenSTAOracleAdapter {
         return values
     }
 
-    private static func reportDiagnostics(for payload: STAPayload, stderr: String) -> [XcircuiteEngineDiagnostic] {
-        var result: [XcircuiteEngineDiagnostic] = []
+    private static func reportDiagnostics(for payload: STAPayload, stderr: String) -> [DesignDiagnostic] {
+        var result: [DesignDiagnostic] = []
         if payload.worstSetupSlack == nil {
             result.append(diagnostic(
                 severity: .error,
@@ -241,7 +257,7 @@ struct OpenSTAOracleAdapter {
         return Double(lower.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    private static func diagnostics(from stderr: String) -> [XcircuiteEngineDiagnostic] {
+    private static func diagnostics(from stderr: String) -> [DesignDiagnostic] {
         guard !stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         return [diagnostic(
             severity: .warning,
@@ -298,52 +314,82 @@ struct OpenSTAOracleAdapter {
         return "\"\(escaped)\""
     }
 
-    private static func envelope(
+    private static func result(
         runID: String,
-        status: XcircuiteEngineExecutionStatus,
-        diagnostics: [XcircuiteEngineDiagnostic],
+        status: TimingExecutionStatus,
+        diagnostics: [DesignDiagnostic],
         payload: STAPayload,
         startedAt: Date,
-        oracleID: String
-    ) -> XcircuiteEngineResultEnvelope<STAPayload> {
-        XcircuiteEngineResultEnvelope(
-            schemaVersion: 1,
+        oracleID: String,
+        inputs: [ArtifactReference],
+        designRevision: ContentDigest?,
+        artifacts: [ArtifactReference] = []
+    ) throws -> STAExecutionResult {
+        let producer = try ProducerIdentity(
+            kind: .tool,
+            identifier: "timing.sta.external",
+            version: "adapter-1.0.0",
+            build: oracleID
+        )
+        let provenance = try ExecutionProvenance(
+            producer: producer,
+            inputs: inputs,
+            designRevision: designRevision,
+            startedAt: startedAt,
+            completedAt: Date()
+        )
+        return STAExecutionResult(
             runID: runID,
             status: status,
+            payload: payload,
+            artifacts: artifacts,
             diagnostics: diagnostics,
-            metadata: XcircuiteEngineExecutionMetadata(
-                engineID: "timing.sta.external",
-                implementationID: oracleID,
-                implementationVersion: "adapter-1.0.0",
-                startedAt: startedAt,
-                completedAt: Date()
-            ),
-            payload: payload
+            provenance: provenance
         )
     }
 
-    private static func failureEnvelope(
+    private static func failureResult(
         runID: String,
         code: String,
         message: String
-    ) -> XcircuiteEngineResultEnvelope<STAPayload> {
-        envelope(
+    ) throws -> STAExecutionResult {
+        let producer = try ProducerIdentity(
+            kind: .tool,
+            identifier: "timing.sta.external",
+            version: "adapter-1.0.0"
+        )
+        let provenance = try ExecutionProvenance(
+            producer: producer,
+            startedAt: Date(),
+            completedAt: Date()
+        )
+        return STAExecutionResult(
             runID: runID,
             status: .failed,
-            diagnostics: [diagnostic(severity: .error, code: code, message: message, suggestedActions: ["inspect_adapter_arguments"])],
             payload: STAPayload(worstSetupSlack: nil, worstHoldSlack: nil, analyzedCorners: [], analyzedModes: []),
-            startedAt: Date(),
-            oracleID: "opensta-adapter"
+            diagnostics: [diagnostic(severity: .error, code: code, message: message, suggestedActions: ["inspect_adapter_arguments"])],
+            provenance: provenance
         )
     }
 
     private static func diagnostic(
-        severity: XcircuiteEngineDiagnosticSeverity,
+        severity: DiagnosticSeverity,
         code: String,
         message: String,
         suggestedActions: [String]
-    ) -> XcircuiteEngineDiagnostic {
-        XcircuiteEngineDiagnostic(severity: severity, code: code, message: message, suggestedActions: suggestedActions)
+    ) -> DesignDiagnostic {
+        let diagnosticCode: DiagnosticCode
+        do {
+            diagnosticCode = try DiagnosticCode(rawValue: code)
+        } catch {
+            preconditionFailure("OpenSTA emitted an invalid diagnostic code: \(code)")
+        }
+        return DesignDiagnostic(
+            code: diagnosticCode,
+            severity: severity,
+            summary: message,
+            suggestedActions: suggestedActions.map { SuggestedAction(code: $0, summary: $0) }
+        )
     }
 
     private static func processDiagnosticCode(for error: TimedProcessError) -> String {
@@ -368,9 +414,10 @@ struct OpenSTAOracleAdapter {
         return arguments[arguments.index(after: index)]
     }
 
-    private static func designFormat(for path: String) -> XcircuiteFileFormat {
+    private static func designFormat(for path: String) -> ArtifactFormat {
         switch URL(filePath: path).pathExtension.lowercased() {
-        case "v", "vh", "sv": return .verilog
+        case "v", "vh": return .verilog
+        case "sv": return .systemVerilog
         default: return .json
         }
     }

@@ -5,6 +5,7 @@ import XcircuitePackage
 /// Converts the existing project artifact model at the explicit timing
 /// migration boundary. Foundation references are always verified values;
 /// legacy references are used only to invoke existing Xcircuite adapters.
+@available(*, deprecated, message: "Compatibility bridge only; use Foundation artifact references directly.")
 public struct TimingFoundationArtifactBridge: Sendable {
     public init() {}
 

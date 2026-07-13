@@ -1,12 +1,11 @@
 import Foundation
-import PDKCore
 
 public struct TimingQualificationEvaluator: TimingQualificationEvaluating {
     public init() {}
 
     public func evaluate(
         corpus: TimingCorpusReport,
-        pdk: PDKReference,
+        pdk: TimingPDKReference,
         modeIDs: [String],
         cornerIDs: [String],
         externalOracle: TimingExternalOracleEvidence,
@@ -25,7 +24,7 @@ public struct TimingQualificationEvaluator: TimingQualificationEvaluating {
 
     public func evaluate(
         corpus: TimingCorpusReport,
-        pdk: PDKReference,
+        pdk: TimingPDKReference,
         modeIDs: [String],
         cornerIDs: [String],
         externalOracle: TimingExternalOracleEvidence,
@@ -102,7 +101,7 @@ public struct TimingQualificationEvaluator: TimingQualificationEvaluating {
     private func report(
         decision: TimingQualificationReport.Decision,
         corpus: TimingCorpusReport,
-        pdk: PDKReference,
+        pdk: TimingPDKReference,
         modeIDs: [String],
         cornerIDs: [String],
         externalOracle: TimingExternalOracleEvidence,
@@ -115,8 +114,8 @@ public struct TimingQualificationEvaluator: TimingQualificationEvaluating {
             decision: decision,
             processID: pdk.processID,
             pdkVersion: pdk.version,
-            pdkDigest: pdk.digest,
-            pdkManifestDigest: pdk.manifest.sha256,
+            pdkDigest: pdk.digest.hexadecimalValue,
+            pdkManifestDigest: pdk.manifest.digest.hexadecimalValue,
             corpusSuiteID: corpus.suiteID,
             corpusEvidenceDigest: corpusEvidenceDigest,
             requiredModeIDs: modeIDs,

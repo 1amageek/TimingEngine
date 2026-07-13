@@ -1,30 +1,36 @@
 import Foundation
 import SignalIntegrityEngine
 import STAEngine
+import TimingCore
 
 public struct TimingEngineService: Sendable {
-    public let sta: any STAAnalyzing
-    public let signalIntegrity: any SignalIntegrityAnalyzing
-    public let foundationSTA: any STAFoundationEngine
-    public let foundationSignalIntegrity: any SignalIntegrityFoundationEngine
+    public let sta: any STAFoundationEngine
+    public let signalIntegrity: any SignalIntegrityFoundationEngine
     public let corpus: any TimingCorpusRunning
     public let qualification: any TimingQualificationEvaluating
 
     public init(
-        sta: any STAAnalyzing = NativeSTAEngine(),
-        signalIntegrity: any SignalIntegrityAnalyzing = NativeSignalIntegrityEngine(),
-        foundationSTA: (any STAFoundationEngine)? = nil,
-        foundationSignalIntegrity: (any SignalIntegrityFoundationEngine)? = nil,
+        sta: (any STAFoundationEngine)? = nil,
+        signalIntegrity: (any SignalIntegrityFoundationEngine)? = nil,
         workspaceRoot: URL? = nil,
-        corpus: any TimingCorpusRunning = LocalTimingCorpusRunner(),
+        corpus: (any TimingCorpusRunning)? = nil,
         qualification: any TimingQualificationEvaluating = TimingQualificationEvaluator()
     ) {
-        self.sta = sta
-        self.signalIntegrity = signalIntegrity
-        self.foundationSTA = foundationSTA ?? NativeSTAFoundationEngine(workspaceRoot: workspaceRoot)
-        self.foundationSignalIntegrity = foundationSignalIntegrity
-            ?? NativeSignalIntegrityFoundationEngine(workspaceRoot: workspaceRoot)
-        self.corpus = corpus
+        self.sta = sta ?? NativeSTAEngine(workspaceRoot: workspaceRoot)
+        self.signalIntegrity = signalIntegrity ?? NativeSignalIntegrityEngine(workspaceRoot: workspaceRoot)
+        self.corpus = corpus ?? LocalTimingCorpusRunner(
+            sta: self.sta,
+            signalIntegrity: self.signalIntegrity,
+            reader: FileSystemTimingArtifactReader(workspaceRoot: workspaceRoot)
+        )
         self.qualification = qualification
+    }
+
+    @available(*, deprecated, message: "Use sta.")
+    public var foundationSTA: any STAFoundationEngine { sta }
+
+    @available(*, deprecated, message: "Use signalIntegrity.")
+    public var foundationSignalIntegrity: any SignalIntegrityFoundationEngine {
+        signalIntegrity
     }
 }

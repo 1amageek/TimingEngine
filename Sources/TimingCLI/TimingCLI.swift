@@ -1,11 +1,10 @@
 import Foundation
+import CircuiteFoundation
 import LogicIR
-import PDKCore
 import SignalIntegrityEngine
 import STAEngine
 import TimingCore
 import TimingEngine
-import XcircuitePackage
 
 @main
 struct TimingCLI {
@@ -69,34 +68,38 @@ struct TimingCLI {
         let cornerIDs = option("--corner", in: values).map { [$0] } ?? ["default"]
         let outputDirectory = option("--out", in: values).map { URL(filePath: $0) }
         let referenceBuilder = TimingArtifactReferenceBuilder()
-        let designReference = try referenceBuilder.makeReference(path: designPath, kind: .netlist, format: format(for: designPath, fallback: .json))
-        let libraryReference = try referenceBuilder.makeReference(path: libraryPath, kind: .timingLibrary, format: .liberty)
-        let constraintReference = try referenceBuilder.makeReference(path: constraintsPath, kind: .constraint, format: .sdc)
-        let pdkManifestReference = try referenceBuilder.makeReference(path: pdkPath, kind: .technology, format: .json)
-        let pdkReference = PDKReference(
-            manifest: pdkManifestReference,
-            processID: option("--process", in: values) ?? "unknown",
-            version: option("--pdk-version", in: values) ?? "unknown",
-            digest: option("--pdk-digest", in: values) ?? pdkManifestReference.sha256 ?? "unknown"
+        let designReference = try referenceBuilder.makeReference(path: designPath, kind: CircuiteFoundation.ArtifactKind.netlist, format: format(for: designPath, fallback: .json))
+        let libraryReference = try referenceBuilder.makeReference(path: libraryPath, kind: try ArtifactKind(rawValue: "timing.library"), format: .liberty)
+        let constraintReference = try referenceBuilder.makeReference(path: constraintsPath, kind: CircuiteFoundation.ArtifactKind.constraints, format: try ArtifactFormat(rawValue: "sdc"))
+        let pdkManifestReference = try referenceBuilder.makeReference(path: pdkPath, kind: CircuiteFoundation.ArtifactKind.technology, format: .json)
+        let processID = option("--process", in: values) ?? "unknown"
+        let pdkVersion = option("--pdk-version", in: values) ?? "unknown"
+        let pdkDigest = try ContentDigest(
+            algorithm: .sha256,
+            hexadecimalValue: option("--pdk-digest", in: values) ?? pdkManifestReference.digest.hexadecimalValue
         )
         let parasitics = try option("--spef", in: values).map {
-            try referenceBuilder.makeReference(path: $0, kind: .parasitic, format: .spef)
+            try referenceBuilder.makeReference(path: $0, kind: CircuiteFoundation.ArtifactKind.parasitics, format: .spef)
         }
-        let request = STARequest(
+        let request = STAFoundationRequest(
             runID: runID,
-            inputs: [designReference, libraryReference, constraintReference, pdkReference.manifest] + (parasitics.map { [$0] } ?? []),
-            design: LogicDesignReference(artifact: designReference, topDesignName: top, designDigest: option("--design-digest", in: values) ?? designReference.sha256 ?? "unknown"),
-            libraries: [TimingLibraryReference(artifact: libraryReference, cornerIDs: cornerIDs)],
-            constraints: TimingConstraintReference(artifact: constraintReference, modeIDs: modeIDs),
-            pdk: pdkReference,
-            parasitics: parasitics,
+            design: designReference,
+            topDesignName: top,
+            designRevision: try option("--design-digest", in: values).map { try ContentDigest(algorithm: .sha256, hexadecimalValue: $0) } ?? designReference.digest,
+            libraries: [STAFoundationLibraryReference(artifact: libraryReference, cornerIDs: cornerIDs)],
+            constraints: constraintReference,
             requestedModeIDs: modeIDs,
             requestedCornerIDs: cornerIDs,
+            pdkManifest: pdkManifestReference,
+            processID: processID,
+            pdkVersion: pdkVersion,
+            pdkDigest: pdkDigest,
+            parasitics: parasitics,
             requiresSignoff: values.contains("--requires-signoff")
         )
         let store = outputDirectory.map { FileSystemTimingArtifactStore(outputDirectory: $0) }
-        let envelope = try await NativeSTAEngine(artifactStore: store).execute(request)
-        try emit(envelope)
+        let result = try await NativeSTAEngine(artifactStore: store, workspaceRoot: nil).execute(request)
+        try emit(result)
     }
 
     private static func runCorpus(_ values: [String]) async throws {
@@ -142,14 +145,18 @@ struct TimingCLI {
         }
         let pdkManifest = try TimingArtifactReferenceBuilder().makeReference(
             path: pdkPath,
-            kind: .technology,
+            kind: CircuiteFoundation.ArtifactKind.technology,
             format: .json
         )
-        let pdk = PDKReference(
+        let pdkDigest = try ContentDigest(
+            algorithm: .sha256,
+            hexadecimalValue: option("--pdk-digest", in: values) ?? pdkManifest.digest.hexadecimalValue
+        )
+        let pdk = try TimingPDKReference(
             manifest: pdkManifest,
             processID: option("--process", in: values) ?? corpus.processID,
             version: option("--pdk-version", in: values) ?? "unknown",
-            digest: option("--pdk-digest", in: values) ?? pdkManifest.sha256 ?? ""
+            digest: pdkDigest
         )
         let pdkEvidence = try LocalTimingPDKQualificationEvidenceBuilder().build(for: pdk)
         let externalOracle: TimingExternalOracleEvidence
@@ -239,15 +246,15 @@ struct TimingCLI {
     }
 
     private struct DecodedSTAReport {
-        var status: XcircuiteEngineExecutionStatus
+        var status: TimingExecutionStatus
         var payload: STAPayload
     }
 
     private static func decodeSTAReport(path: String) throws -> DecodedSTAReport {
         let data = try read(path: path)
         do {
-            let envelope = try JSONDecoder().decode(XcircuiteEngineResultEnvelope<STAPayload>.self, from: data)
-            return DecodedSTAReport(status: envelope.status, payload: envelope.payload)
+            let result = try JSONDecoder().decode(STAExecutionResult.self, from: data)
+            return DecodedSTAReport(status: result.status, payload: result.payload)
         } catch let envelopeError {
             do {
                 let payload = try JSONDecoder().decode(STAPayload.self, from: data)
@@ -278,10 +285,11 @@ struct TimingCLI {
         }
     }
 
-    private static func format(for path: String, fallback: XcircuiteFileFormat) -> XcircuiteFileFormat {
+    private static func format(for path: String, fallback: ArtifactFormat) -> ArtifactFormat {
         switch URL(filePath: path).pathExtension.lowercased() {
         case "json": return .json
-        case "v", "vh", "sv": return .verilog
+        case "v", "vh": return .verilog
+        case "sv": return .systemVerilog
         case "spef": return .spef
         case "sdf": return .sdf
         default: return fallback

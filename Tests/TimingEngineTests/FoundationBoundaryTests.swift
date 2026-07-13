@@ -87,7 +87,7 @@ struct FoundationBoundaryTests {
                 pdkVersion: "1"
             )
 
-            let engine: any STAFoundationEngine = NativeSTAFoundationEngine(
+            let engine: any STAFoundationEngine = NativeSTAEngine(
                 workspaceRoot: root
             )
             let result = try await engine.execute(request)
@@ -160,8 +160,8 @@ struct FoundationBoundaryTests {
             let store = FileSystemTimingArtifactStore(
                 outputDirectory: root.appending(path: "artifacts", directoryHint: .isDirectory)
             )
-            let engine = NativeSTAFoundationEngine(
-                legacyEngine: NativeSTAEngine(artifactStore: store),
+            let engine = NativeSTAEngine(
+                artifactStore: store,
                 workspaceRoot: root
             )
 
@@ -213,7 +213,7 @@ struct FoundationBoundaryTests {
                 maxNoiseRatio: 0.5
             )
 
-            let engine: any SignalIntegrityFoundationEngine = NativeSignalIntegrityFoundationEngine(
+            let engine: any SignalIntegrityFoundationEngine = NativeSignalIntegrityEngine(
                 workspaceRoot: root
             )
             let result = try await engine.execute(request)
@@ -246,7 +246,7 @@ struct FoundationBoundaryTests {
             )
 
             do {
-                _ = try await NativeSTAFoundationEngine().execute(request)
+                _ = try await NativeSTAEngine().execute(request)
                 Issue.record("Expected a typed workspace-root boundary error.")
             } catch let error as TimingFoundationBoundaryError {
                 #expect(error == .workspaceRootRequired("design.json"))

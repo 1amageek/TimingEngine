@@ -1,8 +1,5 @@
 import Foundation
-import XcircuitePackage
-import LogicIR
 import TimingCore
-import PDKCore
 
 public struct STAPayload: Sendable, Hashable, Codable {
     public var worstSetupSlack: Double?

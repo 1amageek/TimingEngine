@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 import Testing
 @testable import TimingCore
@@ -130,6 +131,67 @@ struct TimingCoreTests {
     func unsupportedSDC() {
         #expect(throws: TimingError.self) {
             _ = try SDCParser().parse(Data("set_case_analysis 1 [get_ports scan_enable]".utf8))
+        }
+    }
+
+    @Test("Foundation artifact store and reader preserve immutable identity")
+    func foundationArtifactStoreRoundTrip() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "timing-artifact-test-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer {
+            do {
+                try FileManager.default.removeItem(at: root)
+            } catch {
+                Issue.record("Temporary artifact cleanup failed: \(error.localizedDescription)")
+            }
+        }
+        let producer = try ProducerIdentity(
+            kind: .engine,
+            identifier: "timing.test",
+            version: "1.0.0"
+        )
+        let data = Data("timing evidence".utf8)
+        let store = FileSystemTimingArtifactStore(outputDirectory: root)
+        let reference = try await store.store(
+            data,
+            artifactID: try ArtifactID(rawValue: "test-report"),
+            runID: "round-trip",
+            kind: .report,
+            format: .json,
+            producer: producer
+        )
+        let reader = FileSystemTimingArtifactReader()
+        #expect(try await reader.read(reference) == data)
+        #expect(reference.id.rawValue == "test-report")
+        #expect(reference.digest.algorithm == .sha256)
+        #expect(reference.byteCount == UInt64(data.count))
+        #expect(reference.producer == producer)
+
+        let replayed = try await store.store(
+            data,
+            artifactID: try ArtifactID(rawValue: "test-report"),
+            runID: "round-trip",
+            kind: .report,
+            format: .json,
+            producer: producer
+        )
+        #expect(replayed == reference)
+
+        do {
+            _ = try await store.store(
+                Data("different evidence".utf8),
+                artifactID: try ArtifactID(rawValue: "test-report"),
+                runID: "round-trip",
+                kind: .report,
+                format: .json,
+                producer: producer
+            )
+            Issue.record("An immutable artifact identity must reject different content.")
+        } catch let error as TimingError {
+            guard case .artifactWriteFailed = error else {
+                Issue.record("Unexpected timing error: \(error.localizedDescription)")
+                return
+            }
         }
     }
 

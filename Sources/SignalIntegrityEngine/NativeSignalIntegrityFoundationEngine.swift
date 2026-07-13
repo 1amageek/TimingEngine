@@ -5,12 +5,13 @@ import TimingCore
 import XcircuitePackage
 
 /// Foundation-facing adapter for the native signal-integrity implementation.
+@available(*, deprecated, message: "Use NativeSignalIntegrityEngine.")
 public struct NativeSignalIntegrityFoundationEngine: SignalIntegrityFoundationEngine {
-    public let legacyEngine: any SignalIntegrityAnalyzing
+    public let legacyEngine: any LegacySignalIntegrityAnalyzing
     public let workspaceRoot: URL?
 
     public init(
-        legacyEngine: any SignalIntegrityAnalyzing = NativeSignalIntegrityEngine(),
+        legacyEngine: any LegacySignalIntegrityAnalyzing = LegacyNativeSignalIntegrityEngine(),
         workspaceRoot: URL? = nil
     ) {
         self.legacyEngine = legacyEngine

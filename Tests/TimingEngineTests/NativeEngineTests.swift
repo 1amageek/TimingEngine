@@ -56,7 +56,7 @@ struct NativeEngineTests {
             requestedModeIDs: ["functional"],
             requestedCornerIDs: ["typical"]
         )
-        let envelope = try await NativeSTAEngine(reader: reader).execute(request)
+        let envelope = try await LegacyNativeSTAEngine(reader: reader).execute(request)
         #expect(envelope.status == .completed)
         #expect(envelope.payload.analyzedModes == ["functional"])
         #expect(envelope.payload.analyzedCorners == ["typical"])
@@ -94,7 +94,7 @@ struct NativeEngineTests {
             ),
             requiresSignoff: true
         )
-        let envelope = try await NativeSTAEngine(reader: InMemoryTimingArtifactReader(artifacts: [:])).execute(request)
+        let envelope = try await LegacyNativeSTAEngine(reader: InMemoryTimingArtifactReader(artifacts: [:])).execute(request)
         #expect(envelope.status == .blocked)
         #expect(envelope.diagnostics.first?.code == "STA_MISSING_ARTIFACT")
     }
@@ -160,7 +160,7 @@ struct NativeEngineTests {
             requiresSignoff: true
         )
 
-        let envelope = try await NativeSTAEngine(reader: reader).execute(request)
+        let envelope = try await LegacyNativeSTAEngine(reader: reader).execute(request)
 
         #expect(envelope.status == .blocked)
         #expect(envelope.diagnostics.contains { $0.code == "DESIGN_PROVENANCE_INPUT_DIGEST_MISMATCH" })

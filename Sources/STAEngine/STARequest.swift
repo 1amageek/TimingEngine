@@ -4,7 +4,8 @@ import LogicIR
 import TimingCore
 import PDKCore
 
-public struct STARequest: XcircuiteEngineRequest {
+@available(*, deprecated, message: "Use STAFoundationRequest for all new executions.")
+public struct LegacySTARequest: XcircuiteEngineRequest {
     public static let currentSchemaVersion = 1
 
     public var schemaVersion: Int
@@ -54,3 +55,6 @@ public struct STARequest: XcircuiteEngineRequest {
         self.variation = variation
     }
 }
+
+@available(*, deprecated, message: "Use STAFoundationRequest for all new executions.")
+public typealias STARequest = LegacySTARequest

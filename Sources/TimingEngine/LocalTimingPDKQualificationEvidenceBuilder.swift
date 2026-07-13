@@ -1,18 +1,33 @@
 import CryptoKit
+import CircuiteFoundation
 import Foundation
 import PDKCore
 import TimingCore
 
 public struct LocalTimingPDKQualificationEvidenceBuilder: TimingPDKQualificationEvidenceBuilding {
-    public init() {}
+    public let workspaceRoot: URL?
 
-    public func build(for pdk: PDKReference) throws -> TimingPDKQualificationEvidence {
-        let manifestURL = URL(filePath: pdk.manifest.path).standardizedFileURL
+    public init(workspaceRoot: URL? = nil) {
+        self.workspaceRoot = workspaceRoot?.standardizedFileURL
+    }
+
+    public func build(for pdk: TimingPDKReference) throws -> TimingPDKQualificationEvidence {
+        let manifestURL: URL
+        do {
+            manifestURL = try pdk.manifest.locator.location.resolvedFileURL(
+                relativeTo: workspaceRoot
+            )
+        } catch {
+            throw TimingError.artifactReadFailed(
+                path: pdk.manifest.locator.location.value,
+                message: error.localizedDescription
+            )
+        }
         let manifestData: Data
         do {
             manifestData = try Data(contentsOf: manifestURL)
         } catch {
-            throw TimingError.artifactReadFailed(path: pdk.manifest.path, message: error.localizedDescription)
+            throw TimingError.artifactReadFailed(path: manifestURL.path(percentEncoded: false), message: error.localizedDescription)
         }
         let manifest: PDKManifest
         do {
@@ -23,10 +38,10 @@ public struct LocalTimingPDKQualificationEvidenceBuilder: TimingPDKQualification
 
         let manifestDigest = digest(manifestData)
         var findings: [String] = []
-        if let expected = pdk.manifest.sha256, expected.caseInsensitiveCompare(manifestDigest) != .orderedSame {
+        if pdk.manifest.digest.hexadecimalValue.caseInsensitiveCompare(manifestDigest) != .orderedSame {
             findings.append("pdk_manifest_digest_mismatch")
         }
-        if pdk.digest.caseInsensitiveCompare(manifestDigest) != .orderedSame {
+        if pdk.digest.hexadecimalValue.caseInsensitiveCompare(manifestDigest) != .orderedSame {
             findings.append("pdk_reference_digest_mismatch")
         }
         if pdk.processID != manifest.processID { findings.append("pdk_process_mismatch") }
@@ -34,10 +49,16 @@ public struct LocalTimingPDKQualificationEvidenceBuilder: TimingPDKQualification
         let manifestReport = manifest.validate()
         if !manifestReport.isValid { findings.append("pdk_manifest_invalid") }
 
-        let rootURL = manifestURL.deletingLastPathComponent().standardizedFileURL
+        let rootURL = manifestURL
+            .deletingLastPathComponent()
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
         var assets: [TimingPDKAssetEvidence] = []
         for asset in manifest.assets.sorted(by: { $0.assetID < $1.assetID }) {
-            let assetURL = rootURL.appending(path: asset.path).standardizedFileURL
+            let assetURL = rootURL
+                .appending(path: asset.path)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
             let rootPath = rootURL.path.hasSuffix("/") ? rootURL.path : rootURL.path + "/"
             guard assetURL.path == rootURL.path || assetURL.path.hasPrefix(rootPath) else {
                 findings.append("pdk_asset_unsafe_path:\(asset.assetID)")

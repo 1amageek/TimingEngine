@@ -1,6 +1,6 @@
 # TimingEngine Interface Contract
 
-## Legacy compatibility shape
+## Legacy compatibility shape (deprecated)
 
 ```swift
 public protocol DomainExecuting: Sendable {
@@ -10,7 +10,7 @@ public protocol DomainExecuting: Sendable {
 }
 ```
 
-The Foundation-native public shape is:
+The canonical public shape is:
 
 ```swift
 public protocol STAFoundationEngine: Engine
@@ -19,11 +19,11 @@ where Request == STAFoundationRequest, Output == STAExecutionResult {}
 
 Requests carry a Foundation schema version, run ID and verified `ArtifactReference` values. Domain results conform independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`; payloads contain domain metrics, while evidence and diagnostics remain inspectable without a universal result envelope.
 
-The legacy `XcircuiteEngineResultEnvelope` shape remains only at the current Xcircuite adapter boundary and is promoted into Foundation results before the Foundation-facing engine returns.
+The legacy `XcircuiteEngineResultEnvelope` shape is confined to deprecated compatibility adapters. The canonical service, corpus runner, CLI and OpenSTA adapter exchange Foundation requests and domain results directly.
 
 The `TimingEngine` umbrella product exposes these seams through
-`TimingEngineService.foundationSTA`, `TimingEngineService.foundationSignalIntegrity`,
-`TimingEngineAPI.makeFoundationSTA` and `TimingEngineAPI.makeFoundationSignalIntegrity`.
+`TimingEngineService.sta`, `TimingEngineService.signalIntegrity`,
+`TimingEngineAPI.makeNativeSTA` and `TimingEngineAPI.makeNativeSignalIntegrity`.
 
 ## Products
 

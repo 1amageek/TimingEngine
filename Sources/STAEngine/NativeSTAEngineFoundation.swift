@@ -1,35 +1,71 @@
 import Foundation
+import CircuiteFoundation
 import LogicIR
 import PDKCore
 import TimingCore
 import XcircuitePackage
 
-/// Foundation-facing adapter for the native STA implementation.
-@available(*, deprecated, message: "Use NativeSTAEngine.")
-public struct NativeSTAFoundationEngine: STAFoundationEngine {
-    public let legacyEngine: any LegacySTAAnalyzing
+/// Foundation-native STA engine.
+///
+/// The retained legacy backend is injected only as an explicit compatibility
+/// implementation. Requests and results crossing this public seam are always
+/// CircuiteFoundation values.
+public struct NativeSTAEngine: STAFoundationEngine {
+    private let compatibilityBackend: any LegacySTAAnalyzing
+    public let reader: any TimingArtifactReading
+    public let artifactStore: (any TimingArtifactStoring)?
     public let workspaceRoot: URL?
 
     public init(
-        legacyEngine: any LegacySTAAnalyzing = LegacyNativeSTAEngine(),
+        reader: any TimingArtifactReading = FileSystemTimingArtifactReader(),
+        artifactStore: (any TimingArtifactStoring)? = nil,
         workspaceRoot: URL? = nil
     ) {
-        self.legacyEngine = legacyEngine
+        self.reader = reader
+        self.compatibilityBackend = LegacyNativeSTAEngine(
+            reader: LegacyTimingArtifactReaderAdapter(
+                reader: reader
+            )
+        )
+        self.artifactStore = artifactStore
+        self.workspaceRoot = workspaceRoot
+    }
+
+    internal init(
+        compatibilityBackend: any LegacySTAAnalyzing,
+        reader: any TimingArtifactReading = FileSystemTimingArtifactReader(),
+        artifactStore: (any TimingArtifactStoring)? = nil,
+        workspaceRoot: URL? = nil
+    ) {
+        self.compatibilityBackend = compatibilityBackend
+        self.reader = reader
+        self.artifactStore = artifactStore
         self.workspaceRoot = workspaceRoot
     }
 
     public func execute(_ request: STAFoundationRequest) async throws -> STAExecutionResult {
-        guard request.schemaVersion == STAFoundationRequest.currentSchemaVersion else {
-            throw TimingFoundationBoundaryError.unsupportedSchemaVersion(
-                expected: STAFoundationRequest.currentSchemaVersion,
-                actual: request.schemaVersion
-            )
-        }
         let legacyRequest = try makeLegacyRequest(request)
-        let legacyResult = try await legacyEngine.execute(legacyRequest)
-        return try STAExecutionResult(
-            legacy: legacyResult,
-            request: request
+        let legacyResult = try await compatibilityBackend.execute(legacyRequest)
+        let foundationResult = try STAExecutionResult(legacy: legacyResult, request: request)
+        guard let artifactStore else { return foundationResult }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let report = try await artifactStore.store(
+            try encoder.encode(foundationResult.payload),
+            artifactID: try ArtifactID(rawValue: "timing-sta-report"),
+            runID: request.runID,
+            kind: .report,
+            format: .json,
+            producer: foundationResult.evidence.provenance.producer
+        )
+        return STAExecutionResult(
+            runID: foundationResult.runID,
+            status: foundationResult.status,
+            payload: foundationResult.payload,
+            artifacts: foundationResult.artifacts + [report],
+            diagnostics: foundationResult.diagnostics,
+            provenance: foundationResult.evidence.provenance,
+            schemaVersion: foundationResult.schemaVersion
         )
     }
 
@@ -90,7 +126,15 @@ public struct NativeSTAFoundationEngine: STAFoundationEngine {
                 artifact: designArtifact,
                 topDesignName: request.topDesignName,
                 designDigest: request.designRevision?.hexadecimalValue
-                    ?? request.design.digest.hexadecimalValue
+                    ?? request.design.digest.hexadecimalValue,
+                provenance: LogicDesignProvenance(
+                    sourceDesignDigest: request.designRevision?.hexadecimalValue
+                        ?? request.design.digest.hexadecimalValue,
+                    inputDesignDigest: request.design.digest.hexadecimalValue,
+                    producerID: "timing.foundation.request",
+                    producerVersion: "1",
+                    runID: request.runID
+                )
             ),
             libraries: libraryReferences,
             constraints: TimingConstraintReference(

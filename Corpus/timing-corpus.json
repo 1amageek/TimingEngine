@@ -23,7 +23,7 @@
       "engine": "sta",
       "description": "Unsupported clock-group semantics remain an explicit blocked result.",
       "expectedOutcome": "blocked",
-      "expectedDiagnosticCodes": ["STA_UNSUPPORTED_SEMANTIC"],
+      "expectedDiagnosticCodes": ["timing.sta.sta_unsupported_semantic"],
       "designPath": "fixtures/simple/design.json",
       "topDesignName": "top",
       "libraryPaths": ["fixtures/simple/library.lib"],

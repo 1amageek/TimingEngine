@@ -50,7 +50,7 @@ struct SignalIntegrityTests {
             maxDeltaDelay: 1e-12,
             maxNoiseRatio: 0.5
         )
-        let envelope = try await NativeSignalIntegrityEngine(reader: reader).execute(request)
+        let envelope = try await LegacyNativeSignalIntegrityEngine(reader: reader).execute(request)
         #expect(envelope.status == .completed)
         #expect(envelope.payload.violationCount == 1)
         #expect(envelope.payload.worstDeltaDelay != nil)

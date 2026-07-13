@@ -1,21 +1,21 @@
+import CircuiteFoundation
 import Foundation
 import LogicIR
-import PDKCore
 import SignalIntegrityEngine
 import STAEngine
 import TimingCore
-import XcircuitePackage
 
+/// Executes the local timing corpus through the canonical Foundation engines.
 public struct LocalTimingCorpusRunner: TimingCorpusRunning {
-    public let sta: any STAAnalyzing
-    public let signalIntegrity: any SignalIntegrityAnalyzing
+    public let sta: any STAFoundationEngine
+    public let signalIntegrity: any SignalIntegrityFoundationEngine
     public let reader: any TimingArtifactReading
     public let referenceAnalyzer: TimingReferenceAnalyzer
     public let correlationRunner: TimingCorrelationRunner
 
     public init(
-        sta: any STAAnalyzing = NativeSTAEngine(),
-        signalIntegrity: any SignalIntegrityAnalyzing = NativeSignalIntegrityEngine(),
+        sta: any STAFoundationEngine = NativeSTAEngine(),
+        signalIntegrity: any SignalIntegrityFoundationEngine = NativeSignalIntegrityEngine(),
         reader: any TimingArtifactReading = FileSystemTimingArtifactReader(),
         referenceAnalyzer: TimingReferenceAnalyzer = TimingReferenceAnalyzer(),
         correlationRunner: TimingCorrelationRunner = TimingCorrelationRunner()
@@ -58,33 +58,42 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
     ) async -> TimingCorpusCaseResult {
         do {
             let request = try makeRequest(corpusCase, rootURL: rootURL, runID: runID)
-            let envelope: XcircuiteEngineResultEnvelope<STAPayload>?
-            let siEnvelope: XcircuiteEngineResultEnvelope<SignalIntegrityPayload>?
+            let staResult: STAExecutionResult?
+            let siResult: SignalIntegrityExecutionResult?
             switch corpusCase.engine {
             case .sta:
-                envelope = try await sta.execute(request.sta)
-                siEnvelope = nil
+                staResult = try await sta.execute(request.sta)
+                siResult = nil
             case .signalIntegrity:
-                envelope = nil
-                siEnvelope = try await signalIntegrity.execute(request.si)
+                staResult = nil
+                siResult = try await signalIntegrity.execute(request.si)
             }
-            let observedOutcome = outcome(for: envelope?.status ?? siEnvelope!.status)
-            let diagnostics = (envelope?.diagnostics ?? siEnvelope!.diagnostics).map(\.code).sorted()
+
+            let status = staResult?.status ?? siResult!.status
+            let observedOutcome = outcome(for: status)
+            let diagnostics = (staResult?.diagnostics ?? siResult!.diagnostics)
+                .map { $0.code.rawValue }
+                .sorted()
             let missingCodes = Set(corpusCase.expectedDiagnosticCodes).subtracting(diagnostics).sorted()
             var correlation: TimingCorrelationResult?
             var provenance = TimingArtifactProvenance()
             var nativeSetup: Double?
             var nativeHold: Double?
-            if let envelope {
-                nativeSetup = envelope.payload.worstSetupSlack
-                nativeHold = envelope.payload.worstHoldSlack
-                provenance = envelope.payload.provenance
-                if envelope.status == .completed {
-                    correlation = try await correlate(corpusCase, rootURL: rootURL, request: request.sta, payload: envelope.payload)
+            if let staResult {
+                nativeSetup = staResult.payload.worstSetupSlack
+                nativeHold = staResult.payload.worstHoldSlack
+                provenance = staResult.payload.provenance
+                if staResult.status == .completed {
+                    correlation = try await correlate(
+                        corpusCase,
+                        request: request.sta,
+                        payload: staResult.payload
+                    )
                 }
-            } else if let siEnvelope {
-                provenance = siEnvelope.payload.provenance
+            } else if let siResult {
+                provenance = siResult.payload.provenance
             }
+
             let expectedSlackMatches = matchesExpectedSlacks(corpusCase, setup: nativeSetup, hold: nativeHold)
             let correlationPassed = corpusCase.engine == .sta && corpusCase.expectedOutcome == .completed
                 ? correlation?.passed == true
@@ -93,7 +102,10 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
                 caseID: corpusCase.caseID,
                 expectedOutcome: corpusCase.expectedOutcome,
                 observedOutcome: observedOutcome,
-                passed: observedOutcome == corpusCase.expectedOutcome && missingCodes.isEmpty && expectedSlackMatches && correlationPassed,
+                passed: observedOutcome == corpusCase.expectedOutcome
+                    && missingCodes.isEmpty
+                    && expectedSlackMatches
+                    && correlationPassed,
                 expectedDiagnosticCodes: corpusCase.expectedDiagnosticCodes,
                 observedDiagnosticCodes: diagnostics,
                 missingExpectedDiagnosticCodes: missingCodes,
@@ -108,10 +120,12 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
                 caseID: corpusCase.caseID,
                 expectedOutcome: corpusCase.expectedOutcome,
                 observedOutcome: .failed,
-                passed: corpusCase.expectedOutcome == .failed && corpusCase.expectedDiagnosticCodes.contains(code),
+                passed: corpusCase.expectedOutcome == .failed
+                    && corpusCase.expectedDiagnosticCodes.contains(code),
                 expectedDiagnosticCodes: corpusCase.expectedDiagnosticCodes,
                 observedDiagnosticCodes: [code],
-                missingExpectedDiagnosticCodes: Set(corpusCase.expectedDiagnosticCodes).subtracting([code]).sorted()
+                missingExpectedDiagnosticCodes: Set(corpusCase.expectedDiagnosticCodes)
+                    .subtracting([code]).sorted()
             )
         } catch {
             return TimingCorpusCaseResult(
@@ -121,14 +135,15 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
                 passed: false,
                 expectedDiagnosticCodes: corpusCase.expectedDiagnosticCodes,
                 observedDiagnosticCodes: ["TIMING_CORPUS_CASE_EXECUTION_FAILED"],
-                missingExpectedDiagnosticCodes: Set(corpusCase.expectedDiagnosticCodes).subtracting(["TIMING_CORPUS_CASE_EXECUTION_FAILED"]).sorted()
+                missingExpectedDiagnosticCodes: Set(corpusCase.expectedDiagnosticCodes)
+                    .subtracting(["TIMING_CORPUS_CASE_EXECUTION_FAILED"]).sorted()
             )
         }
     }
 
     private struct CaseRequest: Sendable {
-        let sta: STARequest
-        let si: SignalIntegrityRequest
+        let sta: STAFoundationRequest
+        let si: SignalIntegrityFoundationRequest
     }
 
     private func makeRequest(
@@ -137,70 +152,85 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
         runID: String
     ) throws -> CaseRequest {
         let builder = TimingArtifactReferenceBuilder()
-        let design = try builder.makeReference(path: try resolve(corpusCase.designPath, rootURL: rootURL), kind: .netlist, format: format(for: corpusCase.designPath, fallback: .json))
-        let constraint = try builder.makeReference(path: try resolve(corpusCase.constraintPath, rootURL: rootURL), kind: .constraint, format: .sdc)
-        let pdkManifest = try builder.makeReference(path: try resolve(corpusCase.pdkManifestPath, rootURL: rootURL), kind: .technology, format: .json)
+        let design = try builder.makeReference(
+            path: try resolve(corpusCase.designPath, rootURL: rootURL),
+            kind: CircuiteFoundation.ArtifactKind.netlist,
+            format: format(for: corpusCase.designPath, fallback: .json)
+        )
+        let constraint = try builder.makeReference(
+            path: try resolve(corpusCase.constraintPath, rootURL: rootURL),
+            kind: CircuiteFoundation.ArtifactKind.constraints,
+            format: try ArtifactFormat(rawValue: "sdc")
+        )
+        let pdkManifest = try builder.makeReference(
+            path: try resolve(corpusCase.pdkManifestPath, rootURL: rootURL),
+            kind: CircuiteFoundation.ArtifactKind.technology,
+            format: .json
+        )
         let libraries = try corpusCase.libraryPaths.map {
-            try TimingLibraryReference(
-                artifact: builder.makeReference(path: try resolve($0, rootURL: rootURL), kind: .timingLibrary, format: .liberty),
+            try STAFoundationLibraryReference(
+                artifact: builder.makeReference(
+                    path: try resolve($0, rootURL: rootURL),
+                    kind: try ArtifactKind(rawValue: "timing.library"),
+                    format: .liberty
+                ),
                 cornerIDs: corpusCase.cornerIDs.isEmpty ? ["default"] : corpusCase.cornerIDs
             )
         }
         let parasitics = try corpusCase.parasiticsPath.map {
-            try builder.makeReference(path: try resolve($0, rootURL: rootURL), kind: .parasitic, format: .spef)
-        }
-        let pdk = PDKReference(
-            manifest: pdkManifest,
-            processID: corpusCase.processID,
-            version: corpusCase.pdkVersion,
-            digest: corpusCase.pdkDigest ?? pdkManifest.sha256 ?? ""
-        )
-        let designReference = LogicDesignReference(
-            artifact: design,
-            topDesignName: corpusCase.topDesignName,
-            designDigest: design.sha256 ?? "",
-            provenance: LogicDesignProvenance(
-                sourceDesignDigest: design.sha256 ?? "",
-                producerID: "timing-corpus-fixture",
-                producerVersion: "1.0.0",
-                runID: runID
+            try builder.makeReference(
+                path: try resolve($0, rootURL: rootURL),
+                kind: CircuiteFoundation.ArtifactKind.parasitics,
+                format: .spef
             )
-        )
-        let constraintReference = TimingConstraintReference(
-            artifact: constraint,
-            modeIDs: corpusCase.modeIDs
-        )
-        let sta = STARequest(
+        }
+        let pdkDigest = try corpusCase.pdkDigest.map {
+            try ContentDigest(algorithm: .sha256, hexadecimalValue: $0)
+        } ?? pdkManifest.digest
+        let sta = STAFoundationRequest(
             runID: runID,
-            inputs: [design, constraint, pdkManifest] + libraries.map(\.artifact) + (parasitics.map { [$0] } ?? []),
-            design: designReference,
+            design: design,
+            topDesignName: corpusCase.topDesignName,
+            designRevision: design.digest,
             libraries: libraries,
-            constraints: constraintReference,
-            pdk: pdk,
-            parasitics: parasitics,
+            constraints: constraint,
             requestedModeIDs: corpusCase.modeIDs,
             requestedCornerIDs: corpusCase.cornerIDs,
+            pdkManifest: pdkManifest,
+            processID: corpusCase.processID,
+            pdkVersion: corpusCase.pdkVersion,
+            pdkDigest: pdkDigest,
+            parasitics: parasitics,
             requiresSignoff: corpusCase.requiresSignoff
         )
-        let si = SignalIntegrityRequest(
+        let siParasitics = try parasitics ?? builder.makeReference(
+            path: try resolve(corpusCase.parasiticsPath ?? corpusCase.designPath, rootURL: rootURL),
+            kind: CircuiteFoundation.ArtifactKind.parasitics,
+            format: .spef
+        )
+        let si = SignalIntegrityFoundationRequest(
             runID: runID,
-            inputs: [design, constraint, pdkManifest, parasitics].compactMap { $0 },
-            design: designReference,
-            constraints: constraintReference,
-            pdk: pdk,
-            parasitics: parasitics ?? XcircuiteFileReference(path: "", kind: .parasitic, format: .spef)
+            design: design,
+            topDesignName: corpusCase.topDesignName,
+            designRevision: design.digest,
+            constraints: constraint,
+            requestedModeIDs: corpusCase.modeIDs,
+            pdkManifest: pdkManifest,
+            processID: corpusCase.processID,
+            pdkVersion: corpusCase.pdkVersion,
+            pdkDigest: pdkDigest,
+            parasitics: siParasitics
         )
         return CaseRequest(sta: sta, si: si)
     }
 
     private func correlate(
         _ corpusCase: TimingCorpusCase,
-        rootURL: URL,
-        request: STARequest,
+        request: STAFoundationRequest,
         payload: STAPayload
     ) async throws -> TimingCorrelationResult {
-        let designData = try await reader.read(request.design.artifact)
-        let design = try TimingDesignParser().parse(designData, topDesignName: request.design.topDesignName)
+        let designData = try await reader.read(request.design)
+        let design = try TimingDesignParser().parse(designData, topDesignName: request.topDesignName)
         var library: TimingLibrary?
         for reference in request.libraries {
             let parsed = try LibertyParser().parse(try await reader.read(reference.artifact))
@@ -210,7 +240,7 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
             throw TimingError.missingArtifact(role: "timing-library")
         }
         let modeID = corpusCase.modeIDs.first ?? "default"
-        let constraints = try SDCParser().parse(try await reader.read(request.constraints.artifact), modeID: modeID)
+        let constraints = try SDCParser().parse(try await reader.read(request.constraints), modeID: modeID)
         let parasitics: TimingParasitics?
         if let reference = request.parasitics {
             parasitics = try SPEFParser().parse(try await reader.read(reference))
@@ -223,7 +253,6 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
             constraints: constraints,
             parasitics: parasitics
         )
-        _ = rootURL
         return correlationRunner.compare(native: payload, reference: reference)
     }
 
@@ -236,7 +265,7 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
         return candidate.path(percentEncoded: false)
     }
 
-    private func outcome(for status: XcircuiteEngineExecutionStatus) -> TimingCorpusExpectedOutcome {
+    private func outcome(for status: TimingExecutionStatus) -> TimingCorpusExpectedOutcome {
         switch status {
         case .completed: return .completed
         case .blocked: return .blocked
@@ -246,15 +275,18 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
 
     private func matchesExpectedSlacks(_ corpusCase: TimingCorpusCase, setup: Double?, hold: Double?) -> Bool {
         let tolerance = correlationRunner.tolerance
-        if let expected = corpusCase.expectedWorstSetupSlack, (setup == nil || abs(setup! - expected) > tolerance) { return false }
-        if let expected = corpusCase.expectedWorstHoldSlack, (hold == nil || abs(hold! - expected) > tolerance) { return false }
+        if let expected = corpusCase.expectedWorstSetupSlack,
+           setup.map({ abs($0 - expected) > tolerance }) ?? true { return false }
+        if let expected = corpusCase.expectedWorstHoldSlack,
+           hold.map({ abs($0 - expected) > tolerance }) ?? true { return false }
         return true
     }
 
-    private func format(for path: String, fallback: XcircuiteFileFormat) -> XcircuiteFileFormat {
+    private func format(for path: String, fallback: ArtifactFormat) -> ArtifactFormat {
         switch URL(filePath: path).pathExtension.lowercased() {
         case "json": return .json
-        case "v", "vh", "sv": return .verilog
+        case "v", "vh": return .verilog
+        case "sv": return .systemVerilog
         default: return fallback
         }
     }

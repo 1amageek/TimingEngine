@@ -4,8 +4,12 @@ import LogicIR
 import TimingCore
 import PDKCore
 
-public protocol SignalIntegrityAnalyzing: Sendable {
+@available(*, deprecated, message: "Use SignalIntegrityFoundationEngine for all new executions.")
+public protocol LegacySignalIntegrityAnalyzing: Sendable {
     func execute(
         _ request: SignalIntegrityRequest
     ) async throws -> XcircuiteEngineResultEnvelope<SignalIntegrityPayload>
 }
+
+@available(*, deprecated, message: "Use SignalIntegrityFoundationEngine for all new executions.")
+public typealias SignalIntegrityAnalyzing = LegacySignalIntegrityAnalyzing

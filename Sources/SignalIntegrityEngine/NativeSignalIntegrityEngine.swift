@@ -4,15 +4,16 @@ import PDKCore
 import TimingCore
 import XcircuitePackage
 
-public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing {
-    public let reader: any TimingArtifactReading
-    public let artifactStore: (any TimingArtifactStoring)?
+@available(*, deprecated, message: "Use NativeSignalIntegrityEngine Foundation execution or NativeSignalIntegrityFoundationEngine.")
+public struct LegacyNativeSignalIntegrityEngine: SignalIntegrityAnalyzing {
+    public let reader: any LegacyTimingArtifactReading
+    public let artifactStore: (any LegacyTimingArtifactStoring)?
     public let parasiticParser: any TimingParasiticParsing
     public let constraintParser: any TimingConstraintParsing
 
     public init(
-        reader: any TimingArtifactReading = FileSystemTimingArtifactReader(),
-        artifactStore: (any TimingArtifactStoring)? = nil,
+        reader: any LegacyTimingArtifactReading = FileSystemTimingArtifactReader(),
+        artifactStore: (any LegacyTimingArtifactStoring)? = nil,
         parasiticParser: any TimingParasiticParsing = SPEFParser(),
         constraintParser: any TimingConstraintParsing = SDCParser()
     ) {

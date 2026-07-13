@@ -1,6 +1,5 @@
 import Foundation
 import TimingCore
-import XcircuitePackage
 
 public struct TimingCorpusCaseResult: Sendable, Hashable, Codable {
     public var caseID: String

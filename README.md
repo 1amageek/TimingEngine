@@ -4,7 +4,7 @@ Canonical timing data, MMMC static timing analysis, signal integrity, retained e
 
 ## Status
 
-This package provides a local native implementation for a standards-constrained timing subset. It parses Liberty, SDC, SDF and SPEF artifacts, runs MMMC setup/hold analysis, evaluates coupling-aware signal integrity, retains provenance-bound corpus evidence and emits structured result envelopes.
+This package provides a local native implementation for a standards-constrained timing subset. It parses Liberty, SDC, SDF and SPEF artifacts, runs MMMC setup/hold analysis, evaluates coupling-aware signal integrity, retains provenance-bound corpus evidence and emits structured Foundation results.
 
 The release path is deliberately explicit:
 
@@ -30,7 +30,7 @@ Native implementation, retained replay, headless integration and a reproducible 
 | `SignalIntegrityEngine` | Coupling-aware crosstalk analysis |
 | `TimingEngine` | Umbrella API, corpus replay, reference correlation and qualification decisions |
 | `timingengine` | Deterministic JSON CLI |
-| `opensta-oracle-adapter` | Bounded OpenSTA process adapter that emits the shared STA result envelope |
+| `opensta-oracle-adapter` | Bounded OpenSTA process adapter that emits `STAExecutionResult` |
 
 ## CircuiteFoundation boundary
 
@@ -50,16 +50,19 @@ flowchart LR
 Every Foundation result separately conforms to `ArtifactProducing`,
 `DiagnosticReporting` and `EvidenceProviding`. Artifact promotion validates
 the location, SHA-256 digest and byte count; relative locations require an
-explicit workspace root. The native Foundation adapters are
-`NativeSTAFoundationEngine` and `NativeSignalIntegrityFoundationEngine`.
-`TimingEngineService.foundationSTA` and
-`TimingEngineService.foundationSignalIntegrity` expose the same seams from the
-umbrella product, and `TimingEngineAPI` provides factory methods for them.
+explicit workspace root. The canonical native engines are `NativeSTAEngine`
+and `NativeSignalIntegrityEngine`. `TimingEngineService.sta` and
+`TimingEngineService.signalIntegrity` expose those seams from the umbrella
+product, and `TimingEngineAPI` provides Foundation-native factory methods.
 
-The existing `XcircuiteEngineResultEnvelope` path remains for the current
-Xcircuite stage adapters while the workspace migrates package by package. It is
-an explicit compatibility boundary and is not used by the new Foundation
-protocols.
+`NativeSTAFoundationEngine`, `NativeSignalIntegrityFoundationEngine`, the
+Xcircuite request types, and the Xcircuite artifact overloads are retained only
+as explicitly deprecated compatibility APIs. They are not selected by the
+service, corpus runner, CLI, or OpenSTA adapter.
+
+The existing `XcircuiteEngineResultEnvelope` path remains only in the explicit
+legacy compatibility layer while the workspace migrates package by package. It
+is not used by the canonical service, corpus runner, CLI, or OpenSTA adapter.
 
 ## Contract
 
@@ -71,10 +74,10 @@ Foundation-facing execution uses:
 - immutable `ArtifactReference` inputs and outputs;
 - explicit blocked, failed and cancelled states.
 
-The retained Xcircuite request/envelope contract is used only by the current
-stage adapters during the package-by-package migration.
+The retained Xcircuite request/envelope contract is deprecated and confined to
+compatibility adapters during the package-by-package migration.
 
-External oracle requests use a bounded process runner. Missing executables, launch failures, timeouts, non-zero exits and invalid result envelopes remain structured diagnostics rather than hanging or being treated as correlation evidence.
+External oracle requests use a bounded process runner. Missing executables, launch failures, timeouts, non-zero exits and invalid Foundation results remain structured diagnostics rather than hanging or being treated as correlation evidence.
 
 ## Supported standard artifacts
 
@@ -85,7 +88,7 @@ External oracle requests use a bounded process runner. Missing executables, laun
 | Parasitics | SPEF (`.spef`) |
 | Delay annotation | SDF (`.sdf`) |
 | Design graph | JSON timing IR or structural Verilog subset |
-| Result and evidence | Versioned JSON envelopes with SHA-256 provenance |
+| Result and evidence | Versioned JSON result/evidence documents with SHA-256 provenance |
 
 ## Build
 
@@ -104,7 +107,7 @@ swift run timingengine run-corpus --manifest Corpus/timing-corpus.json --root Co
 # Evaluate the process qualification gate; unavailable external oracles remain blocked
 swift run timingengine qualify --corpus-report /tmp/timing-corpus-report.json --pdk-manifest Corpus/fixtures/simple/pdk.json --pdk-version 1 --mode functional --corner typical
 
-# Correlate a completed external STA envelope against a native STA envelope
+# Correlate a completed external STA result against a native STA result
 swift run timingengine correlate-oracle --native-report native.json --oracle-report external.json --oracle-id opensta
 
 # Build the independent OpenSTA adapter
@@ -145,14 +148,14 @@ The pinned revisions are intentionally immutable release inputs. Updating a depe
 perl -e 'alarm 30; exec @ARGV' swift test
 ```
 
-The public clone verification is 26 tests in 6 suites, including the
+The public clone verification is 28 tests in 6 suites, including the
 CircuiteFoundation STA/SI boundary and artifact-integrity tests. This Swift
 package has no configured Xcode test scheme; SwiftPM Testing is the
 authoritative local test command.
 
 ## Xcircuite integration
 
-The separate Xcircuite package provides `timing.sta` and `timing.signal-integrity` stage adapters. They resolve and digest-check project inputs, persist raw timing envelopes, expose flow gates, and preserve timing artifacts through human approval and resume.
+The separate Xcircuite package provides `timing.sta` and `timing.signal-integrity` stage adapters. They resolve and digest-check project inputs, consume the Foundation-native results from this package, expose flow gates, and preserve timing artifacts through human approval and resume. A deprecated envelope projection remains available only for the package-by-package workspace migration.
 
 ## Release status
 

@@ -10,7 +10,9 @@ struct ContractTests {
     func contractVersion() {
         #expect(TimingEngineAPI.contractVersion == 1)
         #expect(TimingEngineService().corpus is LocalTimingCorpusRunner)
-        #expect(TimingEngineService().foundationSTA is NativeSTAFoundationEngine)
-        #expect(TimingEngineService().foundationSignalIntegrity is NativeSignalIntegrityFoundationEngine)
+        #expect(TimingEngineService().sta is NativeSTAEngine)
+        #expect(TimingEngineService().signalIntegrity is NativeSignalIntegrityEngine)
+        #expect(TimingEngineAPI.nativeCapabilities.first?.supportedInputFormats.contains { $0.rawValue == "sdc" } == true)
+        #expect(TimingEngineAPI.nativeCapabilities.first?.supportedOutputFormats == [.json])
     }
 }

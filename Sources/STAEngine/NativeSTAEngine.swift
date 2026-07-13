@@ -4,17 +4,18 @@ import PDKCore
 import TimingCore
 import XcircuitePackage
 
-public struct NativeSTAEngine: STAAnalyzing {
-    public let reader: any TimingArtifactReading
-    public let artifactStore: (any TimingArtifactStoring)?
+@available(*, deprecated, message: "Use NativeSTAEngine Foundation execution or NativeSTAFoundationEngine.")
+public struct LegacyNativeSTAEngine: STAAnalyzing {
+    public let reader: any LegacyTimingArtifactReading
+    public let artifactStore: (any LegacyTimingArtifactStoring)?
     public let libraryParser: any TimingLibraryParsing
     public let constraintParser: any TimingConstraintParsing
     public let designParser: any TimingDesignParsing
     public let parasiticParser: any TimingParasiticParsing
 
     public init(
-        reader: any TimingArtifactReading = FileSystemTimingArtifactReader(),
-        artifactStore: (any TimingArtifactStoring)? = nil,
+        reader: any LegacyTimingArtifactReading = FileSystemTimingArtifactReader(),
+        artifactStore: (any LegacyTimingArtifactStoring)? = nil,
         libraryParser: any TimingLibraryParsing = LibertyParser(),
         constraintParser: any TimingConstraintParsing = SDCParser(),
         designParser: any TimingDesignParsing = TimingDesignParser(),

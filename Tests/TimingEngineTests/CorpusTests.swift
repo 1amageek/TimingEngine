@@ -1,10 +1,9 @@
 import Foundation
+import CircuiteFoundation
 import Testing
 @testable import TimingEngine
 import TimingCore
-import PDKCore
 import STAEngine
-import XcircuitePackage
 
 @Suite("Timing corpus and correlation")
 struct CorpusTests {
@@ -38,11 +37,11 @@ struct CorpusTests {
             .appending(path: "Corpus/fixtures/simple/library.lib")
         let reference = try TimingArtifactReferenceBuilder().makeReference(
             path: fixture.path(percentEncoded: false),
-            kind: .timingLibrary,
+            kind: try ArtifactKind(rawValue: "timing.library"),
             format: .liberty
         )
-        #expect(reference.sha256?.count == 64)
-        #expect(reference.byteCount ?? 0 > 0)
+        #expect(reference.digest.hexadecimalValue.count == 64)
+        #expect(reference.byteCount > 0)
     }
 
     @Test("qualification blocks when an external oracle is unavailable")
@@ -58,18 +57,24 @@ struct CorpusTests {
             rootURL: packageRoot.appending(path: "Corpus"),
             runID: "qualification-test"
         )
-        let pdkReference = try TimingArtifactReferenceBuilder().makeReference(
-            path: packageRoot.appending(path: "Corpus/fixtures/simple/pdk.json").path(percentEncoded: false),
-            kind: .technology,
-            format: .json
+        let corpusRoot = packageRoot.appending(path: "Corpus")
+        let pdkReference = try LocalArtifactReferencer().reference(
+            ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: "fixtures/simple/pdk.json"),
+                kind: CircuiteFoundation.ArtifactKind.technology,
+                format: .json
+            ),
+            relativeTo: corpusRoot
         )
-        let pdk = PDKReference(
+        let pdk = try TimingPDKReference(
             manifest: pdkReference,
             processID: "fixture-process",
             version: "1",
-            digest: pdkReference.sha256 ?? ""
+            digest: pdkReference.digest
         )
-        let pdkEvidence = try LocalTimingPDKQualificationEvidenceBuilder().build(for: pdk)
+        let pdkEvidence = try LocalTimingPDKQualificationEvidenceBuilder(
+            workspaceRoot: corpusRoot
+        ).build(for: pdk)
         let report = TimingQualificationEvaluator().evaluate(
             corpus: corpus,
             pdk: pdk,
@@ -163,8 +168,8 @@ struct CorpusTests {
         #expect(result.diagnostics == ["external_oracle_executable_unavailable"])
     }
 
-    @Test("external oracle runner consumes the shared result envelope")
-    func externalOracleRunnerReadsEnvelope() async throws {
+    @Test("external oracle runner consumes a Foundation result")
+    func externalOracleRunnerReadsResult() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "timing-oracle-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let payload = STAPayload(
@@ -174,22 +179,24 @@ struct CorpusTests {
             analyzedModes: ["functional"]
         )
         let now = Date()
-        let envelope = XcircuiteEngineResultEnvelope(
-            schemaVersion: 1,
+        let producer = try ProducerIdentity(
+            kind: .tool,
+            identifier: "timing.external",
+            version: "1"
+        )
+        let oracleResult = STAExecutionResult(
             runID: "oracle-envelope",
             status: .completed,
-            metadata: XcircuiteEngineExecutionMetadata(
-                engineID: "timing.external",
-                implementationID: "fixture-oracle",
-                implementationVersion: "1",
+            payload: payload,
+            provenance: try ExecutionProvenance(
+                producer: producer,
                 startedAt: now,
                 completedAt: now
-            ),
-            payload: payload
+            )
         )
         let reportURL = directory.appending(path: "oracle.json")
-        try JSONEncoder().encode(envelope).write(to: reportURL, options: .atomic)
-        let result = try await LocalTimingExternalOracleRunner().execute(
+        try JSONEncoder().encode(oracleResult).write(to: reportURL, options: .atomic)
+        let observed = try await LocalTimingExternalOracleRunner().execute(
             TimingExternalOracleRequest(
                 runID: "oracle-envelope",
                 oracleID: "fixture-oracle",
@@ -198,8 +205,47 @@ struct CorpusTests {
                 workingDirectory: directory.path(percentEncoded: false)
             )
         )
-        #expect(result.status == .completed)
-        #expect(result.payload?.worstSetupSlack == 1e-9)
+        #expect(observed.status == .completed)
+        #expect(observed.payload?.worstSetupSlack == 1e-9)
+    }
+
+    @Test("external oracle runner rejects a result from another run")
+    func externalOracleRunnerRejectsMismatchedRun() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "timing-oracle-mismatch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let now = Date()
+        let producer = try ProducerIdentity(
+            kind: .tool,
+            identifier: "timing.external",
+            version: "1"
+        )
+        let oracleResult = STAExecutionResult(
+            runID: "different-run",
+            status: .completed,
+            payload: STAPayload(
+                worstSetupSlack: 1e-9,
+                worstHoldSlack: 2e-9,
+                analyzedCorners: ["typical"]
+            ),
+            provenance: try ExecutionProvenance(
+                producer: producer,
+                startedAt: now,
+                completedAt: now
+            )
+        )
+        let reportURL = directory.appending(path: "oracle.json")
+        try JSONEncoder().encode(oracleResult).write(to: reportURL, options: .atomic)
+        let observed = try await LocalTimingExternalOracleRunner().execute(
+            TimingExternalOracleRequest(
+                runID: "expected-run",
+                oracleID: "fixture-oracle",
+                executablePath: "/bin/cat",
+                arguments: [reportURL.path(percentEncoded: false)],
+                workingDirectory: directory.path(percentEncoded: false)
+            )
+        )
+        #expect(observed.status == .failed)
+        #expect(observed.diagnostics == ["external_oracle_run_id_mismatch"])
     }
 
     @Test("external oracle timeout returns a structured failure")
