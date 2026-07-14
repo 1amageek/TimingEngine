@@ -35,25 +35,4 @@ public struct SignalIntegrityExecutionResult: Sendable, Hashable, Codable,
         )
     }
 
-    @available(*, deprecated, message: "Use the Foundation-ordered initializer.")
-    public init(
-        schemaVersion: Int,
-        runID: String,
-        status: TimingExecutionStatus,
-        diagnostics: [DesignDiagnostic] = [],
-        artifacts: [ArtifactReference] = [],
-        provenance: ExecutionProvenance,
-        payload: SignalIntegrityPayload
-    ) {
-        self.init(
-            runID: runID,
-            status: status,
-            payload: payload,
-            artifacts: artifacts,
-            diagnostics: diagnostics,
-            provenance: provenance,
-            schemaVersion: .v1
-        )
-    }
-
 }

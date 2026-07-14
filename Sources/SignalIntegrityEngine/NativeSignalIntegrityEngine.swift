@@ -4,7 +4,7 @@ import PDKCore
 import TimingCore
 import DesignFlowKernel
 
-public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing, SignalIntegrityFoundationEngine {
+public struct NativeSignalIntegrityEngine: SignalIntegrityFoundationEngine {
     public typealias Request = SignalIntegrityFoundationRequest
     public typealias Output = SignalIntegrityExecutionResult
     public let reader: any TimingArtifactReading
@@ -25,22 +25,22 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing, SignalInteg
         self.constraintParser = constraintParser
     }
 
-    public func execute(_ request: SignalIntegrityRequest) async throws -> SignalIntegrityExecutionResult {
+    public func execute(_ request: SignalIntegrityFoundationRequest) async throws -> SignalIntegrityExecutionResult {
         let startedAt = Date()
         do {
             _ = try await reader.read(
-                try artifact(for: request.design.artifact, in: request)
+                request.design
             )
             _ = try await reader.read(
-                request.pdk.manifest
+                request.pdkManifest
             )
-            let constraintsData = try await reader.read(request.constraints.artifact)
-            let modeIDs = request.constraints.modeIDs.isEmpty ? ["default"] : request.constraints.modeIDs
+            let constraintsData = try await reader.read(request.constraints)
+            let modeIDs = request.requestedModeIDs.isEmpty ? ["default"] : request.requestedModeIDs
             for modeID in modeIDs {
                 _ = try constraintParser.parse(constraintsData, modeID: modeID)
             }
             let parasitics = try parasiticParser.parse(try await reader.read(request.parasitics))
-            let provenanceIssues = LogicDesignProvenanceValidation.issues(for: request.design)
+            let provenanceIssues = LogicDesignProvenanceValidation.issues(for: logicDesignReference(for: request))
             guard provenanceIssues.isEmpty else {
                 return try provenanceBlockedEnvelope(
                     request: request,
@@ -80,10 +80,10 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing, SignalInteg
                 )
             }
             let provenance = TimingArtifactProvenance(
-                designDigest: request.design.designDigest,
+                designDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
                 libraryDigests: [],
-                constraintDigest: request.constraints.artifact.digest.hexadecimalValue,
-                pdkDigest: request.pdk.digest.isEmpty ? request.pdk.manifest.digest.hexadecimalValue : request.pdk.digest,
+                constraintDigest: request.constraints.digest.hexadecimalValue,
+                pdkDigest: request.pdkDigest?.hexadecimalValue ?? request.pdkManifest.digest.hexadecimalValue,
                 parasiticsDigest: request.parasitics.digest.hexadecimalValue
             )
             let provenanceDiagnostics: [DesignDiagnostic] = provenance.hasCoreDigests
@@ -127,13 +127,13 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing, SignalInteg
                 )
             } + provenanceDiagnostics
             return SignalIntegrityExecutionResult(
-                schemaVersion: SignalIntegrityRequest.currentSchemaVersion,
                 runID: request.runID,
                 status: .completed,
-                diagnostics: diagnostics,
+                payload: payload,
                 artifacts: artifacts,
+                diagnostics: diagnostics,
                 provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-                payload: payload
+                schemaVersion: SignalIntegrityFoundationRequest.currentSchemaVersion
             )
         } catch let error as TimingError {
             if case .artifactWriteFailed = error {
@@ -142,9 +142,9 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing, SignalInteg
             return try blockedEnvelope(request: request, startedAt: startedAt, error: error)
         } catch {
             return SignalIntegrityExecutionResult(
-                schemaVersion: SignalIntegrityRequest.currentSchemaVersion,
                 runID: request.runID,
                 status: .failed,
+                payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil),
                 diagnostics: [DesignDiagnostic(
                     severity: .error,
                     code: "timing.signal_integrity.execution_failed",
@@ -152,52 +152,20 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing, SignalInteg
                     suggestedActions: ["inspect_input_artifacts", "reproduce_with_timing_cli"]
                 )],
                 provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-                payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil)
+                schemaVersion: SignalIntegrityFoundationRequest.currentSchemaVersion
             )
         }
     }
 
-    /// Executes the canonical Foundation request directly.
-    public func execute(_ request: SignalIntegrityFoundationRequest) async throws -> SignalIntegrityExecutionResult {
-        let design = LogicDesignReference(
-            artifact: request.design.locator,
-            topDesignName: request.topDesignName,
-            designDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
-            provenance: LogicDesignProvenance(
-                sourceDesignDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
-                inputDesignDigest: request.design.digest.hexadecimalValue,
-                producerID: "timing.foundation",
-                producerVersion: "1",
-                runID: request.runID
-            )
-        )
-        let legacyRequest = SignalIntegrityRequest(
-            runID: request.runID,
-            inputs: request.inputs,
-            design: design,
-            constraints: TimingConstraintReference(artifact: request.constraints, modeIDs: request.requestedModeIDs),
-            pdk: PDKReference(
-                manifest: request.pdkManifest,
-                processID: request.processID,
-                version: request.pdkVersion,
-                digest: request.pdkDigest?.hexadecimalValue ?? request.pdkManifest.digest.hexadecimalValue
-            ),
-            parasitics: request.parasitics,
-            maxDeltaDelay: request.maxDeltaDelay,
-            maxNoiseRatio: request.maxNoiseRatio
-        )
-        return try await execute(legacyRequest)
-    }
-
     private func blockedEnvelope(
-        request: SignalIntegrityRequest,
+        request: SignalIntegrityFoundationRequest,
         startedAt: Date,
         error: TimingError
     ) throws -> SignalIntegrityExecutionResult {
         SignalIntegrityExecutionResult(
-            schemaVersion: SignalIntegrityRequest.currentSchemaVersion,
             runID: request.runID,
             status: .blocked,
+            payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil),
             diagnostics: [DesignDiagnostic(
                 severity: .error,
                 code: code(for: error),
@@ -205,19 +173,19 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing, SignalInteg
                 suggestedActions: ["inspect_input_artifacts", "check_spef_coupling_data"]
             )],
             provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-            payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil)
+            schemaVersion: SignalIntegrityFoundationRequest.currentSchemaVersion
         )
     }
 
     private func provenanceBlockedEnvelope(
-        request: SignalIntegrityRequest,
+        request: SignalIntegrityFoundationRequest,
         startedAt: Date,
         issues: [LogicDesignProvenanceValidation.Issue]
     ) throws -> SignalIntegrityExecutionResult {
         SignalIntegrityExecutionResult(
-            schemaVersion: SignalIntegrityRequest.currentSchemaVersion,
             runID: request.runID,
             status: .blocked,
+            payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil),
             diagnostics: issues.map { issue in
                 DesignDiagnostic(
                     severity: .error,
@@ -227,19 +195,19 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing, SignalInteg
                 )
             },
             provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-            payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil)
+            schemaVersion: SignalIntegrityFoundationRequest.currentSchemaVersion
         )
     }
 
     private func failedEnvelope(
-        request: SignalIntegrityRequest,
+        request: SignalIntegrityFoundationRequest,
         startedAt: Date,
         error: TimingError
     ) throws -> SignalIntegrityExecutionResult {
         SignalIntegrityExecutionResult(
-            schemaVersion: SignalIntegrityRequest.currentSchemaVersion,
             runID: request.runID,
             status: .failed,
+            payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil),
             diagnostics: [DesignDiagnostic(
                 severity: .error,
                 code: "timing.signal_integrity.artifact_write_failed",
@@ -247,7 +215,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing, SignalInteg
                 suggestedActions: ["inspect_output_directory", "retry_with_writable_artifact_store"]
             )],
             provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-            payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil)
+            schemaVersion: SignalIntegrityFoundationRequest.currentSchemaVersion
         )
     }
 
@@ -263,13 +231,6 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing, SignalInteg
         case .artifactWriteFailed: return "timing.signal_integrity.artifact_write_failed"
         case .invariantViolation: return "timing.signal_integrity.invariant_violation"
         }
-    }
-
-    private func artifact(for locator: ArtifactLocator, in request: SignalIntegrityRequest) throws -> ArtifactReference {
-        guard let reference = request.inputs.first(where: { $0.locator == locator }) else {
-            throw TimingError.missingArtifact(role: locator.role.rawValue)
-        }
-        return reference
     }
 
     private func makeProvenance(
@@ -288,9 +249,18 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityAnalyzing, SignalInteg
             completedAt: completedAt
         )
     }
+    private func logicDesignReference(for request: SignalIntegrityFoundationRequest) -> LogicDesignReference {
+        LogicDesignReference(
+            artifact: request.design.locator,
+            topDesignName: request.topDesignName,
+            designDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
+            provenance: LogicDesignProvenance(
+                sourceDesignDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
+                inputDesignDigest: request.design.digest.hexadecimalValue,
+                producerID: "timing.foundation",
+                producerVersion: "1",
+                runID: request.runID
+            )
+        )
+    }
 }
-
-/// Deprecated source name retained until the external Xcircuite stage migrates
-/// to `SignalIntegrityFoundationEngine`.
-@available(*, deprecated, renamed: "NativeSignalIntegrityEngine")
-public typealias LegacyNativeSignalIntegrityEngine = NativeSignalIntegrityEngine

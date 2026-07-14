@@ -4,7 +4,7 @@ import PDKCore
 import TimingCore
 import DesignFlowKernel
 
-public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
+public struct NativeSTAEngine: STAFoundationEngine {
     public typealias Request = STAFoundationRequest
     public typealias Output = STAExecutionResult
     public let reader: any TimingArtifactReading
@@ -31,7 +31,7 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
         self.parasiticParser = parasiticParser
     }
 
-    public func execute(_ request: STARequest) async throws -> STAExecutionResult {
+    public func execute(_ request: STAFoundationRequest) async throws -> STAExecutionResult {
         let startedAt = Date()
         do {
             guard request.variation.isValid else {
@@ -39,7 +39,7 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
             }
             let inputs = try await loadInputs(request)
             let provenanceIssues = LogicDesignProvenanceValidation.issues(
-                for: request.design,
+                for: logicDesignReference(for: request),
                 requireProvenance: request.requiresSignoff
             )
             guard provenanceIssues.isEmpty else {
@@ -75,13 +75,13 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
             }
             let completedAt = Date()
             return STAExecutionResult(
-                schemaVersion: STARequest.currentSchemaVersion,
                 runID: request.runID,
                 status: result.status,
-                diagnostics: result.diagnostics,
+                payload: result.payload,
                 artifacts: artifacts,
+                diagnostics: result.diagnostics,
                 provenance: try makeProvenance(startedAt: startedAt, completedAt: completedAt, inputs: request.inputs),
-                payload: result.payload
+                schemaVersion: STAFoundationRequest.currentSchemaVersion
             )
         } catch let error as TimingError {
             if case .artifactWriteFailed = error {
@@ -97,56 +97,14 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
                 suggestedActions: ["inspect_input_artifacts", "reproduce_with_timing_cli"]
             )
             return STAExecutionResult(
-                schemaVersion: STARequest.currentSchemaVersion,
                 runID: request.runID,
                 status: .failed,
+                payload: emptyPayload(request: request),
                 diagnostics: [diagnostic],
                 provenance: try makeProvenance(startedAt: startedAt, completedAt: completedAt, inputs: request.inputs),
-                payload: emptyPayload(request: request)
+                schemaVersion: STAFoundationRequest.currentSchemaVersion
             )
         }
-    }
-
-    /// Executes the canonical Foundation request without an adapter layer.
-    public func execute(_ request: STAFoundationRequest) async throws -> STAExecutionResult {
-        let design = LogicDesignReference(
-            artifact: request.design.locator,
-            topDesignName: request.topDesignName,
-            designDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
-            provenance: LogicDesignProvenance(
-                sourceDesignDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
-                inputDesignDigest: request.design.digest.hexadecimalValue,
-                producerID: "timing.foundation",
-                producerVersion: "1",
-                runID: request.runID
-            )
-        )
-        let legacyRequest = STARequest(
-            runID: request.runID,
-            inputs: request.inputs,
-            design: design,
-            libraries: request.libraries.map {
-                TimingLibraryReference(artifact: $0.artifact, cornerIDs: $0.cornerIDs)
-            },
-            constraints: TimingConstraintReference(
-                artifact: request.constraints,
-                modeIDs: request.requestedModeIDs
-            ),
-            pdk: PDKReference(
-                manifest: request.pdkManifest,
-                processID: request.processID,
-                version: request.pdkVersion,
-                digest: request.pdkDigest?.hexadecimalValue ?? request.pdkManifest.digest.hexadecimalValue
-            ),
-            parasitics: request.parasitics,
-            requestedModeIDs: request.requestedModeIDs,
-            requestedCornerIDs: request.requestedCornerIDs,
-            analysisKinds: request.analysisKinds,
-            maxPaths: request.maxPaths,
-            requiresSignoff: request.requiresSignoff,
-            variation: request.variation
-        )
-        return try await execute(legacyRequest)
     }
 
     private struct LoadedInputs: Sendable {
@@ -158,10 +116,10 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
         let modeIDs: [String]
     }
 
-    private func loadInputs(_ request: STARequest) async throws -> LoadedInputs {
+    private func loadInputs(_ request: STAFoundationRequest) async throws -> LoadedInputs {
         guard !request.libraries.isEmpty else { throw TimingError.missingArtifact(role: "timing-library") }
-        let designData = try await reader.read(try artifact(for: request.design.artifact, in: request))
-        let design = try designParser.parse(designData, topDesignName: request.design.topDesignName)
+        let designData = try await reader.read(request.design)
+        let design = try designParser.parse(designData, topDesignName: request.topDesignName)
 
         var library: TimingLibrary?
         var cornerIDs: [String] = []
@@ -177,11 +135,11 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
             cornerIDs = request.requestedCornerIDs
         }
 
-        _ = try await reader.read(request.pdk.manifest)
-        let constraintData = try await reader.read(request.constraints.artifact)
+        _ = try await reader.read(request.pdkManifest)
+        let constraintData = try await reader.read(request.constraints)
         let modeIDs = unique(
             request.requestedModeIDs.isEmpty
-                ? (request.constraints.modeIDs.isEmpty ? ["default"] : request.constraints.modeIDs)
+                ? ["default"]
                 : request.requestedModeIDs
         )
         var constraints: [String: TimingConstraintSet] = [:]
@@ -215,7 +173,7 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
     }
 
     private func analyze(
-        request: STARequest,
+        request: STAFoundationRequest,
         design: TimingDesign,
         library: TimingLibrary,
         constraints: [String: TimingConstraintSet],
@@ -337,7 +295,7 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
     }
 
     private func analyzeScenario(
-        request: STARequest,
+        request: STAFoundationRequest,
         design: TimingDesign,
         library: TimingLibrary,
         constraints: TimingConstraintSet,
@@ -678,7 +636,7 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
         _ kind: STAAnalysisKind,
         slack: Double,
         endpoint: STAEndpoint,
-        request: STARequest,
+        request: STAFoundationRequest,
         modeID: String,
         cornerID: String,
         violations: inout [STAViolation]
@@ -735,14 +693,14 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
     }
 
     private func blockedEnvelope(
-        request: STARequest,
+        request: STAFoundationRequest,
         startedAt: Date,
         error: TimingError
     ) throws -> STAExecutionResult {
         STAExecutionResult(
-            schemaVersion: STARequest.currentSchemaVersion,
             runID: request.runID,
             status: .blocked,
+            payload: emptyPayload(request: request),
             diagnostics: [DesignDiagnostic(
                 severity: .error,
                 code: diagnosticCode(for: error),
@@ -750,19 +708,19 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
                 suggestedActions: ["inspect_input_artifacts", "check_supported_semantics"]
             )],
             provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-            payload: emptyPayload(request: request)
+            schemaVersion: STAFoundationRequest.currentSchemaVersion
         )
     }
 
     private func provenanceBlockedEnvelope(
-        request: STARequest,
+        request: STAFoundationRequest,
         startedAt: Date,
         issues: [LogicDesignProvenanceValidation.Issue]
     ) throws -> STAExecutionResult {
         STAExecutionResult(
-            schemaVersion: STARequest.currentSchemaVersion,
             runID: request.runID,
             status: .blocked,
+            payload: emptyPayload(request: request),
             diagnostics: issues.map { issue in
                 DesignDiagnostic(
                     severity: .error,
@@ -772,19 +730,19 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
                 )
             },
             provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-            payload: emptyPayload(request: request)
+            schemaVersion: STAFoundationRequest.currentSchemaVersion
         )
     }
 
     private func failedEnvelope(
-        request: STARequest,
+        request: STAFoundationRequest,
         startedAt: Date,
         error: TimingError
     ) throws -> STAExecutionResult {
         STAExecutionResult(
-            schemaVersion: STARequest.currentSchemaVersion,
             runID: request.runID,
             status: .failed,
+            payload: emptyPayload(request: request),
             diagnostics: [DesignDiagnostic(
                 severity: .error,
                 code: "timing.sta.artifact_write_failed",
@@ -792,11 +750,11 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
                 suggestedActions: ["inspect_output_directory", "retry_with_writable_artifact_store"]
             )],
             provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-            payload: emptyPayload(request: request)
+            schemaVersion: STAFoundationRequest.currentSchemaVersion
         )
     }
 
-    private func emptyPayload(request: STARequest) -> STAPayload {
+    private func emptyPayload(request: STAFoundationRequest) -> STAPayload {
         STAPayload(
             worstSetupSlack: nil,
             worstHoldSlack: nil,
@@ -807,21 +765,29 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
         )
     }
 
-    private func provenance(for request: STARequest) -> TimingArtifactProvenance {
+    private func provenance(for request: STAFoundationRequest) -> TimingArtifactProvenance {
         TimingArtifactProvenance(
-            designDigest: request.design.designDigest,
+            designDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
             libraryDigests: request.libraries.map { $0.artifact.digest.hexadecimalValue },
-            constraintDigest: request.constraints.artifact.digest.hexadecimalValue,
-            pdkDigest: request.pdk.digest.isEmpty ? request.pdk.manifest.digest.hexadecimalValue : request.pdk.digest,
+            constraintDigest: request.constraints.digest.hexadecimalValue,
+            pdkDigest: request.pdkDigest?.hexadecimalValue ?? request.pdkManifest.digest.hexadecimalValue,
             parasiticsDigest: request.parasitics?.digest.hexadecimalValue
         )
     }
 
-    private func artifact(for locator: ArtifactLocator, in request: STARequest) throws -> ArtifactReference {
-        guard let reference = request.inputs.first(where: { $0.locator == locator }) else {
-            throw TimingError.missingArtifact(role: locator.role.rawValue)
-        }
-        return reference
+    private func logicDesignReference(for request: STAFoundationRequest) -> LogicDesignReference {
+        LogicDesignReference(
+            artifact: request.design.locator,
+            topDesignName: request.topDesignName,
+            designDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
+            provenance: LogicDesignProvenance(
+                sourceDesignDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
+                inputDesignDigest: request.design.digest.hexadecimalValue,
+                producerID: "timing.foundation",
+                producerVersion: "1",
+                runID: request.runID
+            )
+        )
     }
 
     private func makeProvenance(
@@ -864,8 +830,3 @@ public struct NativeSTAEngine: STAAnalyzing, STAFoundationEngine {
         String(format: "%.6g s", value)
     }
 }
-
-/// Deprecated source name retained until the external Xcircuite stage migrates
-/// to `STAFoundationEngine`.
-@available(*, deprecated, renamed: "NativeSTAEngine")
-public typealias LegacyNativeSTAEngine = NativeSTAEngine

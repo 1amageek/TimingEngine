@@ -69,8 +69,8 @@ Foundation-facing execution uses:
 - immutable `ArtifactReference` inputs and outputs;
 - explicit blocked, failed and cancelled states.
 
-Legacy flow requests are owned by the consuming runtime during migration; this
-package exposes only the Foundation request and domain-result contracts.
+Flow requests are owned by the consuming runtime; this package exposes only the
+Foundation request and domain-result contracts.
 
 External oracle requests use a bounded process runner. Missing executables, launch failures, timeouts, non-zero exits and invalid Foundation results remain structured diagnostics rather than hanging or being treated as correlation evidence.
 

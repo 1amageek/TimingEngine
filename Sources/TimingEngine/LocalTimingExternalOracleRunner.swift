@@ -89,47 +89,15 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
                 diagnostics: diagnostics
             )
         } catch {
-            do {
-                let legacy = try JSONDecoder().decode(
-                    STAExecutionResult.self,
-                    from: Data(stdout.utf8)
-                )
-                guard legacy.runID == request.runID else {
-                    return invalidResult(
-                        request: request,
-                        exitCode: exitCode,
-                        stdout: stdout,
-                        stderr: stderr,
-                        diagnostic: "external_oracle_run_id_mismatch"
-                    )
-                }
-                var diagnostics: [String] = legacy.diagnostics.map { diagnostic in
-                    diagnostic.code.rawValue
-                }
-                if legacy.status != .completed {
-                    diagnostics.append("external_oracle_result_not_completed")
-                }
-                return TimingExternalOracleResult(
-                    runID: request.runID,
-                    oracleID: request.oracleID,
-                    status: externalStatus(for: legacy.status),
-                    exitCode: exitCode,
-                    stdout: stdout,
-                    stderr: stderr,
-                    payload: legacy.payload,
-                    diagnostics: diagnostics
-                )
-            } catch {
-                return TimingExternalOracleResult(
-                    runID: request.runID,
-                    oracleID: request.oracleID,
-                    status: .failed,
-                    exitCode: exitCode,
-                    stdout: stdout,
-                    stderr: stderr,
-                    diagnostics: ["external_oracle_output_invalid"]
-                )
-            }
+            return TimingExternalOracleResult(
+                runID: request.runID,
+                oracleID: request.oracleID,
+                status: .failed,
+                exitCode: exitCode,
+                stdout: stdout,
+                stderr: stderr,
+                diagnostics: ["external_oracle_output_invalid"]
+            )
         }
     }
 

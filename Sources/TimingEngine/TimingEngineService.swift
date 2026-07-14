@@ -26,11 +26,4 @@ public struct TimingEngineService: Sendable {
         self.qualification = qualification
     }
 
-    @available(*, deprecated, message: "Use sta.")
-    public var foundationSTA: any STAFoundationEngine { sta }
-
-    @available(*, deprecated, message: "Use signalIntegrity.")
-    public var foundationSignalIntegrity: any SignalIntegrityFoundationEngine {
-        signalIntegrity
-    }
 }

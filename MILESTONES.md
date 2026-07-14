@@ -21,7 +21,7 @@ flowchart LR
 | ID | Scope | Exit criteria | Status |
 |---|---|---|---|
 | M0 | Scope and acceptance contract | Public responsibilities, non-goals, and release gates are written and testable | Complete |
-| M1 | Canonical timing semantics | Standard input/output identities, CircuiteFoundation artifact/evidence contracts, provenance digests, path groups, clock groups, power metadata, backward-compatible payload decoding, and typed unsupported semantics are covered by tests | Complete |
+| M1 | Canonical timing semantics | Standard input/output identities, CircuiteFoundation artifact/evidence contracts, provenance digests, path groups, clock groups, power metadata, strict canonical payload decoding, and typed unsupported semantics are covered by tests | Complete |
 | M2 | Retained corpus | Positive, negative, blocked, and SI cases are versioned with a manifest and deterministic CLI/test replay artifacts | Complete |
 | M3 | Independent oracle correlation | Scalar reference and external-process adapters compare identical payloads with explicit slack, mode, corner and provenance tolerances | Complete for Sky130A/OpenSTA 3.1; 1 ps tolerance is retained in the evidence |
 | M4 | Process qualification | PDK manifest validity, required asset digests, corner/mode matrix, corpus pass rate and oracle evidence produce a retained qualification decision | Complete for the checked-in Sky130A TT profile; not foundry signoff equivalence |

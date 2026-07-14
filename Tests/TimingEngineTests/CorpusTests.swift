@@ -61,6 +61,7 @@ struct CorpusTests {
         let pdkReference = try LocalArtifactReferencer().reference(
             ArtifactLocator(
                 location: try ArtifactLocation(workspaceRelativePath: "fixtures/simple/pdk.json"),
+                role: .input,
                 kind: CircuiteFoundation.ArtifactKind.technology,
                 format: .json
             ),
@@ -87,7 +88,7 @@ struct CorpusTests {
             ),
             pdkEvidence: pdkEvidence
         )
-        #expect(report.decision == .blocked)
+        #expect(report.decision == TimingQualificationReport.Decision.blocked)
         #expect(report.findings.contains("external_sta_oracle_unavailable"))
         #expect(report.corpusEvidenceDigest?.count == 64)
         #expect(report.pdkManifestDigest?.count == 64)
@@ -107,7 +108,7 @@ struct CorpusTests {
             externalCorrelation: nil,
             pdkEvidence: pdkEvidence
         )
-        #expect(availableWithoutCorrelation.decision == .blocked)
+        #expect(availableWithoutCorrelation.decision == TimingQualificationReport.Decision.blocked)
         #expect(availableWithoutCorrelation.findings.contains("external_oracle_correlation_missing"))
     }
 
@@ -266,20 +267,20 @@ struct CorpusTests {
         #expect(result.diagnostics == ["external_oracle_timed_out"])
     }
 
-    @Test("external oracle request preserves legacy decoding")
-    func legacyExternalOracleRequestDecoding() throws {
+    @Test("external oracle request rejects obsolete schema")
+    func externalOracleRequestRejectsObsoleteSchema() throws {
         let data = Data("""
         {
           "schemaVersion": 1,
-          "runID": "legacy-oracle",
+          "runID": "obsolete-oracle",
           "oracleID": "fixture-oracle",
           "executablePath": "/bin/cat",
           "arguments": [],
           "workingDirectory": "/tmp"
         }
         """.utf8)
-        let request = try JSONDecoder().decode(TimingExternalOracleRequest.self, from: data)
-        #expect(request.schemaVersion == 1)
-        #expect(request.timeoutSeconds == TimingExternalOracleRequest.defaultTimeoutSeconds)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TimingExternalOracleRequest.self, from: data)
+        }
     }
 }

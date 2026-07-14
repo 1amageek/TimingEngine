@@ -42,13 +42,19 @@ public struct TimingExternalOracleRequest: Sendable, Hashable, Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: container,
+                debugDescription: "Unsupported timing external oracle request schema version."
+            )
+        }
         self.runID = try container.decode(String.self, forKey: .runID)
         self.oracleID = try container.decode(String.self, forKey: .oracleID)
         self.executablePath = try container.decode(String.self, forKey: .executablePath)
         self.arguments = try container.decode([String].self, forKey: .arguments)
         self.workingDirectory = try container.decode(String.self, forKey: .workingDirectory)
-        self.timeoutSeconds = try container.decodeIfPresent(Double.self, forKey: .timeoutSeconds)
-            ?? Self.defaultTimeoutSeconds
+        self.timeoutSeconds = try container.decode(Double.self, forKey: .timeoutSeconds)
     }
 
     public func encode(to encoder: Encoder) throws {

@@ -24,6 +24,6 @@
 - The native STA backend is not process-qualified and does not claim foundry signoff.
 - Statistical OCV, AOCV/POCV correlation, waveform-resolved crosstalk noise and CCS/ECSM remain outside the native subset.
 - The independent scalar reference oracle is implemented for the retained subset; no external digital STA executable is available locally, so external correlation and process qualification remain blocked.
-- External oracle execution accepts a fixed executable path and argument array, enforces a request timeout with process-tree cleanup, validates the returned run ID, and requires a completed `STAExecutionResult` on stdout. A deprecated Xcircuite envelope is accepted only as a compatibility fallback; availability is not treated as correlation evidence.
+- External oracle execution accepts a fixed executable path and argument array, enforces a request timeout with process-tree cleanup, validates the returned run ID, and requires a completed canonical `STAExecutionResult` on stdout. Obsolete result schemas are rejected; availability is not treated as correlation evidence.
 - Qualification remains a separate ToolQualification evidence state and must be established per PDK/process/corner.
-- External Xcircuite stage adapters may retain the legacy envelope at their invocation boundary during workspace migration; the canonical TimingEngine service, corpus, CLI and OpenSTA paths are Foundation-native.
+- TimingEngine has no compatibility envelope or adapter boundary. The service, corpus, CLI and OpenSTA paths all exchange Foundation-native requests and results.

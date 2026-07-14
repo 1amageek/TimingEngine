@@ -9,7 +9,7 @@
 | Responsibility boundary | Complete | README.md and DESIGN.md |
 | Public package products | Complete | Package.swift and public targets |
 | Shared Foundation execution contract | Complete | `STAFoundationRequest`, `SignalIntegrityFoundationRequest`, domain results and `Engine` seams |
-| Foundation request/result contract | Canonical | Native engines directly implement Foundation protocols; no legacy envelope or artifact adapter is shipped |
+| Foundation request/result contract | Canonical | Native engines directly implement Foundation protocols; no compatibility envelope or artifact adapter is shipped |
 | Contract build | Passed | swift build |
 | Contract test | Passed locally | timeout-bounded SwiftPM Testing run: 28 tests in 6 suites, including the Foundation boundary and artifact persistence; no Xcode test scheme is configured for this package |
 | Domain implementation | Implemented | Native parser, timing graph, MMMC STA and SI backends |

@@ -27,7 +27,7 @@ Provide standard-constrained, multi-corner timing and signal-integrity analysis 
 
 - Public execution surfaces are protocol-first, Sendable and dependency-injected.
 - Requests and payloads are Codable, Hashable and schema-versioned.
-- Foundation-facing inputs and outputs use immutable `ArtifactReference` values with verified locations, digests and byte counts. No legacy artifact shape is exposed by this package.
+- Foundation-facing inputs and outputs use immutable `ArtifactReference` values with verified locations, digests and byte counts. Only the canonical artifact shape is exposed by this package.
 - Diagnostics contain a stable code, severity, affected entity and suggested actions.
 - Unsupported semantics and missing prerequisites produce blocked results.
 - Native and external-tool backends conform to identical request and payload schemas.
