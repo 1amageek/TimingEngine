@@ -31,7 +31,7 @@ public struct LocalTimingPDKEvidenceBuilder: TimingPDKEvidenceBuilding {
         }
         let manifest: PDKManifest
         do {
-            manifest = try PDKManifestCodec.decode(data: manifestData).manifest
+            manifest = try PDKManifestCodec.decode(data: manifestData)
         } catch {
             throw TimingError.parseFailure(format: "PDK manifest", line: 1, message: error.localizedDescription)
         }
