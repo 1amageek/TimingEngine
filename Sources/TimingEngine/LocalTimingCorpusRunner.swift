@@ -201,7 +201,7 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
             pdkVersion: corpusCase.pdkVersion,
             pdkDigest: pdkDigest,
             parasitics: parasitics,
-            requiresSignoff: corpusCase.requiresSignoff
+            requiresPostLayoutInputs: corpusCase.requiresPostLayoutInputs
         )
         let siParasitics = try parasitics ?? builder.makeReference(
             path: try resolve(corpusCase.parasiticsPath ?? corpusCase.designPath, rootURL: rootURL),

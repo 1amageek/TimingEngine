@@ -2,7 +2,6 @@ import Foundation
 import LogicIR
 import PDKCore
 import TimingCore
-import DesignFlowKernel
 
 public struct NativeSignalIntegrityEngine: SignalIntegrityFoundationEngine {
     public typealias Request = SignalIntegrityFoundationRequest
@@ -101,7 +100,6 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityFoundationEngine {
                 analyzedModes: modeIDs,
                 analyzedNets: summaries,
                 violations: violations,
-                signoffEligible: provenance.isCompleteForSignalIntegrity,
                 provenance: provenance
             )
             var artifacts: [ArtifactReference] = []

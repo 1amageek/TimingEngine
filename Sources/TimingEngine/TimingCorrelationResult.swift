@@ -5,7 +5,6 @@ public struct TimingCorrelationResult: Sendable, Hashable, Codable {
     public var status: Status
     public var setupSlackDifference: Double?
     public var holdSlackDifference: Double?
-    public var passed: Bool
     public var tolerance: Double
     public var diagnostics: [String]
 
@@ -20,7 +19,6 @@ public struct TimingCorrelationResult: Sendable, Hashable, Codable {
         status: Status,
         setupSlackDifference: Double? = nil,
         holdSlackDifference: Double? = nil,
-        passed: Bool,
         tolerance: Double,
         diagnostics: [String] = []
     ) {
@@ -28,8 +26,18 @@ public struct TimingCorrelationResult: Sendable, Hashable, Codable {
         self.status = status
         self.setupSlackDifference = setupSlackDifference
         self.holdSlackDifference = holdSlackDifference
-        self.passed = passed
         self.tolerance = tolerance
         self.diagnostics = diagnostics
+    }
+
+    public var passed: Bool {
+        guard status == .passed,
+              diagnostics.isEmpty,
+              tolerance.isFinite,
+              tolerance >= 0 else {
+            return false
+        }
+        let differences = [setupSlackDifference, holdSlackDifference].compactMap { $0 }
+        return differences.allSatisfy { $0.isFinite && abs($0) <= tolerance }
     }
 }

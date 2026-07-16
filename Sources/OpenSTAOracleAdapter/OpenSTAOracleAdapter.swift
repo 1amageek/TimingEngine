@@ -23,6 +23,7 @@ struct OpenSTAOracleAdapter {
     private static func execute(arguments: [String]) async throws -> STAExecutionResult {
         let runID = option("--run-id", in: arguments) ?? "opensta-oracle-run"
         let oracleID = option("--oracle-id", in: arguments) ?? "opensta-3.1"
+        let oracleVersion = try required("--oracle-version", in: arguments)
         let staPath = try required("--sta", in: arguments)
         let designPath = try required("--design", in: arguments)
         let libraryPath = try required("--library", in: arguments)
@@ -33,18 +34,48 @@ struct OpenSTAOracleAdapter {
         let cornerID = option("--corner", in: arguments) ?? "default"
         let timeoutSeconds = option("--timeout", in: arguments).flatMap(Double.init) ?? 300
         let spefPath = option("--spef", in: arguments)
+        let workspaceRoot = option("--workspace-root", in: arguments).map {
+            URL(filePath: $0, directoryHint: .isDirectory)
+                .standardizedFileURL.resolvingSymlinksInPath()
+        }
 
         let referenceBuilder = TimingArtifactReferenceBuilder()
-        let designReference = try referenceBuilder.makeReference(
+        let designReference = try makeReference(
             path: designPath,
+            workspaceRoot: workspaceRoot,
+            builder: referenceBuilder,
             kind: .netlist,
             format: designFormat(for: designPath)
         )
-        let libraryReference = try referenceBuilder.makeReference(path: libraryPath, kind: try ArtifactKind(rawValue: "timing.library"), format: .liberty)
-        let constraintReference = try referenceBuilder.makeReference(path: constraintsPath, kind: CircuiteFoundation.ArtifactKind.constraints, format: try ArtifactFormat(rawValue: "sdc"))
-        let pdkReference = try referenceBuilder.makeReference(path: pdkPath, kind: CircuiteFoundation.ArtifactKind.technology, format: .json)
+        let libraryReference = try makeReference(
+            path: libraryPath,
+            workspaceRoot: workspaceRoot,
+            builder: referenceBuilder,
+            kind: try ArtifactKind(rawValue: "timing.library"),
+            format: .liberty
+        )
+        let constraintReference = try makeReference(
+            path: constraintsPath,
+            workspaceRoot: workspaceRoot,
+            builder: referenceBuilder,
+            kind: CircuiteFoundation.ArtifactKind.constraints,
+            format: try ArtifactFormat(rawValue: "sdc")
+        )
+        let pdkReference = try makeReference(
+            path: pdkPath,
+            workspaceRoot: workspaceRoot,
+            builder: referenceBuilder,
+            kind: CircuiteFoundation.ArtifactKind.technology,
+            format: .json
+        )
         let parasiticsReference = try spefPath.map {
-            try referenceBuilder.makeReference(path: $0, kind: CircuiteFoundation.ArtifactKind.parasitics, format: .spef)
+            try makeReference(
+                path: $0,
+                workspaceRoot: workspaceRoot,
+                builder: referenceBuilder,
+                kind: CircuiteFoundation.ArtifactKind.parasitics,
+                format: .spef
+            )
         }
         let provenance = TimingArtifactProvenance(
             designDigest: designReference.digest.hexadecimalValue,
@@ -66,8 +97,10 @@ struct OpenSTAOracleAdapter {
             top: top,
             spefPath: spefPath
         )
-        let scriptReference = try referenceBuilder.makeReference(
+        let scriptReference = try makeReference(
             path: scriptURL.path(percentEncoded: false),
+            workspaceRoot: workspaceRoot,
+            builder: referenceBuilder,
             kind: .evidence,
             format: try ArtifactFormat(rawValue: "tcl")
         )
@@ -75,6 +108,11 @@ struct OpenSTAOracleAdapter {
         process.executableURL = URL(filePath: staPath)
         process.arguments = ["-exit", scriptURL.path(percentEncoded: false)]
         process.currentDirectoryURL = scriptURL.deletingLastPathComponent()
+        let invocation = try ExecutionInvocation.externalProcess(
+            executable: staPath,
+            arguments: process.arguments ?? [],
+            workingDirectory: process.currentDirectoryURL?.path(percentEncoded: false)
+        )
 
         do {
             let processResult = try await TimedProcessRunner(timeoutSeconds: timeoutSeconds).run(process: process)
@@ -83,7 +121,6 @@ struct OpenSTAOracleAdapter {
                 modeID: modeID,
                 cornerID: cornerID,
                 provenance: provenance,
-                hasParasitics: parasiticsReference != nil,
                 timeUnitScale: timeUnitScale
             )
             let diagnostics = diagnostics(from: processResult.standardError)
@@ -100,7 +137,9 @@ struct OpenSTAOracleAdapter {
                     payload: payload,
                     startedAt: startedAt,
                     oracleID: oracleID,
+                    oracleVersion: oracleVersion,
                     inputs: inputs,
+                    invocation: invocation,
                     designRevision: designReference.digest,
                     artifacts: [scriptReference]
                 )
@@ -113,7 +152,9 @@ struct OpenSTAOracleAdapter {
                 payload: payload,
                 startedAt: startedAt,
                 oracleID: oracleID,
+                oracleVersion: oracleVersion,
                 inputs: inputs,
+                invocation: invocation,
                 designRevision: designReference.digest,
                 artifacts: [scriptReference]
             )
@@ -127,14 +168,34 @@ struct OpenSTAOracleAdapter {
                     message: error.localizedDescription,
                     suggestedActions: ["inspect_generated_tcl", "increase_timeout_if_appropriate"]
                 )],
-                payload: emptyPayload(modeID: modeID, cornerID: cornerID, provenance: provenance, hasParasitics: parasiticsReference != nil),
+                payload: emptyPayload(modeID: modeID, cornerID: cornerID, provenance: provenance),
                 startedAt: startedAt,
                 oracleID: oracleID,
+                oracleVersion: oracleVersion,
                 inputs: inputs,
+                invocation: invocation,
                 designRevision: designReference.digest,
                 artifacts: [scriptReference]
             )
         }
+    }
+
+    private static func makeReference(
+        path: String,
+        workspaceRoot: URL?,
+        builder: TimingArtifactReferenceBuilder,
+        kind: ArtifactKind,
+        format: ArtifactFormat
+    ) throws -> ArtifactReference {
+        if let workspaceRoot {
+            return try builder.makeReference(
+                at: URL(filePath: path),
+                relativeTo: workspaceRoot,
+                kind: kind,
+                format: format
+            )
+        }
+        return try builder.makeReference(path: path, kind: kind, format: format)
     }
 
     private static func makePayload(
@@ -142,7 +203,6 @@ struct OpenSTAOracleAdapter {
         modeID: String,
         cornerID: String,
         provenance: TimingArtifactProvenance,
-        hasParasitics: Bool,
         timeUnitScale: Double
     ) -> STAPayload {
         let setup = slackValues(in: stdout, section: "setup")
@@ -152,7 +212,6 @@ struct OpenSTAOracleAdapter {
             worstHoldSlack: hold.min().map { $0 * timeUnitScale },
             analyzedCorners: [cornerID],
             analyzedModes: [modeID],
-            signoffEligible: hasParasitics,
             provenance: provenance
         )
     }
@@ -160,15 +219,13 @@ struct OpenSTAOracleAdapter {
     private static func emptyPayload(
         modeID: String,
         cornerID: String,
-        provenance: TimingArtifactProvenance,
-        hasParasitics: Bool
+        provenance: TimingArtifactProvenance
     ) -> STAPayload {
         STAPayload(
             worstSetupSlack: nil,
             worstHoldSlack: nil,
             analyzedCorners: [cornerID],
             analyzedModes: [modeID],
-            signoffEligible: hasParasitics,
             provenance: provenance
         )
     }
@@ -321,7 +378,9 @@ struct OpenSTAOracleAdapter {
         payload: STAPayload,
         startedAt: Date,
         oracleID: String,
+        oracleVersion: String,
         inputs: [ArtifactReference],
+        invocation: ExecutionInvocation,
         designRevision: ContentDigest?,
         artifacts: [ArtifactReference] = []
     ) throws -> STAExecutionResult {
@@ -333,7 +392,13 @@ struct OpenSTAOracleAdapter {
         )
         let provenance = try ExecutionProvenance(
             producer: producer,
+            supportingTools: [try ProducerIdentity(
+                kind: .tool,
+                identifier: oracleID,
+                version: oracleVersion
+            )],
             inputs: inputs,
+            invocation: invocation,
             designRevision: designRevision,
             startedAt: startedAt,
             completedAt: Date()

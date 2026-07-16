@@ -31,7 +31,6 @@ public struct TimingExternalOracleCorrelator: Sendable {
             status: passed ? .passed : .failed,
             setupSlackDifference: base.setupSlackDifference,
             holdSlackDifference: base.holdSlackDifference,
-            passed: passed,
             tolerance: tolerance,
             diagnostics: diagnostics
         )

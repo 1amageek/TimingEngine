@@ -46,10 +46,10 @@ struct TimingCLI {
             try await runSTA(values)
         case "run-corpus":
             try await runCorpus(values)
-        case "qualify":
-            try runQualification(values)
+        case "assess-evidence":
+            try await runEvidenceAssessment(values)
         case "correlate-oracle":
-            try runOracleCorrelation(values)
+            try await runOracleCorrelation(values)
         case "capabilities":
             try emit(TimingEngineAPI.nativeCapabilities)
         default:
@@ -58,6 +58,10 @@ struct TimingCLI {
     }
 
     private static func runSTA(_ values: [String]) async throws {
+        let workspaceRoot = option("--workspace-root", in: values).map {
+            URL(filePath: $0, directoryHint: .isDirectory)
+                .standardizedFileURL.resolvingSymlinksInPath()
+        }
         let designPath = try requiredPath(values, option: "--design")
         let libraryPath = try requiredPath(values, option: "--library")
         let constraintsPath = try requiredPath(values, option: "--constraints")
@@ -68,10 +72,34 @@ struct TimingCLI {
         let cornerIDs = option("--corner", in: values).map { [$0] } ?? ["default"]
         let outputDirectory = option("--out", in: values).map { URL(filePath: $0) }
         let referenceBuilder = TimingArtifactReferenceBuilder()
-        let designReference = try referenceBuilder.makeReference(path: designPath, kind: CircuiteFoundation.ArtifactKind.netlist, format: format(for: designPath, fallback: .json))
-        let libraryReference = try referenceBuilder.makeReference(path: libraryPath, kind: try ArtifactKind(rawValue: "timing.library"), format: .liberty)
-        let constraintReference = try referenceBuilder.makeReference(path: constraintsPath, kind: CircuiteFoundation.ArtifactKind.constraints, format: try ArtifactFormat(rawValue: "sdc"))
-        let pdkManifestReference = try referenceBuilder.makeReference(path: pdkPath, kind: CircuiteFoundation.ArtifactKind.technology, format: .json)
+        let designReference = try makeReference(
+            path: designPath,
+            workspaceRoot: workspaceRoot,
+            builder: referenceBuilder,
+            kind: CircuiteFoundation.ArtifactKind.netlist,
+            format: format(for: designPath, fallback: .json)
+        )
+        let libraryReference = try makeReference(
+            path: libraryPath,
+            workspaceRoot: workspaceRoot,
+            builder: referenceBuilder,
+            kind: try ArtifactKind(rawValue: "timing.library"),
+            format: .liberty
+        )
+        let constraintReference = try makeReference(
+            path: constraintsPath,
+            workspaceRoot: workspaceRoot,
+            builder: referenceBuilder,
+            kind: CircuiteFoundation.ArtifactKind.constraints,
+            format: try ArtifactFormat(rawValue: "sdc")
+        )
+        let pdkManifestReference = try makeReference(
+            path: pdkPath,
+            workspaceRoot: workspaceRoot,
+            builder: referenceBuilder,
+            kind: CircuiteFoundation.ArtifactKind.technology,
+            format: .json
+        )
         let processID = option("--process", in: values) ?? "unknown"
         let pdkVersion = option("--pdk-version", in: values) ?? "unknown"
         let pdkDigest = try ContentDigest(
@@ -79,7 +107,13 @@ struct TimingCLI {
             hexadecimalValue: option("--pdk-digest", in: values) ?? pdkManifestReference.digest.hexadecimalValue
         )
         let parasitics = try option("--spef", in: values).map {
-            try referenceBuilder.makeReference(path: $0, kind: CircuiteFoundation.ArtifactKind.parasitics, format: .spef)
+            try makeReference(
+                path: $0,
+                workspaceRoot: workspaceRoot,
+                builder: referenceBuilder,
+                kind: CircuiteFoundation.ArtifactKind.parasitics,
+                format: .spef
+            )
         }
         let request = STAFoundationRequest(
             runID: runID,
@@ -95,11 +129,40 @@ struct TimingCLI {
             pdkVersion: pdkVersion,
             pdkDigest: pdkDigest,
             parasitics: parasitics,
-            requiresSignoff: values.contains("--requires-signoff")
+            requiresPostLayoutInputs: values.contains("--requires-post-layout-inputs")
         )
-        let store = outputDirectory.map { FileSystemTimingArtifactStore(outputDirectory: $0) }
-        let result = try await NativeSTAEngine(artifactStore: store, workspaceRoot: nil).execute(request)
+        let store: FileSystemTimingArtifactStore?
+        if let outputDirectory {
+            guard let workspaceRoot else {
+                throw TimingError.invalidInput("--out requires --workspace-root for workspace-relative artifacts.")
+            }
+            store = try FileSystemTimingArtifactStore(
+                workspaceRoot: workspaceRoot,
+                outputDirectory: outputDirectory
+            )
+        } else {
+            store = nil
+        }
+        let result = try await NativeSTAEngine(artifactStore: store, workspaceRoot: workspaceRoot).execute(request)
         try emit(result)
+    }
+
+    private static func makeReference(
+        path: String,
+        workspaceRoot: URL?,
+        builder: TimingArtifactReferenceBuilder,
+        kind: ArtifactKind,
+        format: ArtifactFormat
+    ) throws -> ArtifactReference {
+        if let workspaceRoot {
+            return try builder.makeReference(
+                at: URL(filePath: path),
+                relativeTo: workspaceRoot,
+                kind: kind,
+                format: format
+            )
+        }
+        return try builder.makeReference(path: path, kind: kind, format: format)
     }
 
     private static func runCorpus(_ values: [String]) async throws {
@@ -133,9 +196,17 @@ struct TimingCLI {
         try emit(report)
     }
 
-    private static func runQualification(_ values: [String]) throws {
+    private static func runEvidenceAssessment(_ values: [String]) async throws {
+        let workspaceRoot = URL(
+            filePath: try requiredPath(values, option: "--workspace-root"),
+            directoryHint: .isDirectory
+        ).standardizedFileURL.resolvingSymlinksInPath()
         let corpusPath = try requiredPath(values, option: "--corpus-report")
         let pdkPath = try requiredPath(values, option: "--pdk-manifest")
+        let correlationPath = try requiredPath(values, option: "--correlation-report")
+        let oraclePath = try requiredPath(values, option: "--oracle-path")
+        let oracleID = try requiredPath(values, option: "--oracle-id")
+        let oracleVersion = try requiredPath(values, option: "--oracle-version")
         let corpusData = try read(path: corpusPath)
         let corpus: TimingCorpusReport
         do {
@@ -144,7 +215,8 @@ struct TimingCLI {
             throw TimingError.parseFailure(format: "Timing corpus report", line: 1, message: error.localizedDescription)
         }
         let pdkManifest = try TimingArtifactReferenceBuilder().makeReference(
-            path: pdkPath,
+            at: URL(filePath: pdkPath),
+            relativeTo: workspaceRoot,
             kind: CircuiteFoundation.ArtifactKind.technology,
             format: .json
         )
@@ -158,40 +230,37 @@ struct TimingCLI {
             version: option("--pdk-version", in: values) ?? "unknown",
             digest: pdkDigest
         )
-        let pdkEvidence = try LocalTimingPDKQualificationEvidenceBuilder().build(for: pdk)
-        let externalOracle: TimingExternalOracleEvidence
-        if let oraclePath = option("--oracle-path", in: values) {
-            externalOracle = TimingExternalOracleEvidence(
-                oracleID: option("--oracle-id", in: values) ?? "external-digital-sta",
-                status: FileManager.default.isExecutableFile(atPath: oraclePath) ? .available : .unavailable,
-                executablePath: oraclePath,
-                details: FileManager.default.isExecutableFile(atPath: oraclePath)
-                    ? "The configured external executable exists; command version and correlation artifacts are still required."
-                    : "The configured external executable is not executable."
-            )
-        } else {
-            externalOracle = TimingExternalOracleProbe().probe(
-                oracleID: option("--oracle-id", in: values) ?? "external-digital-sta"
-            )
-        }
+        let pdkEvidence = try LocalTimingPDKEvidenceBuilder(
+            workspaceRoot: workspaceRoot
+        ).build(for: pdk)
+        let externalOracle = TimingExternalOracleEvidence(
+            oracleID: oracleID,
+            status: FileManager.default.isExecutableFile(atPath: oraclePath) ? .available : .unavailable,
+            executablePath: oraclePath,
+            version: oracleVersion,
+            details: FileManager.default.isExecutableFile(atPath: oraclePath)
+                ? "The configured external executable is retained by the correlation evidence."
+                : "The configured external executable is not executable."
+        )
         let modeIDs = option("--mode", in: values).map { [$0] } ?? []
         let cornerIDs = option("--corner", in: values).map { [$0] } ?? []
-        let externalCorrelation = try option("--correlation-report", in: values).map { path in
-            let data = try read(path: path)
-            do {
-                return try JSONDecoder().decode(TimingCorrelationResult.self, from: data)
-            } catch {
-                throw TimingError.parseFailure(format: "Timing correlation report", line: 1, message: error.localizedDescription)
-            }
-        }
-        let report = TimingQualificationEvaluator().evaluate(
+        let externalCorrelation = try decodeExternalCorrelation(path: correlationPath)
+        try await LocalTimingExternalCorrelationVerifier().verify(
+            externalCorrelation,
+            corpus: corpus,
+            pdk: pdk,
+            externalOracle: externalOracle,
+            workspaceRoot: workspaceRoot
+        )
+        let report = await TimingEvidenceEvaluator().evaluate(
             corpus: corpus,
             pdk: pdk,
             modeIDs: modeIDs,
             cornerIDs: cornerIDs,
             externalOracle: externalOracle,
             externalCorrelation: externalCorrelation,
-            pdkEvidence: pdkEvidence
+            pdkEvidence: pdkEvidence,
+            workspaceRoot: workspaceRoot
         )
         if let outputPath = option("--out", in: values) {
             let encoder = JSONEncoder()
@@ -208,18 +277,58 @@ struct TimingCLI {
         try emit(report)
     }
 
-    private static func runOracleCorrelation(_ values: [String]) throws {
+    private static func runOracleCorrelation(_ values: [String]) async throws {
+        let workspaceRoot = URL(
+            filePath: try requiredPath(values, option: "--workspace-root"),
+            directoryHint: .isDirectory
+        ).standardizedFileURL.resolvingSymlinksInPath()
         let nativePath = try requiredPath(values, option: "--native-report")
         let oraclePath = try requiredPath(values, option: "--oracle-report")
+        let corpusPath = try requiredPath(values, option: "--corpus-report")
+        let pdkPath = try requiredPath(values, option: "--pdk-manifest")
+        let processID = try requiredPath(values, option: "--process")
+        let pdkVersion = try requiredPath(values, option: "--pdk-version")
+        let oracleID = try requiredPath(values, option: "--oracle-id")
+        let oracleVersion = try requiredPath(values, option: "--oracle-version")
+        let oracleExecutablePath = try requiredPath(values, option: "--oracle-path")
         let native = try decodeSTAReport(path: nativePath)
         let oracle = try decodeSTAReport(path: oraclePath)
+        let corpus: TimingCorpusReport
+        do {
+            corpus = try JSONDecoder().decode(TimingCorpusReport.self, from: read(path: corpusPath))
+        } catch {
+            throw TimingError.parseFailure(format: "Timing corpus report", line: 1, message: error.localizedDescription)
+        }
+        let pdkManifest = try TimingArtifactReferenceBuilder().makeReference(
+            at: URL(filePath: pdkPath),
+            relativeTo: workspaceRoot,
+            kind: CircuiteFoundation.ArtifactKind.technology,
+            format: .json
+        )
+        let pdk = try TimingPDKReference(
+            manifest: pdkManifest,
+            processID: processID,
+            version: pdkVersion,
+            digest: pdkManifest.digest
+        )
+        let pdkEvidence = try LocalTimingPDKEvidenceBuilder(
+            workspaceRoot: workspaceRoot
+        ).build(for: pdk)
+        guard pdkEvidence.isComplete else {
+            throw TimingError.invalidInput("PDK evidence must be complete before external correlation is retained.")
+        }
+        let matchingTools = oracle.evidence.provenance.supportingTools.filter {
+            $0.identifier == oracleID && $0.version == oracleVersion
+        }
+        guard matchingTools.count == 1, let oracleTool = matchingTools.first else {
+            throw TimingError.invalidInput("Oracle result does not retain the requested tool identity and version.")
+        }
         let tolerance = option("--tolerance", in: values).flatMap(Double.init) ?? 1e-15
         let result: TimingCorrelationResult
         if oracle.status != .completed {
             result = TimingCorrelationResult(
-                oracleID: option("--oracle-id", in: values) ?? "external-digital-sta",
+                oracleID: oracleID,
                 status: .blocked,
-                passed: false,
                 tolerance: tolerance,
                 diagnostics: ["external_oracle_result_not_completed"]
             )
@@ -227,13 +336,67 @@ struct TimingCLI {
             result = TimingExternalOracleCorrelator(tolerance: tolerance).compare(
                 native: native.payload,
                 external: oracle.payload,
-                oracleID: option("--oracle-id", in: values) ?? "external-digital-sta"
+                oracleID: oracleID
             )
         }
+        let referenceBuilder = TimingArtifactReferenceBuilder()
+        let corpusEvidenceArtifact = try referenceBuilder.makeReference(
+            at: URL(filePath: corpusPath),
+            relativeTo: workspaceRoot,
+            kind: .report,
+            format: .json
+        )
+        let report = TimingExternalCorrelationReport(
+            processID: processID,
+            pdkVersion: pdkVersion,
+            pdkManifestDigest: pdkEvidence.manifestDigest,
+            corpusEvidenceDigest: try TimingEvidenceHasher().hash(corpus),
+            pdkManifestArtifact: pdkManifest,
+            corpusEvidenceArtifact: corpusEvidenceArtifact,
+            nativeEngine: native.evidence.provenance.producer,
+            oracleTool: oracleTool,
+            oracleExecutableArtifact: try referenceBuilder.makeReference(
+                at: URL(filePath: oracleExecutablePath),
+                relativeTo: workspaceRoot,
+                kind: try ArtifactKind(rawValue: "tool.executable"),
+                format: try ArtifactFormat(rawValue: "binary")
+            ),
+            inputArtifacts: native.evidence.provenance.inputs,
+            nativeOutputArtifact: try referenceBuilder.makeReference(
+                at: URL(filePath: nativePath),
+                relativeTo: workspaceRoot,
+                role: .output,
+                kind: .report,
+                format: .json
+            ),
+            oracleOutputArtifact: try referenceBuilder.makeReference(
+                at: URL(filePath: oraclePath),
+                relativeTo: workspaceRoot,
+                role: .output,
+                kind: .report,
+                format: .json
+            ),
+            correlation: result
+        )
+        try await LocalTimingExternalCorrelationVerifier().verify(
+            report,
+            corpus: corpus,
+            pdk: pdk,
+            externalOracle: TimingExternalOracleEvidence(
+                oracleID: oracleID,
+                status: FileManager.default.isExecutableFile(atPath: oracleExecutablePath)
+                    ? .available
+                    : .unavailable,
+                executablePath: oracleExecutablePath,
+                version: oracleVersion,
+                details: "Oracle selected for retained correlation."
+            ),
+            workspaceRoot: workspaceRoot
+        )
         if let outputPath = option("--out", in: values) {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(result)
+            let data = try encoder.encode(report)
             let url = URL(filePath: outputPath)
             do {
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -242,26 +405,34 @@ struct TimingCLI {
                 throw TimingError.artifactWriteFailed(path: outputPath, message: error.localizedDescription)
             }
         }
-        try emit(result)
+        try emit(report)
     }
 
-    private struct DecodedSTAReport {
-        var status: TimingExecutionStatus
-        var payload: STAPayload
-    }
-
-    private static func decodeSTAReport(path: String) throws -> DecodedSTAReport {
+    private static func decodeSTAReport(path: String) throws -> STAExecutionResult {
         let data = try read(path: path)
         do {
-            let result = try JSONDecoder().decode(STAExecutionResult.self, from: data)
-            return DecodedSTAReport(status: result.status, payload: result.payload)
-        } catch let envelopeError {
-            do {
-                let payload = try JSONDecoder().decode(STAPayload.self, from: data)
-                return DecodedSTAReport(status: .completed, payload: payload)
-            } catch {
-                throw TimingError.parseFailure(format: "STA report", line: 1, message: envelopeError.localizedDescription)
-            }
+            return try JSONDecoder().decode(STAExecutionResult.self, from: data)
+        } catch {
+            throw TimingError.parseFailure(format: "STA execution result", line: 1, message: error.localizedDescription)
+        }
+    }
+
+    private static func decodeExternalCorrelation(path: String) throws -> TimingExternalCorrelationReport {
+        do {
+            let report = try JSONDecoder().decode(
+                TimingExternalCorrelationReport.self,
+                from: read(path: path)
+            )
+            try report.validateStructure()
+            return report
+        } catch let error as TimingError {
+            throw error
+        } catch {
+            throw TimingError.parseFailure(
+                format: "Timing external correlation report",
+                line: 1,
+                message: error.localizedDescription
+            )
         }
     }
 
@@ -303,5 +474,5 @@ struct TimingCLI {
         print(String(decoding: data, as: UTF8.self))
     }
 
-    private static let usage = "Usage: timingengine <parse-liberty|parse-sdc|parse-spef|parse-sdf|inspect-design|run-sta|run-corpus|qualify|correlate-oracle|capabilities> ..."
+    private static let usage = "Usage: timingengine <parse-liberty|parse-sdc|parse-spef|parse-sdf|inspect-design|run-sta|run-corpus|assess-evidence|correlate-oracle|capabilities> ..."
 }

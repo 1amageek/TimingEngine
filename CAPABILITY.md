@@ -1,29 +1,25 @@
-# TimingEngine capability and limitation report
+# TimingEngine Capability and Limitation Report
 
 ## Native capabilities
 
-| Area | Implemented behavior | Result evidence |
+| Area | Implemented behavior | Evidence |
 |---|---|---|
-| Liberty | Parses library units, operating conditions, pins, NLDM delay/transition tables, unate arcs, sequential timing constraints and cell power metadata | `LibertyParser`, parser tests |
-| SDC | Parses clocks, generated clocks, input/output delays, uncertainty, false paths, multicycle paths, path groups, clock groups and max/min path constraints | `SDCParser`, parser tests |
-| Design graph | Loads canonical JSON IR and a deterministic structural Verilog subset | `TimingDesignParser` |
-| MMMC STA | Expands requested modes/corners, propagates rise/fall arrival and slew, evaluates setup/hold and sequential checks | `NativeSTAEngine`, native STA tests |
-| Variation | Applies declared early/late cell and interconnect derates | `STAVariation`, native backend |
-| SI | Parses SPEF ground/coupling capacitance and resistance, computes delta delay and noise ratio | `NativeSignalIntegrityEngine`, SI tests |
-| SDF | Imports and exports cell I/O delay annotations | `SDFParser`, `SDFWriter`, round-trip test |
-| Developer surface | Typed API, deterministic JSON CLI, positive and negative fixtures, structured diagnostics | `timingengine`, tests |
-| Evidence | Manifest-driven retained corpus, blocked/negative cases, provenance-bound results and replay report | `Corpus/timing-corpus.json`, `LocalTimingCorpusRunner` |
-| Correlation | Independent scalar reference analyzer plus external-process Foundation-result adapter with explicit metric, mode, corner and provenance checks | `TimingReferenceAnalyzer`, `TimingExternalOracleCorrelator`, `LocalTimingExternalOracleRunner` |
-| Qualification | PDK manifest validation, required-asset digest evidence, corner/mode matrix and corpus/oracle gate | `LocalTimingPDKQualificationEvidenceBuilder`, `TimingQualificationEvaluator`, `TimingQualificationReport` |
-| Xcircuite | Headless `timing.sta` and `timing.signal-integrity` adapters with digest verification and result artifact persistence | `TimingSTAFlowStageExecutor`, `TimingSIFlowStageExecutor` |
-| CircuiteFoundation | Foundation-native STA/SI requests and results with verified artifact references, execution evidence and typed diagnostics | `STAFoundationEngine`, `SignalIntegrityFoundationEngine`, `STAExecutionResult`, `SignalIntegrityExecutionResult` |
+| Liberty | Units, operating conditions, pins, NLDM tables, unate arcs, sequential constraints and power metadata | Parser and native-engine tests |
+| SDC | Clocks, IO delays, uncertainty, exceptions, path groups and clock groups | Parser tests |
+| Design graph | Canonical JSON IR and deterministic structural Verilog subset | `TimingDesignParser` |
+| MMMC STA | Requested mode/corner expansion, rise/fall propagation and setup/hold checks | `NativeSTAEngine` |
+| Variation | Declared early/late cell and interconnect derates | Native STA tests |
+| Signal integrity | SPEF coupling delta delay and noise ratio | `NativeSignalIntegrityEngine` |
+| SDF | Import/export of cell I/O delay annotations | Round-trip tests |
+| Evidence | Retained corpus, provenance-bound results and workspace-relative correlation artifacts | Corpus tests |
+| Correlation | Independent reference and bounded external OpenSTA execution with metric/provenance reconstruction | Correlation tests |
+| Assessment | Derived pass/blocked/failed observation without production promotion | `TimingEvidenceAssessment` |
 
 ## Explicit limitations
 
-- Liberty support is a deterministic signoff-oriented subset; uncommon table templates and vendor-specific attributes are blocked with a typed diagnostic.
-- The native STA backend is not process-qualified and does not claim foundry signoff.
-- Statistical OCV, AOCV/POCV correlation, waveform-resolved crosstalk noise and CCS/ECSM remain outside the native subset.
-- The independent scalar reference oracle is implemented for the retained subset; no external digital STA executable is available locally, so external correlation and process qualification remain blocked.
-- External oracle execution accepts a fixed executable path and argument array, enforces a request timeout with process-tree cleanup, validates the returned run ID, and requires a completed canonical `STAExecutionResult` on stdout. Obsolete result schemas are rejected; availability is not treated as correlation evidence.
-- Qualification remains a separate ToolQualification evidence state and must be established per PDK/process/corner.
-- TimingEngine has no compatibility envelope or adapter boundary. The service, corpus, CLI and OpenSTA paths all exchange Foundation-native requests and results.
+- Liberty support is a deterministic subset; unsupported templates and vendor attributes are blocked.
+- Statistical OCV, AOCV/POCV correlation, waveform-resolved noise and CCS/ECSM are not implemented.
+- The retained Sky130A profile is narrow and does not establish foundry signoff equivalence.
+- Ideal-interconnect results cannot satisfy post-layout signoff requirements.
+- OpenSTA availability alone is not correlation evidence.
+- TimingEngine does not qualify itself. ToolQualification must validate raw process evidence, and DesignFlowKernel must apply promotion policy.

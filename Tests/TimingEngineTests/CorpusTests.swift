@@ -44,8 +44,37 @@ struct CorpusTests {
         #expect(reference.byteCount > 0)
     }
 
-    @Test("qualification blocks when an external oracle is unavailable")
-    func qualificationRequiresExternalOracle() async throws {
+    @Test("checked-in Sky130A profile remains blocked without the exact external Liberty artifact")
+    func sky130ProfileRequiresRetainedLiberty() throws {
+        let packageRoot = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let profileRoot = packageRoot.appending(path: "Qualification/sky130A")
+        let manifestURL = profileRoot.appending(path: "pdk.json")
+        let manifestReference = try TimingArtifactReferenceBuilder().makeReference(
+            at: manifestURL,
+            relativeTo: profileRoot,
+            kind: .technology,
+            format: .json
+        )
+        let pdk = try TimingPDKReference(
+            manifest: manifestReference,
+            processID: "sky130A",
+            version: "c6d73a35f524070e85faff4a6a9eef49553ebc2b",
+            digest: manifestReference.digest
+        )
+        let evidence = try LocalTimingPDKEvidenceBuilder(
+            workspaceRoot: profileRoot
+        ).build(for: pdk)
+
+        #expect(!evidence.isComplete)
+        #expect(evidence.findings.contains("pdk_required_asset_missing:sky130_fd_sc_hd_tt_liberty"))
+        #expect(evidence.assets.first?.present == false)
+    }
+
+    @Test("evidence assessment blocks when an external oracle is unavailable")
+    func evidenceAssessmentRequiresExternalOracle() async throws {
         let packageRoot = URL(filePath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -73,10 +102,10 @@ struct CorpusTests {
             version: "1",
             digest: pdkReference.digest
         )
-        let pdkEvidence = try LocalTimingPDKQualificationEvidenceBuilder(
+        let pdkEvidence = try LocalTimingPDKEvidenceBuilder(
             workspaceRoot: corpusRoot
         ).build(for: pdk)
-        let report = TimingQualificationEvaluator().evaluate(
+        let report = await TimingEvidenceEvaluator().evaluate(
             corpus: corpus,
             pdk: pdk,
             modeIDs: ["functional"],
@@ -86,15 +115,16 @@ struct CorpusTests {
                 status: .unavailable,
                 details: "test fixture"
             ),
-            pdkEvidence: pdkEvidence
+            pdkEvidence: pdkEvidence,
+            workspaceRoot: corpusRoot
         )
-        #expect(report.decision == TimingQualificationReport.Decision.blocked)
+        #expect(report.outcome == .blocked)
         #expect(report.findings.contains("external_sta_oracle_unavailable"))
         #expect(report.corpusEvidenceDigest?.count == 64)
         #expect(report.pdkManifestDigest?.count == 64)
         #expect(report.pdkEvidence?.isComplete == true)
 
-        let availableWithoutCorrelation = TimingQualificationEvaluator().evaluate(
+        let availableWithoutCorrelation = await TimingEvidenceEvaluator().evaluate(
             corpus: corpus,
             pdk: pdk,
             modeIDs: ["functional"],
@@ -106,10 +136,313 @@ struct CorpusTests {
                 details: "test fixture"
             ),
             externalCorrelation: nil,
-            pdkEvidence: pdkEvidence
+            pdkEvidence: pdkEvidence,
+            workspaceRoot: corpusRoot
         )
-        #expect(availableWithoutCorrelation.decision == TimingQualificationReport.Decision.blocked)
+        #expect(availableWithoutCorrelation.outcome == .blocked)
         #expect(availableWithoutCorrelation.findings.contains("external_oracle_correlation_missing"))
+
+        let encoded = try JSONEncoder().encode(availableWithoutCorrelation)
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object["outcome"] = "passed"
+        let tampered = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        let decoded = try JSONDecoder().decode(TimingEvidenceAssessment.self, from: tampered)
+        #expect(decoded.outcome == .blocked)
+
+        object["schemaVersion"] = 1
+        let obsolete = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TimingEvidenceAssessment.self, from: obsolete)
+        }
+
+        let pdkData = try JSONEncoder().encode(pdkEvidence)
+        var pdkObject = try #require(JSONSerialization.jsonObject(with: pdkData) as? [String: Any])
+        pdkObject["isComplete"] = false
+        let injectedPDK = try JSONSerialization.data(withJSONObject: pdkObject, options: [.sortedKeys])
+        let decodedPDK = try JSONDecoder().decode(TimingPDKEvidence.self, from: injectedPDK)
+        #expect(decodedPDK.isComplete)
+    }
+
+    @Test("workspace-relative artifact construction rejects a symlink escape")
+    func workspaceArtifactRejectsSymlinkEscape() throws {
+        let parent = FileManager.default.temporaryDirectory.appending(
+            path: "timing-workspace-boundary-\(UUID().uuidString)"
+        )
+        let root = parent.appending(path: "workspace")
+        let outside = parent.appending(path: "outside.json")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            do {
+                try FileManager.default.removeItem(at: parent)
+            } catch {
+                Issue.record("Failed to remove timing workspace boundary fixture: \(error)")
+            }
+        }
+        try Data("outside".utf8).write(to: outside, options: .atomic)
+        let link = root.appending(path: "escaped.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+
+        #expect(throws: TimingError.self) {
+            try TimingArtifactReferenceBuilder().makeReference(
+                at: link,
+                relativeTo: root,
+                kind: .evidence,
+                format: .json
+            )
+        }
+    }
+
+    @Test("evidence assessment cross-binds external correlation to PDK, corpus, tool, and artifacts")
+    func evidenceAssessmentBindsExternalCorrelationEvidence() async throws {
+        let packageRoot = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let corpusRoot = packageRoot.appending(path: "Corpus")
+        let manifest = try JSONDecoder().decode(
+            TimingCorpusManifest.self,
+            from: Data(contentsOf: packageRoot.appending(path: "Corpus/timing-corpus.json"))
+        )
+        let corpus = try await LocalTimingCorpusRunner().execute(
+            manifest: manifest,
+            rootURL: corpusRoot,
+            runID: "bound-correlation"
+        )
+        let workspaceRoot = FileManager.default.temporaryDirectory.appending(
+            path: "timing-bound-correlation-\(UUID().uuidString)"
+        )
+        try FileManager.default.createDirectory(at: workspaceRoot, withIntermediateDirectories: true)
+        defer {
+            do {
+                try FileManager.default.removeItem(at: workspaceRoot)
+            } catch {
+                Issue.record("Failed to remove timing correlation workspace: \(error)")
+            }
+        }
+        let fixtureDirectory = workspaceRoot.appending(path: "fixtures/simple")
+        try FileManager.default.createDirectory(
+            at: fixtureDirectory.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.copyItem(
+            at: corpusRoot.appending(path: "fixtures/simple"),
+            to: fixtureDirectory
+        )
+        let executableDirectory = workspaceRoot.appending(path: "tools")
+        try FileManager.default.createDirectory(at: executableDirectory, withIntermediateDirectories: true)
+        let executableURL = executableDirectory.appending(path: "true")
+        try FileManager.default.copyItem(at: URL(filePath: "/usr/bin/true"), to: executableURL)
+        let executablePath = executableURL.path(percentEncoded: false)
+        let pdkReference = try TimingArtifactReferenceBuilder().makeReference(
+            at: fixtureDirectory.appending(path: "pdk.json"),
+            relativeTo: workspaceRoot,
+            kind: CircuiteFoundation.ArtifactKind.technology,
+            format: .json
+        )
+        let pdk = try TimingPDKReference(
+            manifest: pdkReference,
+            processID: "fixture-process",
+            version: "1",
+            digest: pdkReference.digest
+        )
+        let pdkEvidence = try LocalTimingPDKEvidenceBuilder(
+            workspaceRoot: workspaceRoot
+        ).build(for: pdk)
+        let oracleTool = try ProducerIdentity(
+            kind: .tool,
+            identifier: "fixture-oracle",
+            version: "1"
+        )
+        let nativeEngine = try ProducerIdentity(
+            kind: .engine,
+            identifier: "timing.sta",
+            version: "1"
+        )
+        let oracleAdapter = try ProducerIdentity(
+            kind: .tool,
+            identifier: "timing.sta.external",
+            version: "1"
+        )
+        let executableArtifact = try TimingArtifactReferenceBuilder().makeReference(
+            at: executableURL,
+            relativeTo: workspaceRoot,
+            kind: try ArtifactKind(rawValue: "tool.executable"),
+            format: try ArtifactFormat(rawValue: "binary")
+        )
+        let evidenceDirectory = workspaceRoot.appending(path: "evidence")
+        let outputDirectory = workspaceRoot.appending(path: "outputs")
+        try FileManager.default.createDirectory(at: evidenceDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        let corpusURL = evidenceDirectory.appending(path: "corpus.json")
+        let corpusData = try JSONEncoder().encode(corpus)
+        try corpusData.write(to: corpusURL, options: .atomic)
+        let corpusArtifact = try TimingArtifactReferenceBuilder().makeReference(
+            at: corpusURL,
+            relativeTo: workspaceRoot,
+            kind: .report,
+            format: .json
+        )
+        let payload = STAPayload(
+            worstSetupSlack: 1e-9,
+            worstHoldSlack: 2e-9,
+            analyzedCorners: ["typical"],
+            analyzedModes: ["functional"],
+            provenance: TimingArtifactProvenance(pdkDigest: pdkReference.digest.hexadecimalValue)
+        )
+        let now = Date(timeIntervalSince1970: 1)
+        let native = STAExecutionResult(
+            runID: "native-correlation",
+            status: .completed,
+            payload: payload,
+            provenance: try ExecutionProvenance(
+                producer: nativeEngine,
+                inputs: [pdkReference],
+                startedAt: now,
+                completedAt: now
+            )
+        )
+        let oracle = STAExecutionResult(
+            runID: "oracle-correlation",
+            status: .completed,
+            payload: payload,
+            provenance: try ExecutionProvenance(
+                producer: oracleAdapter,
+                supportingTools: [oracleTool],
+                inputs: [pdkReference],
+                invocation: try ExecutionInvocation.externalProcess(executable: executablePath),
+                startedAt: now,
+                completedAt: now
+            )
+        )
+        let nativeURL = outputDirectory.appending(path: "native.json")
+        let oracleURL = outputDirectory.appending(path: "oracle.json")
+        try JSONEncoder().encode(native).write(to: nativeURL, options: .atomic)
+        try JSONEncoder().encode(oracle).write(to: oracleURL, options: .atomic)
+        let nativeOutput = try TimingArtifactReferenceBuilder().makeReference(
+            at: nativeURL,
+            relativeTo: workspaceRoot,
+            role: .output,
+            kind: .report,
+            format: .json
+        )
+        let oracleOutput = try TimingArtifactReferenceBuilder().makeReference(
+            at: oracleURL,
+            relativeTo: workspaceRoot,
+            role: .output,
+            kind: .report,
+            format: .json
+        )
+        let correlation = TimingExternalCorrelationReport(
+            processID: pdk.processID,
+            pdkVersion: pdk.version,
+            pdkManifestDigest: pdkEvidence.manifestDigest,
+            corpusEvidenceDigest: try TimingEvidenceHasher().hash(corpus),
+            pdkManifestArtifact: pdkReference,
+            corpusEvidenceArtifact: corpusArtifact,
+            nativeEngine: nativeEngine,
+            oracleTool: oracleTool,
+            oracleExecutableArtifact: executableArtifact,
+            inputArtifacts: [pdkReference],
+            nativeOutputArtifact: nativeOutput,
+            oracleOutputArtifact: oracleOutput,
+            correlation: TimingExternalOracleCorrelator().compare(
+                native: payload,
+                external: payload,
+                oracleID: oracleTool.identifier
+            )
+        )
+        let evaluator = TimingEvidenceEvaluator()
+        let passed = await evaluator.evaluate(
+            corpus: corpus,
+            pdk: pdk,
+            modeIDs: ["functional"],
+            cornerIDs: ["typical"],
+            externalOracle: TimingExternalOracleEvidence(
+                oracleID: oracleTool.identifier,
+                status: .available,
+                executablePath: executablePath,
+                version: oracleTool.version,
+                details: "retained fixture"
+            ),
+            externalCorrelation: correlation,
+            pdkEvidence: pdkEvidence,
+            workspaceRoot: workspaceRoot
+        )
+        #expect(passed.outcome == .passed)
+
+        var unrelated = correlation
+        unrelated.corpusEvidenceDigest = String(repeating: "0", count: 64)
+        let blocked = await evaluator.evaluate(
+            corpus: corpus,
+            pdk: pdk,
+            modeIDs: ["functional"],
+            cornerIDs: ["typical"],
+            externalOracle: TimingExternalOracleEvidence(
+                oracleID: oracleTool.identifier,
+                status: .available,
+                executablePath: executablePath,
+                version: oracleTool.version,
+                details: "retained fixture"
+            ),
+            externalCorrelation: unrelated,
+            pdkEvidence: pdkEvidence,
+            workspaceRoot: workspaceRoot
+        )
+        #expect(blocked.outcome == .blocked)
+        #expect(blocked.findings.contains("external_correlation_corpus_digest_mismatch"))
+
+        try Data("tampered-corpus-output".utf8).write(to: corpusURL, options: .atomic)
+        let tamperedCorpus = await evaluator.evaluate(
+            corpus: corpus,
+            pdk: pdk,
+            modeIDs: ["functional"],
+            cornerIDs: ["typical"],
+            externalOracle: TimingExternalOracleEvidence(
+                oracleID: oracleTool.identifier,
+                status: .available,
+                executablePath: executablePath,
+                version: oracleTool.version,
+                details: "retained fixture"
+            ),
+            externalCorrelation: correlation,
+            pdkEvidence: pdkEvidence,
+            workspaceRoot: workspaceRoot
+        )
+        #expect(tamperedCorpus.outcome == .blocked)
+        #expect(tamperedCorpus.findings.contains("external_oracle_correlation_invalid"))
+        try corpusData.write(to: corpusURL, options: .atomic)
+
+        try Data("tampered-oracle-output".utf8).write(to: oracleURL, options: .atomic)
+        let tampered = await evaluator.evaluate(
+            corpus: corpus,
+            pdk: pdk,
+            modeIDs: ["functional"],
+            cornerIDs: ["typical"],
+            externalOracle: TimingExternalOracleEvidence(
+                oracleID: oracleTool.identifier,
+                status: .available,
+                executablePath: executablePath,
+                version: oracleTool.version,
+                details: "retained fixture"
+            ),
+            externalCorrelation: correlation,
+            pdkEvidence: pdkEvidence,
+            workspaceRoot: workspaceRoot
+        )
+        #expect(tampered.outcome == .blocked)
+        #expect(tampered.findings.contains("external_oracle_correlation_invalid"))
+    }
+
+    @Test("external correlation evidence rejects an unbound metric-only JSON")
+    func externalCorrelationRejectsUnboundJSON() throws {
+        let unbound = try JSONEncoder().encode(TimingCorrelationResult(
+            oracleID: "fixture-oracle",
+            status: .passed,
+            tolerance: 1e-15
+        ))
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TimingExternalCorrelationReport.self, from: unbound)
+        }
     }
 
     @Test("external oracle correlation checks metrics and provenance")
@@ -126,7 +459,6 @@ struct CorpusTests {
             worstHoldSlack: 2e-9,
             analyzedCorners: ["typical"],
             analyzedModes: ["functional"],
-            signoffEligible: true,
             provenance: provenance
         )
         let external = STAPayload(
@@ -134,7 +466,6 @@ struct CorpusTests {
             worstHoldSlack: 2e-9,
             analyzedCorners: ["typical"],
             analyzedModes: ["functional"],
-            signoffEligible: true,
             provenance: provenance
         )
         let matched = TimingExternalOracleCorrelator().compare(

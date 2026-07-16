@@ -4,14 +4,14 @@ import Foundation
 import PDKCore
 import TimingCore
 
-public struct LocalTimingPDKQualificationEvidenceBuilder: TimingPDKQualificationEvidenceBuilding {
+public struct LocalTimingPDKEvidenceBuilder: TimingPDKEvidenceBuilding {
     public let workspaceRoot: URL?
 
     public init(workspaceRoot: URL? = nil) {
         self.workspaceRoot = workspaceRoot?.standardizedFileURL
     }
 
-    public func build(for pdk: TimingPDKReference) throws -> TimingPDKQualificationEvidence {
+    public func build(for pdk: TimingPDKReference) throws -> TimingPDKEvidence {
         let manifestURL: URL
         do {
             manifestURL = try pdk.manifest.locator.location.resolvedFileURL(
@@ -116,18 +116,13 @@ public struct LocalTimingPDKQualificationEvidenceBuilder: TimingPDKQualification
             ))
         }
 
-        let blockingFindings = findings.filter {
-            !$0.hasPrefix("pdk_optional_asset_missing:")
-        }
-        return TimingPDKQualificationEvidence(
+        return TimingPDKEvidence(
             processID: manifest.processID,
             version: manifest.version,
             manifestDigest: manifestDigest,
-            manifestIsValid: manifestReport.isValid,
             cornerIDs: manifest.corners.map(\.cornerID).sorted(),
             assets: assets,
-            findings: findings,
-            isComplete: blockingFindings.isEmpty && assets.filter(\.required).allSatisfy(\.isVerified)
+            findings: findings
         )
     }
 

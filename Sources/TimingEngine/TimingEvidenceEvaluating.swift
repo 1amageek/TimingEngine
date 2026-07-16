@@ -1,12 +1,13 @@
 import Foundation
 
-public protocol TimingQualificationEvaluating: Sendable {
+public protocol TimingEvidenceEvaluating: Sendable {
     func evaluate(
         corpus: TimingCorpusReport,
         pdk: TimingPDKReference,
         modeIDs: [String],
         cornerIDs: [String],
         externalOracle: TimingExternalOracleEvidence,
-        pdkEvidence: TimingPDKQualificationEvidence?
-    ) -> TimingQualificationReport
+        pdkEvidence: TimingPDKEvidence?,
+        workspaceRoot: URL
+    ) async -> TimingEvidenceAssessment
 }

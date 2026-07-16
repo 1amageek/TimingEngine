@@ -22,7 +22,7 @@ public struct TimingCorpusCase: Sendable, Hashable, Codable {
     public var parasiticsPath: String?
     public var modeIDs: [String]
     public var cornerIDs: [String]
-    public var requiresSignoff: Bool
+    public var requiresPostLayoutInputs: Bool
     public var expectedWorstSetupSlack: Double?
     public var expectedWorstHoldSlack: Double?
 
@@ -43,7 +43,7 @@ public struct TimingCorpusCase: Sendable, Hashable, Codable {
         parasiticsPath: String? = nil,
         modeIDs: [String] = [],
         cornerIDs: [String] = [],
-        requiresSignoff: Bool = false,
+        requiresPostLayoutInputs: Bool = false,
         expectedWorstSetupSlack: Double? = nil,
         expectedWorstHoldSlack: Double? = nil
     ) {
@@ -63,7 +63,7 @@ public struct TimingCorpusCase: Sendable, Hashable, Codable {
         self.parasiticsPath = parasiticsPath
         self.modeIDs = modeIDs
         self.cornerIDs = cornerIDs
-        self.requiresSignoff = requiresSignoff
+        self.requiresPostLayoutInputs = requiresPostLayoutInputs
         self.expectedWorstSetupSlack = expectedWorstSetupSlack
         self.expectedWorstHoldSlack = expectedWorstHoldSlack
     }
@@ -85,7 +85,7 @@ public struct TimingCorpusCase: Sendable, Hashable, Codable {
         case parasiticsPath
         case modeIDs
         case cornerIDs
-        case requiresSignoff
+        case requiresPostLayoutInputs
         case expectedWorstSetupSlack
         case expectedWorstHoldSlack
     }
@@ -109,7 +109,7 @@ public struct TimingCorpusCase: Sendable, Hashable, Codable {
             parasiticsPath: try container.decodeIfPresent(String.self, forKey: .parasiticsPath),
             modeIDs: try container.decodeIfPresent([String].self, forKey: .modeIDs) ?? [],
             cornerIDs: try container.decodeIfPresent([String].self, forKey: .cornerIDs) ?? [],
-            requiresSignoff: try container.decodeIfPresent(Bool.self, forKey: .requiresSignoff) ?? false,
+            requiresPostLayoutInputs: try container.decodeIfPresent(Bool.self, forKey: .requiresPostLayoutInputs) ?? false,
             expectedWorstSetupSlack: try container.decodeIfPresent(Double.self, forKey: .expectedWorstSetupSlack),
             expectedWorstHoldSlack: try container.decodeIfPresent(Double.self, forKey: .expectedWorstHoldSlack)
         )

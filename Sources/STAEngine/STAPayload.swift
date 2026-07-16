@@ -6,7 +6,6 @@ public struct STAPayload: Sendable, Hashable, Codable {
     public var worstHoldSlack: Double?
     public var analyzedCorners: [String]
     public var analyzedModes: [String]
-    public var signoffEligible: Bool
     public var endpoints: [STAEndpoint]
     public var criticalPaths: [STAPath]
     public var violations: [STAViolation]
@@ -18,7 +17,6 @@ public struct STAPayload: Sendable, Hashable, Codable {
         worstHoldSlack: Double?,
         analyzedCorners: [String],
         analyzedModes: [String] = [],
-        signoffEligible: Bool = false,
         endpoints: [STAEndpoint] = [],
         criticalPaths: [STAPath] = [],
         violations: [STAViolation] = [],
@@ -29,7 +27,6 @@ public struct STAPayload: Sendable, Hashable, Codable {
         self.worstHoldSlack = worstHoldSlack
         self.analyzedCorners = analyzedCorners
         self.analyzedModes = analyzedModes
-        self.signoffEligible = signoffEligible
         self.endpoints = endpoints
         self.criticalPaths = criticalPaths
         self.violations = violations
@@ -42,7 +39,6 @@ public struct STAPayload: Sendable, Hashable, Codable {
         case worstHoldSlack
         case analyzedCorners
         case analyzedModes
-        case signoffEligible
         case endpoints
         case criticalPaths
         case violations
@@ -57,7 +53,6 @@ public struct STAPayload: Sendable, Hashable, Codable {
             worstHoldSlack: try container.decodeIfPresent(Double.self, forKey: .worstHoldSlack),
             analyzedCorners: try container.decodeIfPresent([String].self, forKey: .analyzedCorners) ?? [],
             analyzedModes: try container.decodeIfPresent([String].self, forKey: .analyzedModes) ?? [],
-            signoffEligible: try container.decodeIfPresent(Bool.self, forKey: .signoffEligible) ?? false,
             endpoints: try container.decodeIfPresent([STAEndpoint].self, forKey: .endpoints) ?? [],
             criticalPaths: try container.decodeIfPresent([STAPath].self, forKey: .criticalPaths) ?? [],
             violations: try container.decodeIfPresent([STAViolation].self, forKey: .violations) ?? [],
@@ -72,7 +67,6 @@ public struct STAPayload: Sendable, Hashable, Codable {
         try container.encodeIfPresent(worstHoldSlack, forKey: .worstHoldSlack)
         try container.encode(analyzedCorners, forKey: .analyzedCorners)
         try container.encode(analyzedModes, forKey: .analyzedModes)
-        try container.encode(signoffEligible, forKey: .signoffEligible)
         try container.encode(endpoints, forKey: .endpoints)
         try container.encode(criticalPaths, forKey: .criticalPaths)
         try container.encode(violations, forKey: .violations)

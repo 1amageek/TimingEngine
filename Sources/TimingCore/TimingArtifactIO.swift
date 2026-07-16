@@ -1,7 +1,7 @@
 import CryptoKit
 import CircuiteFoundation
 import Foundation
-import DesignFlowKernel
+import ToolQualification
 
 /// Reads immutable artifacts addressed by the canonical Foundation contract.
 public protocol TimingArtifactReading: Sendable {
@@ -20,7 +20,7 @@ public protocol TimingArtifactStoring: Sendable {
     ) async throws -> ArtifactReference
 }
 
-public struct FileSystemTimingArtifactReader: TimingArtifactReading {
+public struct FileSystemTimingArtifactReader: TimingArtifactReading, ToolQualificationArtifactReading {
     public let workspaceRoot: URL?
 
     public init(workspaceRoot: URL? = nil) {
@@ -28,6 +28,16 @@ public struct FileSystemTimingArtifactReader: TimingArtifactReading {
     }
 
     public func read(_ reference: ArtifactReference) async throws -> Data {
+        let integrity = LocalArtifactVerifier().verify(reference, relativeTo: workspaceRoot)
+        guard integrity.isVerified else {
+            let message = integrity.issues
+                .map { $0.detail ?? $0.code.rawValue }
+                .joined(separator: "; ")
+            throw TimingError.artifactReadFailed(
+                path: reference.locator.location.value,
+                message: message
+            )
+        }
         let url: URL
         do {
             url = try reference.locator.location.resolvedFileURL(relativeTo: workspaceRoot)
@@ -39,6 +49,10 @@ public struct FileSystemTimingArtifactReader: TimingArtifactReading {
         }
         let data = try readData(at: url, expectedByteCount: reference.byteCount, expectedDigest: reference.digest.hexadecimalValue)
         return data
+    }
+
+    public func verifiedData(for reference: ArtifactReference) async throws -> Data {
+        try await read(reference)
     }
 
     private func readData(
@@ -66,10 +80,21 @@ public struct FileSystemTimingArtifactReader: TimingArtifactReading {
 }
 
 public struct FileSystemTimingArtifactStore: TimingArtifactStoring {
-    public var outputDirectory: URL
+    public let workspaceRoot: URL
+    public let outputDirectory: URL
 
-    public init(outputDirectory: URL) {
-        self.outputDirectory = outputDirectory
+    public init(workspaceRoot: URL, outputDirectory: URL) throws {
+        let canonicalRoot = workspaceRoot.standardizedFileURL.resolvingSymlinksInPath()
+        let canonicalOutput = outputDirectory.standardizedFileURL.resolvingSymlinksInPath()
+        let rootPrefix = canonicalRoot.path.hasSuffix("/")
+            ? canonicalRoot.path
+            : canonicalRoot.path + "/"
+        guard canonicalOutput.path == canonicalRoot.path
+            || canonicalOutput.path.hasPrefix(rootPrefix) else {
+            throw TimingError.invalidInput("Timing artifact output directory is outside the workspace root.")
+        }
+        self.workspaceRoot = canonicalRoot
+        self.outputDirectory = canonicalOutput
     }
 
     public func store(
@@ -89,7 +114,9 @@ public struct FileSystemTimingArtifactStore: TimingArtifactStoring {
         let url = directory.appending(path: "\(artifactToken).\(format.rawValue)")
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try requireContainedWithoutSymlink(directory)
             if FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) {
+                try requireContainedWithoutSymlink(url)
                 let existingData = try Data(contentsOf: url)
                 let existingDigest = SHA256.hash(data: existingData).map { String(format: "%02x", $0) }.joined()
                 guard existingData.count == data.count,
@@ -101,6 +128,7 @@ public struct FileSystemTimingArtifactStore: TimingArtifactStoring {
                 }
             } else {
                 try data.write(to: url, options: .atomic)
+                try requireContainedWithoutSymlink(url)
             }
         } catch {
             if let timingError = error as? TimingError {
@@ -109,10 +137,21 @@ public struct FileSystemTimingArtifactStore: TimingArtifactStoring {
             throw TimingError.artifactWriteFailed(path: url.path(percentEncoded: false), message: error.localizedDescription)
         }
         do {
+            let canonicalURL = url.standardizedFileURL.resolvingSymlinksInPath()
+            let rootPrefix = workspaceRoot.path.hasSuffix("/")
+                ? workspaceRoot.path
+                : workspaceRoot.path + "/"
+            guard canonicalURL.path.hasPrefix(rootPrefix) else {
+                throw TimingError.artifactWriteFailed(
+                    path: canonicalURL.path(percentEncoded: false),
+                    message: "Artifact path escaped the workspace root."
+                )
+            }
+            let relativePath = String(canonicalURL.path.dropFirst(rootPrefix.count))
             return ArtifactReference(
                 id: resolvedArtifactID,
                 locator: ArtifactLocator(
-                    location: try ArtifactLocation(fileURL: url),
+                    location: try ArtifactLocation(workspaceRelativePath: relativePath),
                     role: .output,
                     kind: kind,
                     format: format
@@ -135,9 +174,24 @@ public struct FileSystemTimingArtifactStore: TimingArtifactStoring {
             throw TimingError.invalidInput("Invalid \(label) path component.")
         }
     }
+
+    private func requireContainedWithoutSymlink(_ url: URL) throws {
+        let lexicalURL = url.standardizedFileURL
+        let resolvedURL = lexicalURL.resolvingSymlinksInPath()
+        let rootPrefix = workspaceRoot.path.hasSuffix("/")
+            ? workspaceRoot.path
+            : workspaceRoot.path + "/"
+        guard lexicalURL.path == resolvedURL.path,
+              resolvedURL.path == workspaceRoot.path || resolvedURL.path.hasPrefix(rootPrefix) else {
+            throw TimingError.artifactWriteFailed(
+                path: lexicalURL.path(percentEncoded: false),
+                message: "Artifact path escaped the workspace root or traversed a symbolic link."
+            )
+        }
+    }
 }
 
-public struct InMemoryTimingArtifactReader: TimingArtifactReading {
+public struct InMemoryTimingArtifactReader: TimingArtifactReading, ToolQualificationArtifactReading {
     public var artifacts: [String: Data]
 
     public init(artifacts: [String: Data]) {
@@ -161,6 +215,10 @@ public struct InMemoryTimingArtifactReader: TimingArtifactReading {
             throw TimingError.artifactDigestMismatch(path: reference.locator.location.value)
         }
         return data
+    }
+
+    public func verifiedData(for reference: ArtifactReference) async throws -> Data {
+        try await read(reference)
     }
 
 }

@@ -5,7 +5,7 @@ import SignalIntegrityEngine
 @testable import STAEngine
 import Testing
 import TimingCore
-import DesignFlowKernel
+import ToolQualification
 
 @Suite("CircuiteFoundation timing boundary")
 struct FoundationBoundaryTests {
@@ -98,7 +98,7 @@ struct FoundationBoundaryTests {
             #expect(result.evidence.provenance.inputs == request.inputs)
             #expect(result.evidence.artifacts == result.artifacts)
             #expect(result.diagnostics.contains {
-                $0.code.rawValue == "timing.sta.ideal_interconnect_not_signoff_eligible"
+                $0.code.rawValue == "timing.sta.post_layout_inputs_missing"
             })
             #expect(result.diagnostics.contains {
                 $0.suggestedActions.contains { $0.code == "provide_spef_artifact" }
@@ -157,7 +157,8 @@ struct FoundationBoundaryTests {
                 processID: "test",
                 pdkVersion: "1"
             )
-            let store = FileSystemTimingArtifactStore(
+            let store = try FileSystemTimingArtifactStore(
+                workspaceRoot: root,
                 outputDirectory: root.appending(path: "artifacts", directoryHint: .isDirectory)
             )
             let engine = NativeSTAEngine(
@@ -280,6 +281,30 @@ struct FoundationBoundaryTests {
         )
         #expect(request.runID == "expected-run")
         #expect(request.inputs.count == 4)
+    }
+
+    @Test("Timing artifact readers directly provide verified ToolQualification bytes")
+    func artifactReadersProvideQualificationBytes() async throws {
+        try await withTemporaryDirectory { root in
+            let expected = Data("qualification-evidence".utf8)
+            try write(expected, to: root.appending(path: "evidence.json"))
+            let artifact = try reference(
+                root: root,
+                path: "evidence.json",
+                kind: .evidence,
+                format: .json
+            )
+
+            let fileReader: any ToolQualificationArtifactReading = FileSystemTimingArtifactReader(
+                workspaceRoot: root
+            )
+            #expect(try await fileReader.verifiedData(for: artifact) == expected)
+
+            let memoryReader: any ToolQualificationArtifactReading = InMemoryTimingArtifactReader(
+                artifacts: ["evidence.json": expected]
+            )
+            #expect(try await memoryReader.verifiedData(for: artifact) == expected)
+        }
     }
 }
 

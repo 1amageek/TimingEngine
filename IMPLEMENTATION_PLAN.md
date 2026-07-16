@@ -1,34 +1,35 @@
 # TimingEngine Implementation Plan
 
-## Order
+## Completed foundation
 
-1. Liberty, SDC and SDF parsers
-2. Timing graph and constraints
-3. MMMC analysis
-4. SPEF coupling and crosstalk
-5. Retained corpus and independent reference correlation
-6. Process qualification decision and Xcircuite headless integration
+1. Liberty, SDC, SDF and SPEF parsing
+2. Canonical timing graph and constraints
+3. MMMC setup/hold analysis
+4. Coupling-aware signal integrity
+5. Structured diagnostics and Foundation-native results
+6. Retained corpus replay and external OpenSTA execution
+7. Workspace-bound raw correlation reconstruction
+8. Non-authoritative evidence assessment
 
-## First implementation slice
+## Trust integration
 
-- Implemented the native standards-constrained slice: Liberty, SDC, SDF and SPEF parsing, canonical timing IR, structural design graph construction, MMMC STA, derates and coupling-aware SI.
-- Added deterministic positive fixtures and negative-path fixtures.
-- Added JSON request/payload and parser round-trip coverage.
-- Added the `timingengine` deterministic JSON CLI.
-- Added path/clock-group semantics, cell power metadata and provenance-bound payloads.
-- Added a manifest-driven retained corpus with positive, blocked and SI cases and a CLI replay command.
-- Added an independent scalar reference analyzer, explicit correlation tolerances and an external-oracle availability probe.
-- Added an external-process oracle runner and envelope correlator that verify slack, mode, corner and provenance agreement.
-- Added bounded external-process execution with structured launch, timeout, cancellation, non-zero-exit and invalid-envelope diagnostics.
-- Added PDK manifest validation and required-asset digest evidence; the retained fixture process now has a complete manifest/asset evidence record.
-- Added PDK/process qualification decision logic with evidence digests; the fixture remains blocked only because no external digital STA oracle is installed.
-- Added Xcircuite `timing.sta` and `timing.signal-integrity` adapters with artifact verification, persistence and headless tests.
+TimingEngine produces raw analysis and correlation artifacts. ToolQualification consumes those artifacts through its asynchronous verified-reader protocol and reconstructs process evidence. DesignFlowKernel applies policy and approval after ToolQualification validation.
+
+```mermaid
+flowchart LR
+    Run["Timing execution"] --> Raw["Raw result artifacts"]
+    Raw --> Correlate["Timing correlation verifier"]
+    Correlate --> Assess["Timing evidence assessment"]
+    Raw --> TQ["ToolQualification validator"]
+    TQ --> DFK["DesignFlowKernel policy"]
+```
 
 ## Completion gates
 
 - Public APIs remain protocol-first and Sendable.
-- Every unsupported semantic produces a structured blocked result.
-- Native and external backends produce the same result schema.
-- No UI type enters a public contract.
-- No result claims foundry qualification without process-scoped oracle evidence.
-- Xcircuite can execute, persist, review and resume the timing stages without circuit-studio.
+- Unsupported semantics produce structured blocked results.
+- Native and external backends produce the same domain result schema.
+- Correlation artifacts remain inside one declared workspace root.
+- Persisted verdicts are recomputed from retained bytes.
+- No TimingEngine type claims production qualification.
+- Xcircuite can execute and persist timing stages without importing UI state into this package.

@@ -23,7 +23,7 @@ public struct STAFoundationRequest: Sendable, Hashable, Codable {
     public let parasitics: ArtifactReference?
     public let analysisKinds: [STAAnalysisKind]
     public let maxPaths: Int
-    public let requiresSignoff: Bool
+    public let requiresPostLayoutInputs: Bool
     public let variation: STAVariation
     public let configurationDigest: ContentDigest?
     public let randomSeed: UInt64?
@@ -44,7 +44,7 @@ public struct STAFoundationRequest: Sendable, Hashable, Codable {
         parasitics: ArtifactReference? = nil,
         analysisKinds: [STAAnalysisKind] = [.setup, .hold],
         maxPaths: Int = 20,
-        requiresSignoff: Bool = false,
+        requiresPostLayoutInputs: Bool = false,
         variation: STAVariation = STAVariation(),
         configurationDigest: ContentDigest? = nil,
         randomSeed: UInt64? = nil
@@ -65,7 +65,7 @@ public struct STAFoundationRequest: Sendable, Hashable, Codable {
         self.parasitics = parasitics
         self.analysisKinds = analysisKinds
         self.maxPaths = max(1, maxPaths)
-        self.requiresSignoff = requiresSignoff
+        self.requiresPostLayoutInputs = requiresPostLayoutInputs
         self.variation = variation
         self.configurationDigest = configurationDigest
         self.randomSeed = randomSeed

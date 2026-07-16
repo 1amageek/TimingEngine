@@ -8,7 +8,6 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
     public var analyzedModes: [String]
     public var analyzedNets: [SINetSummary]
     public var violations: [SIViolation]
-    public var signoffEligible: Bool
     public var provenance: TimingArtifactProvenance
 
     public init(
@@ -18,7 +17,6 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
         analyzedModes: [String] = [],
         analyzedNets: [SINetSummary] = [],
         violations: [SIViolation] = [],
-        signoffEligible: Bool = false,
         provenance: TimingArtifactProvenance = TimingArtifactProvenance()
     ) {
         self.violationCount = violationCount
@@ -27,7 +25,6 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
         self.analyzedModes = analyzedModes
         self.analyzedNets = analyzedNets
         self.violations = violations
-        self.signoffEligible = signoffEligible
         self.provenance = provenance
     }
 
@@ -38,7 +35,6 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
         case analyzedModes
         case analyzedNets
         case violations
-        case signoffEligible
         case provenance
     }
 
@@ -51,7 +47,6 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
             analyzedModes: try container.decodeIfPresent([String].self, forKey: .analyzedModes) ?? [],
             analyzedNets: try container.decodeIfPresent([SINetSummary].self, forKey: .analyzedNets) ?? [],
             violations: try container.decodeIfPresent([SIViolation].self, forKey: .violations) ?? [],
-            signoffEligible: try container.decodeIfPresent(Bool.self, forKey: .signoffEligible) ?? false,
             provenance: try container.decodeIfPresent(TimingArtifactProvenance.self, forKey: .provenance) ?? TimingArtifactProvenance()
         )
     }
@@ -64,7 +59,6 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
         try container.encode(analyzedModes, forKey: .analyzedModes)
         try container.encode(analyzedNets, forKey: .analyzedNets)
         try container.encode(violations, forKey: .violations)
-        try container.encode(signoffEligible, forKey: .signoffEligible)
         try container.encode(provenance, forKey: .provenance)
     }
 }

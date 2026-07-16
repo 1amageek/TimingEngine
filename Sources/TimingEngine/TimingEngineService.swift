@@ -7,14 +7,14 @@ public struct TimingEngineService: Sendable {
     public let sta: any STAFoundationEngine
     public let signalIntegrity: any SignalIntegrityFoundationEngine
     public let corpus: any TimingCorpusRunning
-    public let qualification: any TimingQualificationEvaluating
+    public let evidenceAssessment: any TimingEvidenceEvaluating
 
     public init(
         sta: (any STAFoundationEngine)? = nil,
         signalIntegrity: (any SignalIntegrityFoundationEngine)? = nil,
         workspaceRoot: URL? = nil,
         corpus: (any TimingCorpusRunning)? = nil,
-        qualification: any TimingQualificationEvaluating = TimingQualificationEvaluator()
+        evidenceAssessment: any TimingEvidenceEvaluating = TimingEvidenceEvaluator()
     ) {
         self.sta = sta ?? NativeSTAEngine(workspaceRoot: workspaceRoot)
         self.signalIntegrity = signalIntegrity ?? NativeSignalIntegrityEngine(workspaceRoot: workspaceRoot)
@@ -23,7 +23,7 @@ public struct TimingEngineService: Sendable {
             signalIntegrity: self.signalIntegrity,
             reader: FileSystemTimingArtifactReader(workspaceRoot: workspaceRoot)
         )
-        self.qualification = qualification
+        self.evidenceAssessment = evidenceAssessment
     }
 
 }

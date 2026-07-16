@@ -3,7 +3,6 @@ import Foundation
 import STAEngine
 import SignoffToolSupport
 import TimingCore
-import DesignFlowKernel
 
 public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
     public init() {}

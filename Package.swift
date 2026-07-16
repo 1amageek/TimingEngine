@@ -33,6 +33,12 @@ let circuiteFoundationDependency: Package.Dependency = FileManager.default.fileE
     ? .package(path: "../CircuiteFoundation")
     : .package(url: "https://github.com/1amageek/CircuiteFoundation.git", revision: "8b5b1427280415e8acb3789cb364284b906f6cab")
 
+let toolQualificationDependency: Package.Dependency = FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("ToolQualification/Package.swift").path
+)
+    ? .package(path: "../ToolQualification")
+    : .package(url: "https://github.com/1amageek/ToolQualification.git", revision: "95f5d96fe9d0b871287f4355333d34f8635d6605")
+
 let package = Package(
     name: "TimingEngine",
     platforms: [.macOS(.v26)],
@@ -45,24 +51,23 @@ let package = Package(
         .executable(name: "opensta-oracle-adapter", targets: ["OpenSTAOracleAdapter"]),
     ],
     dependencies: [
-        .package(path: "../DesignFlowKernel"),
         logicDesignDependency,
         pdkKitDependency,
         signoffToolSupportDependency,
         circuiteFoundationDependency,
+        toolQualificationDependency,
     ],
     targets: [
         .target(
             name: "TimingCore",
             dependencies: [
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
-                .product(name: "DesignFlowKernel", package: "DesignFlowKernel")
+                .product(name: "ToolQualification", package: "ToolQualification")
             ]
         ),
         .target(
             name: "STAEngine",
             dependencies: [
-                .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 "TimingCore",
                 .product(name: "LogicIR", package: "LogicDesign"),
@@ -72,7 +77,6 @@ let package = Package(
         .target(
             name: "SignalIntegrityEngine",
             dependencies: [
-                .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 "TimingCore",
                 .product(name: "LogicIR", package: "LogicDesign"),
@@ -86,7 +90,6 @@ let package = Package(
                 "STAEngine",
                 "SignalIntegrityEngine",
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
-                .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
                 .product(name: "SignoffToolSupport", package: "SignoffToolSupport"),
             ]
         ),
@@ -99,7 +102,6 @@ let package = Package(
                 "TimingEngine",
                 .product(name: "LogicIR", package: "LogicDesign"),
                 .product(name: "PDKCore", package: "PDKKit"),
-                .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
             ]
         ),
         .executableTarget(
@@ -108,7 +110,6 @@ let package = Package(
                 "STAEngine",
                 "TimingCore",
                 .product(name: "SignoffToolSupport", package: "SignoffToolSupport"),
-                .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
             ]
         ),
         .testTarget(
@@ -118,7 +119,8 @@ let package = Package(
                 "STAEngine",
                 "SignalIntegrityEngine",
                 "TimingEngine",
-                .product(name: "CircuiteFoundation", package: "CircuiteFoundation")
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
+                .product(name: "ToolQualification", package: "ToolQualification")
             ]
         ),
     ]

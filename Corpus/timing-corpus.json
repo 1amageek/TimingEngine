@@ -49,7 +49,7 @@
       "parasiticsPath": "fixtures/simple/positive.spef",
       "modeIDs": ["functional"],
       "cornerIDs": ["typical"],
-      "requiresSignoff": true,
+      "requiresPostLayoutInputs": true,
       "expectedWorstSetupSlack": 6e-9
     }
   ]

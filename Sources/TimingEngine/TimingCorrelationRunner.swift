@@ -25,7 +25,6 @@ public struct TimingCorrelationRunner: Sendable {
             status: passed ? .passed : .failed,
             setupSlackDifference: setupDifference,
             holdSlackDifference: holdDifference,
-            passed: passed,
             tolerance: tolerance,
             diagnostics: diagnostics
         )

@@ -2,58 +2,49 @@
 
 ## Purpose
 
-Canonical timing data, MMMC static timing analysis and signal-integrity contracts.
+TimingEngine owns canonical timing data, MMMC static timing analysis, signal-integrity analysis, retained observations and independent-oracle correlation.
 
 ## Responsibility boundary
 
-This package owns the schemas and engine protocols listed in its public products. It must remain usable without UI state and without the Xcircuite runtime.
-
-## Non-responsibilities
-
-- Generating parasitics
-- Mutating placement or routing
-- Declaring final release approval
-
-## Dependency direction
-
-```text
-standard artifacts / canonical references
-                 ↓
-CircuiteFoundation artifact / evidence boundary
-                 ↓
-TimingEngine protocols and result schemas
-                 ↓
-native or external-tool backends
-                 ↓
-Runtime integration through Foundation protocols
-                 ↓
-DesignFlowKernel and runtime-owned artifacts
+```mermaid
+flowchart LR
+    Inputs["Liberty / SDC / SPEF / design IR"] --> Timing["TimingEngine\nanalysis + observations"]
+    Timing --> Evidence["ArtifactReference + provenance + diagnostics"]
+    Evidence --> Qualification["ToolQualification\nprocess evidence validation"]
+    Qualification --> Policy["DesignFlowKernel\npolicy + approval"]
+    Policy --> Runtime["Xcircuite\npersistence + resume"]
 ```
 
-Backends may depend on lower-level data packages. This package must never import `Xcircuite` or `circuit-studio`.
+TimingEngine can report that a retained corpus or oracle comparison agrees for a declared scope. It does not decide that a tool is production-qualified and does not approve a release. `ToolQualification` validates raw process evidence. `DesignFlowKernel` applies flow policy and approval. `Xcircuite` owns concrete workspace and run persistence.
 
 ## Trust model
 
-Kernel availability, corpus validation, oracle correlation, process-scoped qualification and release approval are distinct states. The package reports capability and evidence; Xcircuite and ToolQualification apply flow policy.
+The following states are independent:
 
-## Artifact requirements
+| State | Owner | Meaning |
+|---|---|---|
+| Execution completed | TimingEngine backend | A typed analysis result was produced |
+| Corpus replay valid | TimingEngine | Retained expected observations were reproduced |
+| Oracle correlation passed | TimingEngine verifier | Raw native and oracle outputs agree within a declared tolerance |
+| Process evidence accepted | ToolQualification | Raw evidence was reconstructed and validated for a process scope |
+| Flow approved | DesignFlowKernel | Policy and human approval permit promotion |
 
-All outputs are immutable run artifacts with format, digest, producer metadata and the input design/PDK revision needed to reproduce the result.
+Persisted decision fields are not trusted. `TimingEvidenceAssessment.outcome` is derived from findings. External correlation is accepted only after workspace containment, digest, byte-count, producer, invocation, input and metric reconstruction checks.
 
-## CircuiteFoundation boundary
+The checked-in Sky130A directory is an input manifest, not a foundry corpus. Its required Liberty file is deliberately external; absence or digest drift is reported as incomplete PDK evidence. No checked-in decision artifact may convert that missing input into qualification.
 
-Native STA and signal-integrity execution uses CircuiteFoundation as the public cross-domain boundary:
+## Artifact boundary
 
-```mermaid
-flowchart LR
-    Inputs["Verified ArtifactReference inputs"] --> Request["Foundation request"]
-    Request --> Engine["Engine<Request, Output>"]
-    Engine --> Result["Foundation domain result"]
-    Result --> Evidence["EvidenceManifest"]
-    Result --> Diagnostics["DesignDiagnostic[]"]
-    Result --> Artifacts["ArtifactReference[]"]
-```
+Correlation artifacts must use workspace-relative `ArtifactLocation` values. The caller supplies one explicit workspace root. Symlink-resolved files outside that root are rejected. Native and oracle outputs must retain the same input artifact identities and an independent oracle executable identity.
 
-Domain payloads remain owned by TimingEngine. Evidence, artifact identity and
-diagnostic vocabulary come from CircuiteFoundation, so an Agent or human
-reviewer can inspect execution provenance without depending on UI state.
+## Dependency direction
+
+TimingEngine depends on `CircuiteFoundation` for cross-domain artifacts, evidence, diagnostics and engine protocols. It does not import Xcircuite or circuit-studio. Production trust consumers depend on ToolQualification's validation protocol and inject an asynchronous verified artifact reader.
+
+## Non-responsibilities
+
+- Parasitic extraction
+- Placement or routing mutation
+- Tool self-qualification
+- Flow approval, waiver, release or resume policy
+- Concrete `.xcircuite` storage

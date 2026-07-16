@@ -30,7 +30,10 @@ cp "$SCRIPT_DIR/Qualification/sky130A/pdk.json" "$RUNTIME_ROOT/pdk.json"
 cp "$SCRIPT_DIR/Qualification/sky130A/corpus.json" "$RUNTIME_ROOT/corpus.json"
 cp "$SCRIPT_DIR/Qualification/sky130A/sky130_top.v" "$RUNTIME_ROOT/sky130_top.v"
 cp "$SCRIPT_DIR/Qualification/sky130A/sky130.sdc" "$RUNTIME_ROOT/sky130.sdc"
-ln -sfn "$LIBERTY_SOURCE" "$RUNTIME_ROOT/sky130_tt.lib"
+cp "$LIBERTY_SOURCE" "$RUNTIME_ROOT/sky130_tt.lib"
+cp "$OPENSTA_BIN" "$RUNTIME_ROOT/opensta"
+chmod +x "$RUNTIME_ROOT/opensta"
+RETAINED_OPENSTA_BIN="$RUNTIME_ROOT/opensta"
 
 cd "$PACKAGE_ROOT"
 swift run timingengine run-corpus \
@@ -40,6 +43,7 @@ swift run timingengine run-corpus \
     --out "$OUTPUT_ROOT/sky130-corpus-report.json" > "$OUTPUT_ROOT/sky130-corpus-envelope.json"
 
 swift run timingengine run-sta \
+    --workspace-root "$OUTPUT_ROOT" \
     --design "$RUNTIME_ROOT/sky130_top.v" \
     --library "$RUNTIME_ROOT/sky130_tt.lib" \
     --constraints "$RUNTIME_ROOT/sky130.sdc" \
@@ -54,7 +58,10 @@ swift run timingengine run-sta \
 swift build --product opensta-oracle-adapter > /dev/null
 ADAPTER_BIN=$(swift build --show-bin-path --product opensta-oracle-adapter)
 "$ADAPTER_BIN/opensta-oracle-adapter" \
-    --sta "$OPENSTA_BIN" \
+    --workspace-root "$OUTPUT_ROOT" \
+    --sta "$RETAINED_OPENSTA_BIN" \
+    --oracle-id opensta \
+    --oracle-version 3.1 \
     --design "$RUNTIME_ROOT/sky130_top.v" \
     --library "$RUNTIME_ROOT/sky130_tt.lib" \
     --constraints "$RUNTIME_ROOT/sky130.sdc" \
@@ -67,22 +74,31 @@ ADAPTER_BIN=$(swift build --show-bin-path --product opensta-oracle-adapter)
     --run-id sky130-opensta > "$OUTPUT_ROOT/sky130-opensta.json"
 
 swift run timingengine correlate-oracle \
+    --workspace-root "$OUTPUT_ROOT" \
     --native-report "$OUTPUT_ROOT/sky130-native.json" \
     --oracle-report "$OUTPUT_ROOT/sky130-opensta.json" \
-    --oracle-id opensta-3.1 \
+    --corpus-report "$OUTPUT_ROOT/sky130-corpus-report.json" \
+    --pdk-manifest "$RUNTIME_ROOT/pdk.json" \
+    --process sky130A \
+    --pdk-version c6d73a35f524070e85faff4a6a9eef49553ebc2b \
+    --oracle-id opensta \
+    --oracle-version 3.1 \
+    --oracle-path "$RETAINED_OPENSTA_BIN" \
     --tolerance 1e-12 \
     --out "$OUTPUT_ROOT/sky130-correlation.json" > /dev/null
 
-swift run timingengine qualify \
+swift run timingengine assess-evidence \
+    --workspace-root "$OUTPUT_ROOT" \
     --corpus-report "$OUTPUT_ROOT/sky130-corpus-report.json" \
     --pdk-manifest "$RUNTIME_ROOT/pdk.json" \
     --process sky130A \
     --pdk-version c6d73a35f524070e85faff4a6a9eef49553ebc2b \
     --mode functional \
     --corner tt-025C-1v80 \
-    --oracle-id opensta-3.1 \
-    --oracle-path "$OPENSTA_BIN" \
+    --oracle-id opensta \
+    --oracle-version 3.1 \
+    --oracle-path "$RETAINED_OPENSTA_BIN" \
     --correlation-report "$OUTPUT_ROOT/sky130-correlation.json" \
-    --out "$OUTPUT_ROOT/sky130-qualification.json" > /dev/null
+    --out "$OUTPUT_ROOT/sky130-evidence-assessment.json" > /dev/null
 
-echo "Sky130A qualification artifacts written to $OUTPUT_ROOT"
+echo "Sky130A timing evidence artifacts written to $OUTPUT_ROOT"

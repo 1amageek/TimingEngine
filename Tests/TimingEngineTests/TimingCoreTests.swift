@@ -151,7 +151,7 @@ struct TimingCoreTests {
             version: "1.0.0"
         )
         let data = Data("timing evidence".utf8)
-        let store = FileSystemTimingArtifactStore(outputDirectory: root)
+        let store = try FileSystemTimingArtifactStore(workspaceRoot: root, outputDirectory: root)
         let reference = try await store.store(
             data,
             artifactID: try ArtifactID(rawValue: "test-report"),
@@ -160,7 +160,7 @@ struct TimingCoreTests {
             format: .json,
             producer: producer
         )
-        let reader = FileSystemTimingArtifactReader()
+        let reader = FileSystemTimingArtifactReader(workspaceRoot: root)
         #expect(try await reader.read(reference) == data)
         #expect(reference.id.rawValue == "test-report")
         #expect(reference.digest.algorithm == .sha256)
@@ -192,6 +192,32 @@ struct TimingCoreTests {
                 Issue.record("Unexpected timing error: \(error.localizedDescription)")
                 return
             }
+        }
+    }
+
+    @Test("Foundation artifact store rejects an output symlink outside the workspace")
+    func foundationArtifactStoreRejectsSymlinkEscape() throws {
+        let parent = FileManager.default.temporaryDirectory
+            .appending(path: "timing-store-boundary-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let root = parent.appending(path: "workspace", directoryHint: .isDirectory)
+        let outside = parent.appending(path: "outside", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        defer {
+            do {
+                try FileManager.default.removeItem(at: parent)
+            } catch {
+                Issue.record("Temporary store boundary cleanup failed: \(error.localizedDescription)")
+            }
+        }
+        let escapedOutput = root.appending(path: "artifacts", directoryHint: .isDirectory)
+        try FileManager.default.createSymbolicLink(at: escapedOutput, withDestinationURL: outside)
+
+        #expect(throws: TimingError.self) {
+            try FileSystemTimingArtifactStore(
+                workspaceRoot: root,
+                outputDirectory: escapedOutput
+            )
         }
     }
 

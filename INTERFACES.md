@@ -1,61 +1,41 @@
 # TimingEngine Interface Contract
 
-The canonical public shape is:
+## Engine protocols
 
 ```swift
 public protocol STAFoundationEngine: Engine
 where Request == STAFoundationRequest, Output == STAExecutionResult {}
 ```
 
-Requests carry a Foundation schema version, run ID and verified `ArtifactReference` values. Domain results conform independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`; payloads contain domain metrics, while evidence and diagnostics remain inspectable without a universal result envelope.
+Signal-integrity execution follows the same Foundation-native pattern. Requests are `Sendable`, schema-versioned values containing immutable `ArtifactReference` inputs. Results expose domain payloads and conform independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`.
 
-There is no compatibility envelope or adapter layer. The canonical service,
-corpus runner, CLI and OpenSTA process integration exchange Foundation requests
-and domain results directly.
+There is no compatibility envelope or runtime adapter layer. Native implementations conform to the public engine protocols directly.
 
-The `TimingEngine` umbrella product exposes these seams through
-`TimingEngineService.sta`, `TimingEngineService.signalIntegrity`,
-`TimingEngineAPI.makeNativeSTA` and `TimingEngineAPI.makeNativeSignalIntegrity`.
+## Evidence interfaces
 
-## Products
+| Interface | Role |
+|---|---|
+| `TimingCorpusRunning` | Replay retained timing observations |
+| `TimingExternalCorrelationVerifying` | Reopen raw artifacts and reconstruct correlation |
+| `TimingEvidenceEvaluating` | Produce a non-authoritative evidence assessment |
+| `TimingPDKEvidenceBuilding` | Observe PDK manifest/assets under a declared workspace root |
 
-### TimingCore
+`TimingEvidenceAssessment` is an observation report. Its derived outcome is not a production qualification or flow approval.
 
-Liberty, SDC, SPEF, SDF, provenance and canonical timing references.
+## Artifact access
 
-### STAEngine
+`TimingArtifactReading` is asynchronous because artifact access may involve I/O. Filesystem and in-memory implementations verify byte count and SHA-256 before returning bytes. Production evidence validation uses ToolQualification's verified-reader protocol directly; synchronous trust paths are not part of the contract.
 
-MMMC setup and hold analysis.
-
-### SignalIntegrityEngine
-
-Coupling-aware crosstalk analysis.
-
-### TimingEngine
-
-Umbrella API, corpus replay, reference correlation and qualification decisions.
-
+External correlation requires one explicit workspace root. Every retained artifact is workspace-relative and is resolved only against that root.
 
 ## Error contract
 
-- Throw only when execution cannot produce a valid Foundation result.
-- Represent design findings and failed checks as typed diagnostics and a completed domain payload.
-- Represent missing prerequisites or insufficient semantics as `blocked`.
-- Preserve cancellation as `cancelled`.
-- Do not swallow parser, process or persistence failures.
+- Throw when no valid typed result or assessment can be produced.
+- Emit typed diagnostics for design findings.
+- Represent missing prerequisites or unsupported semantics as blocked.
+- Preserve cancellation as cancelled.
+- Do not swallow parsing, process, integrity or persistence errors.
 
 ## Runtime integration
 
-An integrating runtime must:
-
-1. resolve project-relative references at its own workspace boundary;
-2. verify input digests;
-3. evaluate ToolQualification requirements;
-4. invoke the injected engine protocol;
-5. persist every returned artifact;
-6. map diagnostics and status to FlowStageResult;
-7. attach design, PDK and tool provenance;
-8. leave approval and resume handling to DesignFlowKernel.
-
-The runtime preserves the run ID, input digests, output artifact digests and
-structured diagnostics while passing between flow stages.
+An integrating runtime resolves project references, verifies digests, invokes the injected engine, persists returned artifacts and maps diagnostics to flow stage results. ToolQualification evaluates process evidence. DesignFlowKernel owns approval and resume transitions.

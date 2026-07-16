@@ -2,45 +2,35 @@
 
 ## Goal
 
-Provide standard-constrained, multi-corner timing and signal-integrity analysis suitable for post-layout signoff.
+Provide standard-constrained multi-corner timing and signal-integrity analysis with reproducible, machine-readable evidence.
 
 ## Required functions
 
 | Function | Required behavior | Priority |
 |---|---|---:|
-| Liberty parsing | Parse cells, pins, arcs, tables, constraints, power and operating conditions. | P0 |
-| SDC parsing | Parse clocks, generated clocks, IO delays, uncertainty, exceptions and path groups. | P0 |
-| SDF support | Import and export annotated timing for gate-level verification. | P1 |
-| Timing graph construction | Build stable graph identities from LogicDesign and physical/parasitic handoffs. | P0 |
-| MMMC STA | Evaluate setup, hold, recovery, removal and pulse-width checks across modes and corners. | P0 |
-| Variation modeling | Support derates, OCV and declared statistical or advanced variation lanes. | P1 |
-| Signal integrity | Consume coupling parasitics and compute crosstalk delta delay and noise violations. | P1 |
-| Reports and ECO candidates | Emit machine-readable paths, bottlenecks and repair candidates. | P0 |
+| Liberty parsing | Parse cells, pins, arcs, tables, constraints, power and operating conditions | P0 |
+| SDC parsing | Parse clocks, IO delays, uncertainty, exceptions and path groups | P0 |
+| Timing graph | Build stable identities from logic and physical/parasitic handoffs | P0 |
+| MMMC STA | Evaluate setup/hold and declared sequential checks across modes/corners | P0 |
+| Reports | Emit machine-readable paths, diagnostics and repair candidates | P0 |
+| SDF | Import/export annotated timing | P1 |
+| Variation | Support declared derates and advanced-variation lanes | P1 |
+| Signal integrity | Consume coupling parasitics and report crosstalk effects | P1 |
 
-## Required outcomes
+## Evidence requirements
 
-- Every timing verdict names its mode, corner, constraints and parasitic digest.
-- Ideal-interconnect results cannot satisfy post-layout signoff.
-- Timing results are consumable by Xcircuite repair loops.
+- Every timing result names its mode, corner, constraints, PDK and parasitic identity.
+- External correlation reopens raw native/oracle outputs and recomputes metrics.
+- Correlation artifacts use workspace-relative locations under one explicit root.
+- Persisted assessment outcome is derived from findings.
+- Timing evidence remains distinct from ToolQualification acceptance and DesignFlowKernel approval.
+- Ideal-interconnect results do not satisfy post-layout signoff.
 
-## Common platform requirements
+## Developer surfaces
 
-- Public execution surfaces are protocol-first, Sendable and dependency-injected.
-- Requests and payloads are Codable, Hashable and schema-versioned.
-- Foundation-facing inputs and outputs use immutable `ArtifactReference` values with verified locations, digests and byte counts. Only the canonical artifact shape is exposed by this package.
-- Diagnostics contain a stable code, severity, affected entity and suggested actions.
-- Unsupported semantics and missing prerequisites produce blocked results.
-- Native and external-tool backends conform to identical request and payload schemas.
-- Execution capability, corpus validation, oracle correlation, process qualification and release approval remain distinct.
-- Xcircuite owns flow construction, artifact persistence, qualification gates, repair loops, approval and resume.
-- The package never imports Xcircuite or circuit-studio.
-
-## Required developer surfaces
-
-- Typed API
+- Protocol-first typed API
 - Deterministic JSON CLI
-- Positive and negative fixtures
-- Contract and parser round-trip tests
-- Reference corpus
+- Positive, negative and blocked fixtures
+- Retained corpus and raw correlation report
+- Structured errors and diagnostics
 - Capability and limitation report
-- Foundation protocol integration tests at the consuming runtime boundary

@@ -1,25 +1,19 @@
 # TimingEngine
 
-Canonical timing data, MMMC static timing analysis, signal integrity, retained evidence and process-aware qualification contracts.
+TimingEngine is a standalone Swift package for canonical timing data, MMMC static timing analysis, signal-integrity analysis and reproducible timing evidence.
 
-## Status
-
-This package provides a local native implementation for a standards-constrained timing subset. It parses Liberty, SDC, SDF and SPEF artifacts, runs MMMC setup/hold analysis, evaluates coupling-aware signal integrity, retains provenance-bound corpus evidence and emits structured Foundation results.
-
-The release path is deliberately explicit:
+## Responsibility
 
 ```mermaid
 flowchart LR
-    Inputs["LIBERTY / SDC / SPEF / design IR"] --> IR["Canonical timing IR"]
-    IR --> Analysis["MMMC STA + signal integrity"]
-    Analysis --> Evidence["Corpus + diagnostics + provenance"]
-    Evidence --> Oracle["Reference / external oracle correlation"]
-    Oracle --> Qualification["PDK/process qualification"]
-    Qualification --> Flow["Xcircuite headless stage"]
-    Flow --> Review["Review / approve / resume"]
+    Inputs["Liberty / SDC / SPEF / SDF / design IR"] --> Engine["TimingEngine"]
+    Engine --> Results["STA / SI results"]
+    Engine --> Evidence["Corpus / correlation / diagnostics"]
+    Evidence --> TQ["ToolQualification"]
+    TQ --> DFK["DesignFlowKernel policy + approval"]
 ```
 
-Native implementation, retained replay, headless integration and a reproducible Sky130A qualification profile are available locally. External-oracle execution and process qualification remain explicit evidence gates and are never inferred from native results alone.
+TimingEngine executes analyses and reconstructs retained observations. It does not declare itself production-qualified. ToolQualification validates process evidence, while DesignFlowKernel owns promotion policy and approval.
 
 ## Products
 
@@ -28,151 +22,139 @@ Native implementation, retained replay, headless integration and a reproducible 
 | `TimingCore` | Liberty, SDC, SDF, SPEF, provenance and canonical timing references |
 | `STAEngine` | MMMC setup and hold analysis |
 | `SignalIntegrityEngine` | Coupling-aware crosstalk analysis |
-| `TimingEngine` | Umbrella API, corpus replay, reference correlation and qualification decisions |
+| `TimingEngine` | Umbrella API, corpus replay, raw correlation and evidence assessment |
 | `timingengine` | Deterministic JSON CLI |
-| `opensta-oracle-adapter` | Bounded OpenSTA process adapter that emits `STAExecutionResult` |
+| `opensta-oracle-adapter` | Bounded OpenSTA process integration that emits `STAExecutionResult` |
 
-## CircuiteFoundation boundary
+## Foundation boundary
 
-New engine consumers use `CircuiteFoundation` as the cross-domain contract. The
-STA and signal-integrity products expose Foundation-native requests and
-domain-owned results without introducing another universal result envelope:
+STA and signal-integrity engines conform directly to CircuiteFoundation's `Engine` protocol. Requests contain immutable `ArtifactReference` values. Domain results conform independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`.
 
 ```mermaid
 flowchart LR
-    Artifacts["ArtifactReference[]"] --> Request["STAFoundationRequest\nor SignalIntegrityFoundationRequest"]
-    Request --> Engine["Engine protocol"]
-    Engine --> Result["STAExecutionResult\nor SignalIntegrityExecutionResult"]
-    Result --> Evidence["EvidenceManifest"]
-    Result --> Diagnostics["DesignDiagnostic[]"]
+    Artifacts["ArtifactReference[]"] --> Request["STAFoundationRequest"]
+    Request --> Engine["STAFoundationEngine"]
+    Engine --> Result["STAExecutionResult"]
+    Result --> Provenance["EvidenceManifest + diagnostics + artifacts"]
 ```
 
-Every Foundation result separately conforms to `ArtifactProducing`,
-`DiagnosticReporting` and `EvidenceProviding`. Artifact promotion validates
-the location, SHA-256 digest and byte count; relative locations require an
-explicit workspace root. The canonical native engines are `NativeSTAEngine`
-and `NativeSignalIntegrityEngine`. `TimingEngineService.sta` and
-`TimingEngineService.signalIntegrity` expose those seams from the umbrella
-product, and `TimingEngineAPI` provides Foundation-native factory methods.
+There is no universal result envelope or runtime adapter layer.
 
-The native engines implement the Foundation protocols directly. There is no
-universal result envelope or artifact adapter in this package; callers exchange
-domain results and Foundation evidence explicitly.
+## Evidence model
 
-## Contract
+TimingEngine keeps three concepts separate:
 
-Foundation-facing execution uses:
+| Concept | Meaning |
+|---|---|
+| Corpus report | Retained expected observations were replayed |
+| External correlation | Raw native and independent-oracle outputs agree for a declared scope |
+| Evidence assessment | Available timing observations contain no reported gap |
 
-- a `Codable`, `Hashable`, `Sendable` request with a `SchemaVersion` and verified `ArtifactReference` inputs;
-- a domain result conforming independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`;
-- protocol-first dependency injection;
-- immutable `ArtifactReference` inputs and outputs;
-- explicit blocked, failed and cancelled states.
+`TimingEvidenceAssessment.outcome` is computed from findings and is never a production qualification. A correlation report is accepted only after reopening its raw artifacts, verifying SHA-256 and byte count, checking producer and executable identity, confirming common inputs, and recomputing metrics.
 
-Flow requests are owned by the consuming runtime; this package exposes only the
-Foundation request and domain-result contracts.
+All retained correlation artifacts must be workspace-relative. `--workspace-root` defines the only permitted containment boundary; symlink-resolved escapes are rejected.
 
-External oracle requests use a bounded process runner. Missing executables, launch failures, timeouts, non-zero exits and invalid Foundation results remain structured diagnostics rather than hanging or being treated as correlation evidence.
+## Supported artifacts
 
-## Supported standard artifacts
-
-| Domain | Canonical input/output |
+| Domain | Format |
 |---|---|
 | Timing library | Liberty (`.lib`) |
 | Constraints | SDC (`.sdc`) |
 | Parasitics | SPEF (`.spef`) |
 | Delay annotation | SDF (`.sdf`) |
-| Design graph | JSON timing IR or structural Verilog subset |
-| Result and evidence | Versioned JSON result/evidence documents with SHA-256 provenance |
+| Design graph | Canonical JSON IR or supported structural Verilog |
+| Results and evidence | Versioned JSON with SHA-256 provenance |
 
 ## Build
 
 ```bash
 swift build
-
-# Inspect a standard artifact
-swift run timingengine parse-liberty --file path/to/library.lib
-
-# Run native STA through the same typed API used by adapters
-swift run timingengine run-sta --design design.json --library library.lib --constraints constraints.sdc --pdk-manifest pdk.json --top top
-
-# Replay the retained corpus and write a report artifact
-swift run timingengine run-corpus --manifest Corpus/timing-corpus.json --root Corpus --out /tmp/timing-corpus-report.json
-
-# Evaluate the process qualification gate; unavailable external oracles remain blocked
-swift run timingengine qualify --corpus-report /tmp/timing-corpus-report.json --pdk-manifest Corpus/fixtures/simple/pdk.json --pdk-version 1 --mode functional --corner typical
-
-# Correlate a completed external STA result against a native STA result
-swift run timingengine correlate-oracle --native-report native.json --oracle-report external.json --oracle-id opensta
-
-# Build the independent OpenSTA adapter
-swift build --product opensta-oracle-adapter
-
-# Foundation-native requests are constructed from verified ArtifactReference
-# values and executed through STAFoundationEngine or SignalIntegrityFoundationEngine.
-
-# Inspect the declared capabilities and limitations
 swift run timingengine capabilities
 ```
 
-`run-corpus` returns `isValid: true` only when every retained case matches its expected outcome and diagnostics. `qualify` requires PDK evidence, an available external oracle and a passing correlation report; missing correlation is a blocking finding.
+## CLI
 
-## Sky130A process profile
-
-The checked-in profile under `Qualification/sky130A` records the Sky130A TT Liberty digest, one retained DFF corpus case and the exact process/corner identity. The Liberty file itself remains an external PDK asset and is not copied into this repository.
-
-When Volare Sky130A and an independent OpenSTA binary are available, run the complete local release audit:
+Inspect or replay standard inputs:
 
 ```bash
-OPENSTA_BIN=/path/to/sta \
-SKY130_ROOT="$HOME/.volare/sky130A" \
+swift run timingengine parse-liberty --file <library.lib>
+swift run timingengine run-corpus \
+  --manifest <corpus-manifest.json> \
+  --root <corpus-root> \
+  --out <workspace-root>/corpus-report.json
+```
+
+Run native STA with workspace-relative provenance:
+
+```bash
+swift run timingengine run-sta \
+  --workspace-root <workspace-root> \
+  --design <workspace-root>/design.v \
+  --library <workspace-root>/library.lib \
+  --constraints <workspace-root>/constraints.sdc \
+  --pdk-manifest <workspace-root>/pdk.json \
+  --top <top-module>
+```
+
+Retain and assess independent-oracle evidence:
+
+```bash
+swift run timingengine correlate-oracle \
+  --workspace-root <workspace-root> \
+  --native-report <workspace-root>/native.json \
+  --oracle-report <workspace-root>/oracle.json \
+  --corpus-report <workspace-root>/corpus.json \
+  --pdk-manifest <workspace-root>/pdk.json \
+  --process <process-id> \
+  --pdk-version <version> \
+  --oracle-id <tool-id> \
+  --oracle-version <tool-version> \
+  --oracle-path <workspace-root>/tools/oracle
+
+swift run timingengine assess-evidence \
+  --workspace-root <workspace-root> \
+  --corpus-report <workspace-root>/corpus.json \
+  --pdk-manifest <workspace-root>/pdk.json \
+  --correlation-report <workspace-root>/correlation.json \
+  --oracle-id <tool-id> \
+  --oracle-version <tool-version> \
+  --oracle-path <workspace-root>/tools/oracle
+```
+
+The oracle executable must be retained inside the declared workspace for correlation. Availability alone is not evidence.
+
+## Sky130A retained profile
+
+The repository contains a narrow Sky130A TT input profile and a reproducible script. It does not contain retained qualification evidence. The exact PDK Liberty asset and OpenSTA executable are external prerequisites and are copied into a temporary evidence workspace before execution. Their declared SHA-256 digests and byte counts are verified; a missing or different asset is a blocked input, never a passing profile.
+
+```bash
+OPENSTA_BIN=<opensta-executable> \
+SKY130_ROOT=<sky130A-root> \
 ./Scripts/qualify-sky130A.sh
 ```
 
-The script produces native, external, correlation, corpus and qualification JSON artifacts under `.build/qualification/sky130A`. The external adapter retains the Liberty time unit and converts OpenSTA report values to SI seconds. The current native scalar reduction of Liberty hold constraints is correlated with a documented 1 ps tolerance for this profile; this is a release-profile tolerance, not a claim of foundry signoff equivalence.
-
-## Workspace dependency model
-
-TimingEngine is one package in the LSI multi-package workspace. Its manifest
-selects sibling packages when the complete workspace is present and uses
-revision-pinned dependencies for standalone clones. Timing flow and project
-storage remain outside this package; only Foundation artifacts cross the
-boundary.
-
-The pinned revisions are intentionally immutable release inputs. Updating a dependency is a deliberate manifest change followed by a fresh build, test and artifact audit.
+The script writes raw native output, raw oracle output, correlation, corpus and evidence-assessment artifacts. ToolQualification must independently reconstruct trust from those retained bytes. These artifacts demonstrate the selected profile only; they do not establish foundry signoff equivalence.
 
 ## Test
 
 ```bash
-perl -e 'alarm 30; exec @ARGV' swift test
+xcodebuild test \
+  -scheme TimingEngine-Package \
+  -destination 'platform=macOS' \
+  -parallel-testing-enabled NO
 ```
 
-The public clone verification is 28 tests in 6 suites, including the
-CircuiteFoundation STA/SI boundary and artifact-integrity tests. This Swift
-package has no configured Xcode test scheme; SwiftPM Testing is the
-authoritative local test command.
+Use an external 30-second timeout and run focused suites when diagnosing failures.
 
-## Xcircuite integration
+## Integration
 
-The Xcircuite runtime may provide `timing.sta` and `timing.signal-integrity`
-flow stages. It resolves and digest-checks project inputs, invokes the
-Foundation-native protocols in this package, and persists returned artifacts.
-Flow gates, approval and resume are owned by the runtime and DesignFlowKernel.
+TimingEngine is independently usable through its typed API and CLI. A runtime such as Xcircuite may resolve project inputs, invoke the same engine protocols and persist results. ToolQualification performs process-evidence validation, and DesignFlowKernel owns policy, approval and resume.
 
-## Release status
+## Current limitations
 
-| Gate | Status |
-|---|---|
-| Native build and tests | Passed |
-| Retained corpus replay | Passed |
-| Local reference correlation | Passed |
-| PDK manifest and required asset evidence | Passed for the retained fixture |
-| External digital STA correlation | Passed for Sky130A with OpenSTA 3.1 and 1 ps tolerance |
-| Sky130A process-scoped qualification | Passed for the retained Volare profile and TT corpus case |
-| Foundry signoff equivalence | Not claimed; SPEF/signoff and broader PVT/library coverage remain separate gates |
+- The native backend implements a deterministic standards-constrained subset.
+- Advanced statistical variation and waveform-resolved crosstalk are not implemented.
+- The Sky130A retained profile covers a narrow TT scope.
+- Foundry signoff equivalence is not claimed.
 
-See [MILESTONES.md](MILESTONES.md), [CAPABILITY.md](CAPABILITY.md) and [GOAL_STATUS.md](GOAL_STATUS.md) for the evidence boundary and release criteria.
-
-See `DESIGN.md`, `INTERFACES.md` and `IMPLEMENTATION_PLAN.md` before implementing a backend.
-
-See `CAPABILITY.md` for supported semantics and qualification limitations.
+See `DESIGN.md`, `INTERFACES.md`, `CAPABILITY.md`, `MILESTONES.md` and `GOAL_STATUS.md` for the complete contracts and status.

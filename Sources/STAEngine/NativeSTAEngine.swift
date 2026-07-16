@@ -2,7 +2,6 @@ import Foundation
 import LogicIR
 import PDKCore
 import TimingCore
-import DesignFlowKernel
 
 public struct NativeSTAEngine: STAFoundationEngine {
     public typealias Request = STAFoundationRequest
@@ -40,7 +39,7 @@ public struct NativeSTAEngine: STAFoundationEngine {
             let inputs = try await loadInputs(request)
             let provenanceIssues = LogicDesignProvenanceValidation.issues(
                 for: logicDesignReference(for: request),
-                requireProvenance: request.requiresSignoff
+                requireProvenance: request.requiresPostLayoutInputs
             )
             guard provenanceIssues.isEmpty else {
                 return try provenanceBlockedEnvelope(
@@ -151,7 +150,7 @@ public struct NativeSTAEngine: STAFoundationEngine {
         if let reference = request.parasitics {
             parasitics = try parasiticParser.parse(try await reader.read(reference))
         } else {
-            if request.requiresSignoff {
+            if request.requiresPostLayoutInputs {
                 throw TimingError.unsupportedSemantic(format: "STA", semantic: "post-layout signoff without parasitics")
             }
             parasitics = nil
@@ -209,8 +208,8 @@ public struct NativeSTAEngine: STAFoundationEngine {
         if parasitics == nil {
             diagnostics.append(DesignDiagnostic(
                 severity: .warning,
-                code: "timing.sta.ideal_interconnect_not_signoff_eligible",
-                message: "STA ran without parasitics; the result is not eligible for post-layout signoff.",
+                code: "timing.sta.post_layout_inputs_missing",
+                message: "STA ran without parasitics, so post-layout timing effects were not analyzed.",
                 suggestedActions: ["provide_spef_artifact", "run_pex_before_signoff"]
             ))
         }
@@ -240,7 +239,6 @@ public struct NativeSTAEngine: STAFoundationEngine {
             worstHoldSlack: worstHold,
             analyzedCorners: cornerIDs,
             analyzedModes: modeIDs,
-            signoffEligible: provenance.isCompleteForSTA,
             endpoints: endpoints,
             criticalPaths: Array(paths.sorted { $0.slack < $1.slack }.prefix(request.maxPaths)),
             violations: violations,
@@ -760,7 +758,6 @@ public struct NativeSTAEngine: STAFoundationEngine {
             worstHoldSlack: nil,
             analyzedCorners: request.requestedCornerIDs,
             analyzedModes: request.requestedModeIDs,
-            signoffEligible: false,
             provenance: provenance(for: request)
         )
     }

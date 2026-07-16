@@ -61,11 +61,10 @@ struct NativeEngineTests {
         #expect(result.payload.analyzedCorners == ["typical"])
         #expect(result.payload.worstSetupSlack != nil)
         #expect(result.payload.worstHoldSlack != nil)
-        #expect(result.payload.signoffEligible == false)
-        #expect(result.diagnostics.contains { $0.code.rawValue == "timing.sta.ideal_interconnect_not_signoff_eligible" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "timing.sta.post_layout_inputs_missing" })
     }
 
-    @Test("blocks a signoff request without required timing inputs")
+    @Test("blocks a post-layout request without required timing inputs")
     func blocksMissingParasitics() async throws {
         let reference = try artifact(path: "missing.json", data: Data("{}".utf8), kind: .netlist, format: .json)
         let request = STAFoundationRequest(
@@ -77,7 +76,7 @@ struct NativeEngineTests {
             pdkManifest: reference,
             processID: "test",
             pdkVersion: "1",
-            requiresSignoff: true
+            requiresPostLayoutInputs: true
         )
         let result = try await NativeSTAEngine(reader: InMemoryTimingArtifactReader(artifacts: [:])).execute(request)
         #expect(result.status == .blocked)
