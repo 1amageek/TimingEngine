@@ -4,14 +4,14 @@ import STAEngine
 import TimingCore
 
 public struct TimingEngineService: Sendable {
-    public let sta: any STAFoundationEngine
-    public let signalIntegrity: any SignalIntegrityFoundationEngine
+    public let sta: any STAExecuting
+    public let signalIntegrity: any SignalIntegrityExecuting
     public let corpus: any TimingCorpusRunning
     public let evidenceAssessment: any TimingEvidenceEvaluating
 
     public init(
-        sta: (any STAFoundationEngine)? = nil,
-        signalIntegrity: (any SignalIntegrityFoundationEngine)? = nil,
+        sta: (any STAExecuting)? = nil,
+        signalIntegrity: (any SignalIntegrityExecuting)? = nil,
         workspaceRoot: URL? = nil,
         corpus: (any TimingCorpusRunning)? = nil,
         evidenceAssessment: any TimingEvidenceEvaluating = TimingEvidenceEvaluator()

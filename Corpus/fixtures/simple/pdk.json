@@ -4,10 +4,10 @@
   "version": "1",
   "displayName": "TimingEngine retained process fixture",
   "assets": [
-    {"assetID": "liberty-view", "role": "model", "path": "library.lib", "kind": "model", "format": "LIBERTY", "required": true}
+    {"assetID": "liberty-view", "role": "model", "path": "library.lib", "kind": "model", "format": "LIBERTY", "required": true, "cornerIDs": ["typical"], "metadata": {}}
   ],
   "layers": [
-    {"layerID": "metal1", "name": "M1", "number": 1, "purpose": "metal", "isRoutingLayer": true}
+    {"layerID": "metal1", "name": "M1", "number": 1, "purpose": "metal", "isRoutingLayer": true, "aliases": []}
   ],
   "devices": [
     {
@@ -16,7 +16,9 @@
       "terminals": [
         {"name": "A", "role": "input", "order": 0},
         {"name": "Y", "role": "output", "order": 1}
-      ]
+      ],
+      "parameterNames": [],
+      "aliases": []
     }
   ],
   "corners": [
@@ -28,7 +30,7 @@
     }
   ],
   "crossViewMappings": [
-    {"mappingID": "liberty-device-view", "view": "liberty", "assetID": "liberty-view", "deviceIDs": ["inv"], "cornerIDs": ["typical"]}
+    {"mappingID": "liberty-device-view", "view": "liberty", "assetID": "liberty-view", "logicalNames": [], "physicalNames": [], "layerIDs": [], "deviceIDs": ["inv"], "cornerIDs": ["typical"]}
   ],
   "metadata": {"source": "retained-fixture", "units": "micron"}
 }

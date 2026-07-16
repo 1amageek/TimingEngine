@@ -9,14 +9,18 @@
       "engine": "signalIntegrity",
       "description": "Coupled SPEF is analyzed with an unbounded fixture threshold.",
       "expectedOutcome": "completed",
+      "expectedDiagnosticCodes": [],
       "designPath": "fixtures/simple/design.json",
       "topDesignName": "top",
+      "libraryPaths": [],
       "constraintPath": "fixtures/simple/constraints.sdc",
       "pdkManifestPath": "fixtures/simple/pdk.json",
       "processID": "fixture-process",
       "pdkVersion": "1",
       "parasiticsPath": "fixtures/simple/positive.spef",
-      "modeIDs": ["functional"]
+      "modeIDs": ["functional"],
+      "cornerIDs": [],
+      "requiresPostLayoutInputs": true
     },
     {
       "caseID": "sta-blocked",
@@ -32,13 +36,15 @@
       "processID": "fixture-process",
       "pdkVersion": "1",
       "modeIDs": ["functional"],
-      "cornerIDs": ["typical"]
+      "cornerIDs": ["typical"],
+      "requiresPostLayoutInputs": false
     },
     {
       "caseID": "sta-positive",
       "engine": "sta",
       "description": "A deterministic combinational path produces a replayable setup result.",
       "expectedOutcome": "completed",
+      "expectedDiagnosticCodes": [],
       "designPath": "fixtures/simple/design.json",
       "topDesignName": "top",
       "libraryPaths": ["fixtures/simple/library.lib"],

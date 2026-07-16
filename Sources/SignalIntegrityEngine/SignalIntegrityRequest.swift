@@ -1,8 +1,8 @@
 import CircuiteFoundation
 import Foundation
 
-/// Foundation-native inputs for coupling-aware signal-integrity analysis.
-public struct SignalIntegrityFoundationRequest: Sendable, Hashable, Codable {
+/// Inputs for coupling-aware signal-integrity analysis.
+public struct SignalIntegrityRequest: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = SchemaVersion.v1
 
     public let schemaVersion: SchemaVersion

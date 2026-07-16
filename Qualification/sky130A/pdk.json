@@ -13,11 +13,19 @@
       "required": true,
       "sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
       "byteCount": 12841637,
-      "cornerIDs": ["tt-025C-1v80"]
+      "cornerIDs": ["tt-025C-1v80"],
+      "metadata": {}
     }
   ],
   "layers": [
-    { "layerID": "active", "name": "active", "number": 1, "purpose": "diffusion" }
+    {
+      "layerID": "active",
+      "name": "active",
+      "number": 1,
+      "purpose": "diffusion",
+      "isRoutingLayer": false,
+      "aliases": []
+    }
   ],
   "devices": [
     {
@@ -28,7 +36,9 @@
         { "name": "Y", "role": "output", "order": 1 },
         { "name": "VPWR", "role": "bulk", "order": 2 },
         { "name": "VGND", "role": "bulk", "order": 3 }
-      ]
+      ],
+      "parameterNames": [],
+      "aliases": []
     }
   ],
   "corners": [
@@ -48,6 +58,9 @@
       "mappingID": "sky130-liberty-corner",
       "view": "liberty",
       "assetID": "sky130_fd_sc_hd_tt_liberty",
+      "logicalNames": [],
+      "physicalNames": [],
+      "layerIDs": [],
       "deviceIDs": ["sky130_fd_sc_hd_standard_cell"],
       "cornerIDs": ["tt-025C-1v80"]
     }

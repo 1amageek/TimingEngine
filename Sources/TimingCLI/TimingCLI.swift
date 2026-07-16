@@ -115,12 +115,12 @@ struct TimingCLI {
                 format: .spef
             )
         }
-        let request = STAFoundationRequest(
+        let request = STARequest(
             runID: runID,
             design: designReference,
             topDesignName: top,
             designRevision: try option("--design-digest", in: values).map { try ContentDigest(algorithm: .sha256, hexadecimalValue: $0) } ?? designReference.digest,
-            libraries: [STAFoundationLibraryReference(artifact: libraryReference, cornerIDs: cornerIDs)],
+            libraries: [TimingLibraryReference(artifact: libraryReference, cornerIDs: cornerIDs)],
             constraints: constraintReference,
             requestedModeIDs: modeIDs,
             requestedCornerIDs: cornerIDs,

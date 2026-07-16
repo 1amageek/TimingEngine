@@ -26,14 +26,14 @@ TimingEngine executes analyses and reconstructs retained observations. It does n
 | `timingengine` | Deterministic JSON CLI |
 | `opensta-oracle-adapter` | Bounded OpenSTA process integration that emits `STAExecutionResult` |
 
-## Foundation boundary
+## CircuiteFoundation conformance
 
 STA and signal-integrity engines conform directly to CircuiteFoundation's `Engine` protocol. Requests contain immutable `ArtifactReference` values. Domain results conform independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`.
 
 ```mermaid
 flowchart LR
-    Artifacts["ArtifactReference[]"] --> Request["STAFoundationRequest"]
-    Request --> Engine["STAFoundationEngine"]
+    Artifacts["ArtifactReference[]"] --> Request["STARequest"]
+    Request --> Engine["STAExecuting"]
     Engine --> Result["STAExecutionResult"]
     Result --> Provenance["EvidenceManifest + diagnostics + artifacts"]
 ```

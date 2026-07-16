@@ -4,8 +4,8 @@ import LogicIR
 import PDKCore
 import TimingCore
 
-public struct NativeSignalIntegrityEngine: SignalIntegrityFoundationEngine {
-    public typealias Request = SignalIntegrityFoundationRequest
+public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
+    public typealias Request = SignalIntegrityRequest
     public typealias Output = SignalIntegrityExecutionResult
     public let reader: any TimingArtifactReading
     public let artifactStore: (any TimingArtifactStoring)?
@@ -25,7 +25,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityFoundationEngine {
         self.constraintParser = constraintParser
     }
 
-    public func execute(_ request: SignalIntegrityFoundationRequest) async throws -> SignalIntegrityExecutionResult {
+    public func execute(_ request: SignalIntegrityRequest) async throws -> SignalIntegrityExecutionResult {
         let startedAt = Date()
         do {
             _ = try await reader.read(
@@ -132,7 +132,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityFoundationEngine {
                 artifacts: artifacts,
                 diagnostics: diagnostics,
                 provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-                schemaVersion: SignalIntegrityFoundationRequest.currentSchemaVersion
+                schemaVersion: SignalIntegrityRequest.currentSchemaVersion
             )
         } catch let error as TimingError {
             if case .artifactWriteFailed = error {
@@ -151,13 +151,13 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityFoundationEngine {
                     suggestedActions: ["inspect_input_artifacts", "reproduce_with_timing_cli"]
                 )],
                 provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-                schemaVersion: SignalIntegrityFoundationRequest.currentSchemaVersion
+                schemaVersion: SignalIntegrityRequest.currentSchemaVersion
             )
         }
     }
 
     private func blockedEnvelope(
-        request: SignalIntegrityFoundationRequest,
+        request: SignalIntegrityRequest,
         startedAt: Date,
         error: TimingError
     ) throws -> SignalIntegrityExecutionResult {
@@ -172,12 +172,12 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityFoundationEngine {
                 suggestedActions: ["inspect_input_artifacts", "check_spef_coupling_data"]
             )],
             provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-            schemaVersion: SignalIntegrityFoundationRequest.currentSchemaVersion
+            schemaVersion: SignalIntegrityRequest.currentSchemaVersion
         )
     }
 
     private func provenanceBlockedEnvelope(
-        request: SignalIntegrityFoundationRequest,
+        request: SignalIntegrityRequest,
         startedAt: Date,
         issues: [LogicDesignProvenanceValidation.Issue]
     ) throws -> SignalIntegrityExecutionResult {
@@ -194,12 +194,12 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityFoundationEngine {
                 )
             },
             provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-            schemaVersion: SignalIntegrityFoundationRequest.currentSchemaVersion
+            schemaVersion: SignalIntegrityRequest.currentSchemaVersion
         )
     }
 
     private func failedEnvelope(
-        request: SignalIntegrityFoundationRequest,
+        request: SignalIntegrityRequest,
         startedAt: Date,
         error: TimingError
     ) throws -> SignalIntegrityExecutionResult {
@@ -214,7 +214,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityFoundationEngine {
                 suggestedActions: ["inspect_output_directory", "retry_with_writable_artifact_store"]
             )],
             provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-            schemaVersion: SignalIntegrityFoundationRequest.currentSchemaVersion
+            schemaVersion: SignalIntegrityRequest.currentSchemaVersion
         )
     }
 
@@ -248,15 +248,15 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityFoundationEngine {
             completedAt: completedAt
         )
     }
-    private func logicDesignReference(for request: SignalIntegrityFoundationRequest) -> LogicDesignReference {
+    private func logicDesignReference(for request: SignalIntegrityRequest) -> LogicDesignReference {
         LogicDesignReference(
-            artifact: request.design.locator,
+            artifact: request.design,
             topDesignName: request.topDesignName,
             designDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
             provenance: LogicDesignProvenance(
                 sourceDesignDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
                 inputDesignDigest: request.design.digest.hexadecimalValue,
-                producerID: "timing.foundation",
+                producerID: "timing.signal-integrity",
                 producerVersion: "1",
                 runID: request.runID
             )

@@ -33,7 +33,7 @@ struct SignalIntegrityTests {
             "pdk.json": pdkData,
             "parasitics.spef": spefData
         ])
-        let request = SignalIntegrityFoundationRequest(
+        let request = SignalIntegrityRequest(
             runID: "si-run",
             design: design,
             topDesignName: "top",

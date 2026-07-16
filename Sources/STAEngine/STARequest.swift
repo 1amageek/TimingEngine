@@ -2,8 +2,8 @@ import CircuiteFoundation
 import Foundation
 import TimingCore
 
-/// Foundation-native inputs for a static timing analysis execution.
-public struct STAFoundationRequest: Sendable, Hashable, Codable {
+/// Inputs for a static timing analysis execution.
+public struct STARequest: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = SchemaVersion.v1
 
     public let schemaVersion: SchemaVersion
@@ -12,7 +12,7 @@ public struct STAFoundationRequest: Sendable, Hashable, Codable {
     public let design: ArtifactReference
     public let topDesignName: String
     public let designRevision: ContentDigest?
-    public let libraries: [STAFoundationLibraryReference]
+    public let libraries: [TimingLibraryReference]
     public let constraints: ArtifactReference
     public let requestedModeIDs: [String]
     public let requestedCornerIDs: [String]
@@ -33,7 +33,7 @@ public struct STAFoundationRequest: Sendable, Hashable, Codable {
         design: ArtifactReference,
         topDesignName: String,
         designRevision: ContentDigest? = nil,
-        libraries: [STAFoundationLibraryReference],
+        libraries: [TimingLibraryReference],
         constraints: ArtifactReference,
         requestedModeIDs: [String] = [],
         requestedCornerIDs: [String] = [],

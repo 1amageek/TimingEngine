@@ -8,9 +8,9 @@ import TimingCore
 import ToolQualification
 
 @Suite("CircuiteFoundation timing boundary")
-struct FoundationBoundaryTests {
-    @Test("STA Foundation engine emits evidence and structured diagnostics")
-    func staFoundationEngineEmitsEvidence() async throws {
+struct ExecutionContractTests {
+    @Test("STA engine emits evidence and structured diagnostics")
+    func staEngineEmitsEvidence() async throws {
         try await withTemporaryDirectory { root in
             let design = TimingDesign(
                 topDesignName: "top",
@@ -51,7 +51,7 @@ struct FoundationBoundaryTests {
             )
             try write(Data("{}".utf8), to: root.appending(path: "pdk.json"))
 
-            let request = STAFoundationRequest(
+            let request = STARequest(
                 runID: "foundation-sta",
                 design: try reference(
                     root: root,
@@ -60,7 +60,7 @@ struct FoundationBoundaryTests {
                     format: .json
                 ),
                 topDesignName: "top",
-                libraries: [STAFoundationLibraryReference(
+                libraries: [TimingLibraryReference(
                     artifact: try reference(
                         root: root,
                         path: "library.lib",
@@ -87,7 +87,7 @@ struct FoundationBoundaryTests {
                 pdkVersion: "1"
             )
 
-            let engine: any STAFoundationEngine = NativeSTAEngine(
+            let engine: any STAExecuting = NativeSTAEngine(
                 workspaceRoot: root
             )
             let result = try await engine.execute(request)
@@ -110,8 +110,8 @@ struct FoundationBoundaryTests {
         }
     }
 
-    @Test("STA Foundation boundary promotes a persisted report artifact")
-    func staFoundationEnginePromotesOutputArtifact() async throws {
+    @Test("STA execution contract promotes a persisted report artifact")
+    func staEnginePromotesOutputArtifact() async throws {
         try await withTemporaryDirectory { root in
             let design = TimingDesign(
                 topDesignName: "top",
@@ -135,11 +135,11 @@ struct FoundationBoundaryTests {
             try write(Data("create_clock -name clk -period 10ns [get_ports clk]".utf8), to: root.appending(path: "constraints.sdc"))
             try write(Data("{}".utf8), to: root.appending(path: "pdk.json"))
 
-            let request = STAFoundationRequest(
+            let request = STARequest(
                 runID: "foundation-sta-artifact",
                 design: try reference(root: root, path: "design.json", kind: .netlist, format: .json),
                 topDesignName: "top",
-                libraries: [STAFoundationLibraryReference(
+                libraries: [TimingLibraryReference(
                     artifact: try reference(
                         root: root,
                         path: "library.lib",
@@ -177,7 +177,7 @@ struct FoundationBoundaryTests {
     }
 
     @Test("SI Foundation engine preserves net subjects in diagnostics")
-    func signalIntegrityFoundationEnginePreservesNetSubjects() async throws {
+    func signalIntegrityEnginePreservesNetSubjects() async throws {
         try await withTemporaryDirectory { root in
             try write(Data("{}".utf8), to: root.appending(path: "design.json"))
             try write(Data("create_clock -name clk -period 10ns [get_ports clk]".utf8), to: root.appending(path: "constraints.sdc"))
@@ -195,7 +195,7 @@ struct FoundationBoundaryTests {
             *END
             """.utf8), to: root.appending(path: "parasitics.spef"))
 
-            let request = SignalIntegrityFoundationRequest(
+            let request = SignalIntegrityRequest(
                 runID: "foundation-si",
                 design: try reference(root: root, path: "design.json", kind: .netlist, format: .json),
                 topDesignName: "top",
@@ -214,7 +214,7 @@ struct FoundationBoundaryTests {
                 maxNoiseRatio: 0.5
             )
 
-            let engine: any SignalIntegrityFoundationEngine = NativeSignalIntegrityEngine(
+            let engine: any SignalIntegrityExecuting = NativeSignalIntegrityEngine(
                 workspaceRoot: root
             )
             let result = try await engine.execute(request)
@@ -230,12 +230,12 @@ struct FoundationBoundaryTests {
         }
     }
 
-    @Test("Foundation boundary rejects relative artifacts without a workspace root")
+    @Test("execution contract rejects relative artifacts without a workspace root")
     func relativeArtifactRequiresWorkspaceRoot() async throws {
         try await withTemporaryDirectory { root in
             try write(Data("{}".utf8), to: root.appending(path: "design.json"))
             let design = try reference(root: root, path: "design.json", kind: .netlist, format: .json)
-            let request = STAFoundationRequest(
+            let request = STARequest(
                 runID: "missing-root",
                 design: design,
                 topDesignName: "top",
@@ -269,11 +269,11 @@ struct FoundationBoundaryTests {
             digest: digest,
             byteCount: 0
         )
-        let request = STAFoundationRequest(
+        let request = STARequest(
             runID: "expected-run",
             design: artifact,
             topDesignName: "top",
-            libraries: [STAFoundationLibraryReference(artifact: artifact)],
+            libraries: [TimingLibraryReference(artifact: artifact)],
             constraints: artifact,
             pdkManifest: artifact,
             processID: "test",

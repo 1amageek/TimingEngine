@@ -51,11 +51,11 @@ public enum TimingEngineAPI {
         )
     }
 
-    public static func makeFoundationSTA(
+    public static func makeSTAEngine(
         reader: any TimingArtifactReading = FileSystemTimingArtifactReader(),
         artifactStore: (any TimingArtifactStoring)? = nil,
         workspaceRoot: URL? = nil
-    ) -> any STAFoundationEngine {
+    ) -> any STAExecuting {
         NativeSTAEngine(
             reader: reader,
             artifactStore: artifactStore,
@@ -63,11 +63,11 @@ public enum TimingEngineAPI {
         )
     }
 
-    public static func makeFoundationSignalIntegrity(
+    public static func makeSignalIntegrityEngine(
         reader: any TimingArtifactReading = FileSystemTimingArtifactReader(),
         artifactStore: (any TimingArtifactStoring)? = nil,
         workspaceRoot: URL? = nil
-    ) -> any SignalIntegrityFoundationEngine {
+    ) -> any SignalIntegrityExecuting {
         NativeSignalIntegrityEngine(
             reader: reader,
             artifactStore: artifactStore,

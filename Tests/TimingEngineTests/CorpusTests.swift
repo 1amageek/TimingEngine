@@ -500,7 +500,7 @@ struct CorpusTests {
         #expect(result.diagnostics == ["external_oracle_executable_unavailable"])
     }
 
-    @Test("external oracle runner consumes a Foundation result")
+    @Test("external oracle runner consumes a canonical result")
     func externalOracleRunnerReadsResult() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "timing-oracle-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

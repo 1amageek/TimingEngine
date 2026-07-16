@@ -3,11 +3,11 @@
 ## Engine protocols
 
 ```swift
-public protocol STAFoundationEngine: Engine
-where Request == STAFoundationRequest, Output == STAExecutionResult {}
+public protocol STAExecuting: Engine
+where Request == STARequest, Output == STAExecutionResult {}
 ```
 
-Signal-integrity execution follows the same Foundation-native pattern. Requests are `Sendable`, schema-versioned values containing immutable `ArtifactReference` inputs. Results expose domain payloads and conform independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`.
+Signal-integrity execution follows the same direct-conformance pattern. Requests are `Sendable`, schema-versioned values containing immutable `ArtifactReference` inputs. Results expose domain payloads and conform independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`.
 
 There is no compatibility envelope or runtime adapter layer. Native implementations conform to the public engine protocols directly.
 

@@ -8,7 +8,7 @@ import TimingCore
 
 @Suite("Native STA")
 struct NativeEngineTests {
-    @Test("runs Foundation-native MMMC setup and hold")
+    @Test("runs canonical MMMC setup and hold")
     func runsSTA() async throws {
         let design = TimingDesign(
             topDesignName: "top",
@@ -37,11 +37,11 @@ struct NativeEngineTests {
             try artifact(path: "constraints.sdc", data: constraintsData, kind: .constraints, format: .sdc),
             try artifact(path: "pdk.json", data: pdkData, kind: .technology, format: .json)
         ]
-        let request = STAFoundationRequest(
+        let request = STARequest(
             runID: "run-001",
             design: references[0],
             topDesignName: "top",
-            libraries: [STAFoundationLibraryReference(artifact: references[1], cornerIDs: ["typical"])] ,
+            libraries: [TimingLibraryReference(artifact: references[1], cornerIDs: ["typical"])] ,
             constraints: references[2],
             requestedModeIDs: ["functional"],
             requestedCornerIDs: ["typical"],
@@ -67,7 +67,7 @@ struct NativeEngineTests {
     @Test("blocks a post-layout request without required timing inputs")
     func blocksMissingParasitics() async throws {
         let reference = try artifact(path: "missing.json", data: Data("{}".utf8), kind: .netlist, format: .json)
-        let request = STAFoundationRequest(
+        let request = STARequest(
             runID: "blocked-run",
             design: reference,
             topDesignName: "top",

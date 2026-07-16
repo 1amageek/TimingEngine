@@ -5,17 +5,17 @@ import SignalIntegrityEngine
 import STAEngine
 import TimingCore
 
-/// Executes the local timing corpus through the canonical Foundation engines.
+/// Executes the local timing corpus through the canonical timing engines.
 public struct LocalTimingCorpusRunner: TimingCorpusRunning {
-    public let sta: any STAFoundationEngine
-    public let signalIntegrity: any SignalIntegrityFoundationEngine
+    public let sta: any STAExecuting
+    public let signalIntegrity: any SignalIntegrityExecuting
     public let reader: any TimingArtifactReading
     public let referenceAnalyzer: TimingReferenceAnalyzer
     public let correlationRunner: TimingCorrelationRunner
 
     public init(
-        sta: any STAFoundationEngine = NativeSTAEngine(),
-        signalIntegrity: any SignalIntegrityFoundationEngine = NativeSignalIntegrityEngine(),
+        sta: any STAExecuting = NativeSTAEngine(),
+        signalIntegrity: any SignalIntegrityExecuting = NativeSignalIntegrityEngine(),
         reader: any TimingArtifactReading = FileSystemTimingArtifactReader(),
         referenceAnalyzer: TimingReferenceAnalyzer = TimingReferenceAnalyzer(),
         correlationRunner: TimingCorrelationRunner = TimingCorrelationRunner()
@@ -142,8 +142,8 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
     }
 
     private struct CaseRequest: Sendable {
-        let sta: STAFoundationRequest
-        let si: SignalIntegrityFoundationRequest
+        let sta: STARequest
+        let si: SignalIntegrityRequest
     }
 
     private func makeRequest(
@@ -168,7 +168,7 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
             format: .json
         )
         let libraries = try corpusCase.libraryPaths.map {
-            try STAFoundationLibraryReference(
+            try TimingLibraryReference(
                 artifact: builder.makeReference(
                     path: try resolve($0, rootURL: rootURL),
                     kind: try ArtifactKind(rawValue: "timing.library"),
@@ -187,7 +187,7 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
         let pdkDigest = try corpusCase.pdkDigest.map {
             try ContentDigest(algorithm: .sha256, hexadecimalValue: $0)
         } ?? pdkManifest.digest
-        let sta = STAFoundationRequest(
+        let sta = STARequest(
             runID: runID,
             design: design,
             topDesignName: corpusCase.topDesignName,
@@ -208,7 +208,7 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
             kind: CircuiteFoundation.ArtifactKind.parasitics,
             format: .spef
         )
-        let si = SignalIntegrityFoundationRequest(
+        let si = SignalIntegrityRequest(
             runID: runID,
             design: design,
             topDesignName: corpusCase.topDesignName,
@@ -226,7 +226,7 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
 
     private func correlate(
         _ corpusCase: TimingCorpusCase,
-        request: STAFoundationRequest,
+        request: STARequest,
         payload: STAPayload
     ) async throws -> TimingCorrelationResult {
         let designData = try await reader.read(request.design)
