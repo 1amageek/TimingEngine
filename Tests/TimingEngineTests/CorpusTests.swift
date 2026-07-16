@@ -9,16 +9,13 @@ import STAEngine
 struct CorpusTests {
     @Test("replays retained positive, blocked, and SI cases")
     func replaysRetainedCorpus() async throws {
-        let packageRoot = URL(filePath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let manifestURL = packageRoot.appending(path: "Corpus/timing-corpus.json")
+        let corpusRoot = try TimingTestResources.corpusRoot
+        let manifestURL = corpusRoot.appending(path: "timing-corpus.json")
         let manifestData = try Data(contentsOf: manifestURL)
         let manifest = try JSONDecoder().decode(TimingCorpusManifest.self, from: manifestData)
         let report = try await LocalTimingCorpusRunner().execute(
             manifest: manifest,
-            rootURL: packageRoot.appending(path: "Corpus"),
+            rootURL: corpusRoot,
             runID: "test-corpus"
         )
         #expect(report.isValid)
@@ -30,11 +27,8 @@ struct CorpusTests {
 
     @Test("artifact references retain deterministic digest and size")
     func buildsArtifactReference() throws {
-        let fixture = URL(filePath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appending(path: "Corpus/fixtures/simple/library.lib")
+        let fixture = try TimingTestResources.corpusRoot
+            .appending(path: "fixtures/simple/library.lib")
         let reference = try TimingArtifactReferenceBuilder().makeReference(
             path: fixture.path(percentEncoded: false),
             kind: try ArtifactKind(rawValue: "timing.library"),
@@ -46,11 +40,7 @@ struct CorpusTests {
 
     @Test("checked-in Sky130A profile remains blocked without the exact external Liberty artifact")
     func sky130ProfileRequiresRetainedLiberty() throws {
-        let packageRoot = URL(filePath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let profileRoot = packageRoot.appending(path: "Qualification/sky130A")
+        let profileRoot = try TimingTestResources.qualificationRoot.appending(path: "sky130A")
         let manifestURL = profileRoot.appending(path: "pdk.json")
         let manifestReference = try TimingArtifactReferenceBuilder().makeReference(
             at: manifestURL,
@@ -75,18 +65,14 @@ struct CorpusTests {
 
     @Test("evidence assessment blocks when an external oracle is unavailable")
     func evidenceAssessmentRequiresExternalOracle() async throws {
-        let packageRoot = URL(filePath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let manifestData = try Data(contentsOf: packageRoot.appending(path: "Corpus/timing-corpus.json"))
+        let corpusRoot = try TimingTestResources.corpusRoot
+        let manifestData = try Data(contentsOf: corpusRoot.appending(path: "timing-corpus.json"))
         let manifest = try JSONDecoder().decode(TimingCorpusManifest.self, from: manifestData)
         let corpus = try await LocalTimingCorpusRunner().execute(
             manifest: manifest,
-            rootURL: packageRoot.appending(path: "Corpus"),
+            rootURL: corpusRoot,
             runID: "qualification-test"
         )
-        let corpusRoot = packageRoot.appending(path: "Corpus")
         let pdkReference = try LocalArtifactReferencer().reference(
             ArtifactLocator(
                 location: try ArtifactLocation(workspaceRelativePath: "fixtures/simple/pdk.json"),
@@ -194,14 +180,10 @@ struct CorpusTests {
 
     @Test("evidence assessment cross-binds external correlation to PDK, corpus, tool, and artifacts")
     func evidenceAssessmentBindsExternalCorrelationEvidence() async throws {
-        let packageRoot = URL(filePath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let corpusRoot = packageRoot.appending(path: "Corpus")
+        let corpusRoot = try TimingTestResources.corpusRoot
         let manifest = try JSONDecoder().decode(
             TimingCorpusManifest.self,
-            from: Data(contentsOf: packageRoot.appending(path: "Corpus/timing-corpus.json"))
+            from: Data(contentsOf: corpusRoot.appending(path: "timing-corpus.json"))
         )
         let corpus = try await LocalTimingCorpusRunner().execute(
             manifest: manifest,

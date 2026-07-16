@@ -5,39 +5,35 @@ import Foundation
 let workspaceRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
-let isFullLSIWorkspace = FileManager.default.fileExists(
-    atPath: workspaceRoot.appendingPathComponent("Xcircuite/Package.swift").path
-)
-
-let logicDesignDependency: Package.Dependency = isFullLSIWorkspace && FileManager.default.fileExists(
+let logicDesignDependency: Package.Dependency = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("LogicDesign/Package.swift").path
 )
     ? .package(path: "../LogicDesign")
-    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "d6a22bc10cf3d8bea8e00b65c3c3f5aab38a5c8b")
+    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "8e0c8c2c63152aa45bf12d943fa034bb1aba0f1e")
 
-let pdkKitDependency: Package.Dependency = isFullLSIWorkspace && FileManager.default.fileExists(
+let pdkKitDependency: Package.Dependency = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("PDKKit/Package.swift").path
 )
     ? .package(path: "../PDKKit")
-    : .package(url: "https://github.com/1amageek/PDKKit.git", revision: "b1b33ee2224e46e7f852fc58f58072f59f0a9498")
+    : .package(url: "https://github.com/1amageek/PDKKit.git", revision: "aa145dfaa67454c44ac7767c37a28ab7f4b1d2e2")
 
-let signoffToolSupportDependency: Package.Dependency = isFullLSIWorkspace && FileManager.default.fileExists(
+let signoffToolSupportDependency: Package.Dependency = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("SignoffToolSupport/Package.swift").path
 )
     ? .package(path: "../SignoffToolSupport")
-    : .package(url: "https://github.com/1amageek/SignoffToolSupport.git", revision: "777adc160544043a803c986f4822e6ab06b4dfa8")
+    : .package(url: "https://github.com/1amageek/SignoffToolSupport.git", revision: "597c44065b6b717e903623adb8aabcf2ac367697")
 
 let circuiteFoundationDependency: Package.Dependency = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("CircuiteFoundation/Package.swift").path
 )
     ? .package(path: "../CircuiteFoundation")
-    : .package(url: "https://github.com/1amageek/CircuiteFoundation.git", revision: "8b5b1427280415e8acb3789cb364284b906f6cab")
+    : .package(url: "https://github.com/1amageek/CircuiteFoundation.git", revision: "2ec6ee13a89ac6885be3c26b41a9ee0ef89948ac")
 
 let toolQualificationDependency: Package.Dependency = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("ToolQualification/Package.swift").path
 )
     ? .package(path: "../ToolQualification")
-    : .package(url: "https://github.com/1amageek/ToolQualification.git", revision: "95f5d96fe9d0b871287f4355333d34f8635d6605")
+    : .package(url: "https://github.com/1amageek/ToolQualification.git", revision: "32b031b5322f1ccb0ef78466faab0f895d47c4fd")
 
 let package = Package(
     name: "TimingEngine",
@@ -121,6 +117,10 @@ let package = Package(
                 "TimingEngine",
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 .product(name: "ToolQualification", package: "ToolQualification")
+            ],
+            resources: [
+                .copy("../../Corpus"),
+                .copy("../../Qualification"),
             ]
         ),
     ]
