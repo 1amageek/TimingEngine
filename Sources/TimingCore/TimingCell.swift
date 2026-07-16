@@ -54,8 +54,8 @@ public struct TimingCell: Sendable, Hashable, Codable {
         self.init(
             name: try container.decode(String.self, forKey: .name),
             area: try container.decodeIfPresent(Double.self, forKey: .area),
-            pins: try container.decodeIfPresent([TimingPin].self, forKey: .pins) ?? [],
-            arcs: try container.decodeIfPresent([TimingArc].self, forKey: .arcs) ?? [],
+            pins: try container.decode([TimingPin].self, forKey: .pins),
+            arcs: try container.decode([TimingArc].self, forKey: .arcs),
             sequentialModel: try container.decodeIfPresent(TimingSequentialModel.self, forKey: .sequentialModel),
             powerModel: try container.decodeIfPresent(TimingPowerModel.self, forKey: .powerModel)
         )

@@ -51,13 +51,13 @@ public struct STAPayload: Sendable, Hashable, Codable {
         self.init(
             worstSetupSlack: try container.decodeIfPresent(Double.self, forKey: .worstSetupSlack),
             worstHoldSlack: try container.decodeIfPresent(Double.self, forKey: .worstHoldSlack),
-            analyzedCorners: try container.decodeIfPresent([String].self, forKey: .analyzedCorners) ?? [],
-            analyzedModes: try container.decodeIfPresent([String].self, forKey: .analyzedModes) ?? [],
-            endpoints: try container.decodeIfPresent([STAEndpoint].self, forKey: .endpoints) ?? [],
-            criticalPaths: try container.decodeIfPresent([STAPath].self, forKey: .criticalPaths) ?? [],
-            violations: try container.decodeIfPresent([STAViolation].self, forKey: .violations) ?? [],
-            repairCandidates: try container.decodeIfPresent([STARepairCandidate].self, forKey: .repairCandidates) ?? [],
-            provenance: try container.decodeIfPresent(TimingArtifactProvenance.self, forKey: .provenance) ?? TimingArtifactProvenance()
+            analyzedCorners: try container.decode([String].self, forKey: .analyzedCorners),
+            analyzedModes: try container.decode([String].self, forKey: .analyzedModes),
+            endpoints: try container.decode([STAEndpoint].self, forKey: .endpoints),
+            criticalPaths: try container.decode([STAPath].self, forKey: .criticalPaths),
+            violations: try container.decode([STAViolation].self, forKey: .violations),
+            repairCandidates: try container.decode([STARepairCandidate].self, forKey: .repairCandidates),
+            provenance: try container.decode(TimingArtifactProvenance.self, forKey: .provenance)
         )
     }
 

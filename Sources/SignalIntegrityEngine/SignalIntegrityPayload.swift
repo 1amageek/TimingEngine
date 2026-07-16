@@ -41,13 +41,13 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
-            violationCount: try container.decodeIfPresent(Int.self, forKey: .violationCount) ?? 0,
+            violationCount: try container.decode(Int.self, forKey: .violationCount),
             worstDeltaDelay: try container.decodeIfPresent(Double.self, forKey: .worstDeltaDelay),
             worstNoiseRatio: try container.decodeIfPresent(Double.self, forKey: .worstNoiseRatio),
-            analyzedModes: try container.decodeIfPresent([String].self, forKey: .analyzedModes) ?? [],
-            analyzedNets: try container.decodeIfPresent([SINetSummary].self, forKey: .analyzedNets) ?? [],
-            violations: try container.decodeIfPresent([SIViolation].self, forKey: .violations) ?? [],
-            provenance: try container.decodeIfPresent(TimingArtifactProvenance.self, forKey: .provenance) ?? TimingArtifactProvenance()
+            analyzedModes: try container.decode([String].self, forKey: .analyzedModes),
+            analyzedNets: try container.decode([SINetSummary].self, forKey: .analyzedNets),
+            violations: try container.decode([SIViolation].self, forKey: .violations),
+            provenance: try container.decode(TimingArtifactProvenance.self, forKey: .provenance)
         )
     }
 

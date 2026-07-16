@@ -70,11 +70,11 @@ public struct TimingLibrary: Sendable, Hashable, Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
             name: try container.decode(String.self, forKey: .name),
-            timeUnitScale: try container.decodeIfPresent(Double.self, forKey: .timeUnitScale) ?? 1,
-            capacitanceUnitScale: try container.decodeIfPresent(Double.self, forKey: .capacitanceUnitScale) ?? 1,
-            powerUnitScale: try container.decodeIfPresent(Double.self, forKey: .powerUnitScale) ?? 1,
-            cells: try container.decodeIfPresent([String: TimingCell].self, forKey: .cells) ?? [:],
-            operatingConditions: try container.decodeIfPresent([String: TimingOperatingCondition].self, forKey: .operatingConditions) ?? [:]
+            timeUnitScale: try container.decode(Double.self, forKey: .timeUnitScale),
+            capacitanceUnitScale: try container.decode(Double.self, forKey: .capacitanceUnitScale),
+            powerUnitScale: try container.decode(Double.self, forKey: .powerUnitScale),
+            cells: try container.decode([String: TimingCell].self, forKey: .cells),
+            operatingConditions: try container.decode([String: TimingOperatingCondition].self, forKey: .operatingConditions)
         )
     }
 

@@ -166,16 +166,16 @@ public struct TimingConstraintSet: Sendable, Hashable, Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
-            modeID: try container.decodeIfPresent(String.self, forKey: .modeID) ?? "default",
-            clocks: try container.decodeIfPresent([Clock].self, forKey: .clocks) ?? [],
-            generatedClocks: try container.decodeIfPresent([GeneratedClock].self, forKey: .generatedClocks) ?? [],
-            inputDelays: try container.decodeIfPresent([PortDelay].self, forKey: .inputDelays) ?? [],
-            outputDelays: try container.decodeIfPresent([PortDelay].self, forKey: .outputDelays) ?? [],
-            exceptions: try container.decodeIfPresent([PathException].self, forKey: .exceptions) ?? [],
-            pathGroups: try container.decodeIfPresent([TimingPathGroup].self, forKey: .pathGroups) ?? [],
-            clockGroups: try container.decodeIfPresent([TimingClockGroup].self, forKey: .clockGroups) ?? [],
-            defaultInputSlew: try container.decodeIfPresent(Double.self, forKey: .defaultInputSlew) ?? 1e-10,
-            defaultOutputLoad: try container.decodeIfPresent(Double.self, forKey: .defaultOutputLoad) ?? 0
+            modeID: try container.decode(String.self, forKey: .modeID),
+            clocks: try container.decode([Clock].self, forKey: .clocks),
+            generatedClocks: try container.decode([GeneratedClock].self, forKey: .generatedClocks),
+            inputDelays: try container.decode([PortDelay].self, forKey: .inputDelays),
+            outputDelays: try container.decode([PortDelay].self, forKey: .outputDelays),
+            exceptions: try container.decode([PathException].self, forKey: .exceptions),
+            pathGroups: try container.decode([TimingPathGroup].self, forKey: .pathGroups),
+            clockGroups: try container.decode([TimingClockGroup].self, forKey: .clockGroups),
+            defaultInputSlew: try container.decode(Double.self, forKey: .defaultInputSlew),
+            defaultOutputLoad: try container.decode(Double.self, forKey: .defaultOutputLoad)
         )
     }
 
