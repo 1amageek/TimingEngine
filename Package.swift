@@ -5,35 +5,51 @@ import Foundation
 let workspaceRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
+
 let logicDesignDependency: Package.Dependency = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("LogicDesign/Package.swift").path
 )
     ? .package(path: "../LogicDesign")
-    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "8e0c8c2c63152aa45bf12d943fa034bb1aba0f1e")
+    : .package(
+        url: "https://github.com/1amageek/LogicDesign.git",
+        revision: "cc39c974bf14624e6ce29fd8722620385fde0762"
+    )
 
 let pdkKitDependency: Package.Dependency = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("PDKKit/Package.swift").path
 )
     ? .package(path: "../PDKKit")
-    : .package(url: "https://github.com/1amageek/PDKKit.git", revision: "aa145dfaa67454c44ac7767c37a28ab7f4b1d2e2")
+    : .package(
+        url: "https://github.com/1amageek/PDKKit.git",
+        revision: "29cc9f6f8d24562a7dcb5fd43d8dc6437e695c21"
+    )
 
 let signoffToolSupportDependency: Package.Dependency = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("SignoffToolSupport/Package.swift").path
 )
     ? .package(path: "../SignoffToolSupport")
-    : .package(url: "https://github.com/1amageek/SignoffToolSupport.git", revision: "597c44065b6b717e903623adb8aabcf2ac367697")
+    : .package(
+        url: "https://github.com/1amageek/SignoffToolSupport.git",
+        revision: "7bfd1864edd147c59a1dc79e58f297120d165323"
+    )
 
 let circuiteFoundationDependency: Package.Dependency = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("CircuiteFoundation/Package.swift").path
 )
     ? .package(path: "../CircuiteFoundation")
-    : .package(url: "https://github.com/1amageek/CircuiteFoundation.git", revision: "2ec6ee13a89ac6885be3c26b41a9ee0ef89948ac")
+    : .package(
+        url: "https://github.com/1amageek/CircuiteFoundation.git",
+        revision: "2ec6ee13a89ac6885be3c26b41a9ee0ef89948ac"
+    )
 
 let toolQualificationDependency: Package.Dependency = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("ToolQualification/Package.swift").path
 )
     ? .package(path: "../ToolQualification")
-    : .package(url: "https://github.com/1amageek/ToolQualification.git", revision: "32b031b5322f1ccb0ef78466faab0f895d47c4fd")
+    : .package(
+        url: "https://github.com/1amageek/ToolQualification.git",
+        revision: "1856a1bc5660febbe2f0358d3e5e0262e496b3d3e"
+    )
 
 let package = Package(
     name: "TimingEngine",
