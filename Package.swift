@@ -15,7 +15,7 @@ let logicDesignDependency: Package.Dependency = isLSIWorkspace && FileManager.de
     ? .package(path: "../LogicDesign")
     : .package(
         url: "https://github.com/1amageek/LogicDesign.git",
-        revision: "09768ed203d97d1d0f79f786f9988fcb2cd39155"
+        revision: "4b82337cb78bf8aec9f1bb008e6c128a32649b6d"
     )
 
 let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
@@ -24,7 +24,7 @@ let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default
     ? .package(path: "../PDKKit")
     : .package(
         url: "https://github.com/1amageek/PDKKit.git",
-        revision: "28f3b83304ad2bbb0c2e0269d26616081d90d992"
+        revision: "435ea9f047059b1c07fd7e0ac528610841ebb7b6"
     )
 
 let signoffToolSupportDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
@@ -33,7 +33,7 @@ let signoffToolSupportDependency: Package.Dependency = isLSIWorkspace && FileMan
     ? .package(path: "../SignoffToolSupport")
     : .package(
         url: "https://github.com/1amageek/SignoffToolSupport.git",
-        revision: "2c8ce00a8f873934e74e3f219e0cbd122a862fe9"
+        revision: "9a00065522ae527342c87380f0e7faa87e7cca9f"
     )
 
 let circuiteFoundationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
@@ -42,7 +42,7 @@ let circuiteFoundationDependency: Package.Dependency = isLSIWorkspace && FileMan
     ? .package(path: "../CircuiteFoundation")
     : .package(
         url: "https://github.com/1amageek/CircuiteFoundation.git",
-        revision: "2ec6ee13a89ac6885be3c26b41a9ee0ef89948ac"
+        revision: "7abcac83517935c9b9f7553d7016d62cffde259d"
     )
 
 let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
@@ -51,7 +51,7 @@ let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileMana
     ? .package(path: "../ToolQualification")
     : .package(
         url: "https://github.com/1amageek/ToolQualification.git",
-        revision: "f6cacdbf64038a35ab62d70f575a8dd8349e5604"
+        revision: "d572d950a9dccb699413cd5157d901812354444f"
     )
 
 let package = Package(
