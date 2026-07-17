@@ -15,7 +15,7 @@ let logicDesignDependency: Package.Dependency = isLSIWorkspace && FileManager.de
     ? .package(path: "../LogicDesign")
     : .package(
         url: "https://github.com/1amageek/LogicDesign.git",
-        revision: "66dc625904fe1da52a1d01454c1c7759eea8f138"
+        revision: "b9aa25b0b78e6168befa25df3bfe8309bd020a6d"
     )
 
 let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
