@@ -48,7 +48,7 @@ let toolQualificationDependency: Package.Dependency = FileManager.default.fileEx
     ? .package(path: "../ToolQualification")
     : .package(
         url: "https://github.com/1amageek/ToolQualification.git",
-        revision: "1856a1bc5660febbe2f0358d3e5e0262e496b3d3"
+        revision: "81305bc9e603e0fbd6a9bda9084e13d3f59814f0"
     )
 
 let package = Package(
