@@ -33,7 +33,7 @@ let signoffToolSupportDependency: Package.Dependency = isLSIWorkspace && FileMan
     ? .package(path: "../SignoffToolSupport")
     : .package(
         url: "https://github.com/1amageek/SignoffToolSupport.git",
-        revision: "9a00065522ae527342c87380f0e7faa87e7cca9f"
+        revision: "6bf675eecb27e3bd3440c5ce8a85c85c510fc3cb"
     )
 
 let circuiteFoundationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
