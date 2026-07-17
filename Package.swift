@@ -15,7 +15,7 @@ let logicDesignDependency: Package.Dependency = isLSIWorkspace && FileManager.de
     ? .package(path: "../LogicDesign")
     : .package(
         url: "https://github.com/1amageek/LogicDesign.git",
-        revision: "cc39c974bf14624e6ce29fd8722620385fde0762"
+        revision: "698e54a6861cee247969d89df946d3b0f53c28ca"
     )
 
 let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
@@ -24,7 +24,7 @@ let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default
     ? .package(path: "../PDKKit")
     : .package(
         url: "https://github.com/1amageek/PDKKit.git",
-        revision: "29cc9f6f8d24562a7dcb5fd43d8dc6437e695c21"
+        revision: "b0d0ab30b044266e1ce3bd008dcec844e51f2302"
     )
 
 let signoffToolSupportDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
@@ -33,7 +33,7 @@ let signoffToolSupportDependency: Package.Dependency = isLSIWorkspace && FileMan
     ? .package(path: "../SignoffToolSupport")
     : .package(
         url: "https://github.com/1amageek/SignoffToolSupport.git",
-        revision: "7bfd1864edd147c59a1dc79e58f297120d165323"
+        revision: "2c8ce00a8f873934e74e3f219e0cbd122a862fe9"
     )
 
 let circuiteFoundationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
@@ -51,7 +51,7 @@ let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileMana
     ? .package(path: "../ToolQualification")
     : .package(
         url: "https://github.com/1amageek/ToolQualification.git",
-        revision: "81305bc9e603e0fbd6a9bda9084e13d3f59814f0"
+        revision: "f6cacdbf64038a35ab62d70f575a8dd8349e5604"
     )
 
 let package = Package(
