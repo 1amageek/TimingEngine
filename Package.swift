@@ -15,7 +15,7 @@ let logicDesignDependency: Package.Dependency = isLSIWorkspace && FileManager.de
     ? .package(path: "../LogicDesign")
     : .package(
         url: "https://github.com/1amageek/LogicDesign.git",
-        revision: "4b82337cb78bf8aec9f1bb008e6c128a32649b6d"
+        revision: "66dc625904fe1da52a1d01454c1c7759eea8f138"
     )
 
 let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
@@ -24,7 +24,7 @@ let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default
     ? .package(path: "../PDKKit")
     : .package(
         url: "https://github.com/1amageek/PDKKit.git",
-        revision: "435ea9f047059b1c07fd7e0ac528610841ebb7b6"
+        revision: "b62c5ad7e5819a24977038c2133856caed52f481"
     )
 
 let signoffToolSupportDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
