@@ -5,8 +5,11 @@ import Foundation
 let workspaceRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
+let isLSIWorkspace = FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("docs/workspace-packages.json").path
+)
 
-let logicDesignDependency: Package.Dependency = FileManager.default.fileExists(
+let logicDesignDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("LogicDesign/Package.swift").path
 )
     ? .package(path: "../LogicDesign")
@@ -15,7 +18,7 @@ let logicDesignDependency: Package.Dependency = FileManager.default.fileExists(
         revision: "cc39c974bf14624e6ce29fd8722620385fde0762"
     )
 
-let pdkKitDependency: Package.Dependency = FileManager.default.fileExists(
+let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("PDKKit/Package.swift").path
 )
     ? .package(path: "../PDKKit")
@@ -24,7 +27,7 @@ let pdkKitDependency: Package.Dependency = FileManager.default.fileExists(
         revision: "29cc9f6f8d24562a7dcb5fd43d8dc6437e695c21"
     )
 
-let signoffToolSupportDependency: Package.Dependency = FileManager.default.fileExists(
+let signoffToolSupportDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("SignoffToolSupport/Package.swift").path
 )
     ? .package(path: "../SignoffToolSupport")
@@ -33,7 +36,7 @@ let signoffToolSupportDependency: Package.Dependency = FileManager.default.fileE
         revision: "7bfd1864edd147c59a1dc79e58f297120d165323"
     )
 
-let circuiteFoundationDependency: Package.Dependency = FileManager.default.fileExists(
+let circuiteFoundationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("CircuiteFoundation/Package.swift").path
 )
     ? .package(path: "../CircuiteFoundation")
@@ -42,7 +45,7 @@ let circuiteFoundationDependency: Package.Dependency = FileManager.default.fileE
         revision: "2ec6ee13a89ac6885be3c26b41a9ee0ef89948ac"
     )
 
-let toolQualificationDependency: Package.Dependency = FileManager.default.fileExists(
+let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("ToolQualification/Package.swift").path
 )
     ? .package(path: "../ToolQualification")
