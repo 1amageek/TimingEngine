@@ -4,6 +4,11 @@ import STAEngine
 import TimingCore
 
 public struct TimingEngineService: Sendable {
+    public static let nativeCapabilities = [
+        NativeSTAEngine.capability,
+        NativeSignalIntegrityEngine.capability,
+    ]
+
     public let sta: any STAExecuting
     public let signalIntegrity: any SignalIntegrityExecuting
     public let corpus: any TimingCorpusRunning

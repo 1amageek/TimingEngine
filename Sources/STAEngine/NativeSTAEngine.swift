@@ -5,6 +5,14 @@ import PDKCore
 import TimingCore
 
 public struct NativeSTAEngine: STAExecuting {
+    public static let capability = TimingCapability(
+        engineID: "timing.sta",
+        supportedInputFormats: [.liberty, .json, .verilog, .sdc, .spef],
+        supportedOutputFormats: [.json],
+        features: ["foundation-request", "liberty-parsing", "sdc-parsing", "timing-graph", "mmmc-setup-hold", "recovery-removal", "pulse-width", "derate-ocv", "path-groups", "clock-groups", "provenance-digests", "artifact-persistence", "repair-candidates"],
+        limitations: ["advanced-statistical-ocv", "process-qualified-signoff"]
+    )
+
     public typealias Request = STARequest
     public typealias Output = STAExecutionResult
     public let reader: any TimingArtifactReading

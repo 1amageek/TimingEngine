@@ -2,6 +2,10 @@
 
 ## Native capabilities
 
+The machine-readable declarations are owned by `NativeSTAEngine.capability`
+and `NativeSignalIntegrityEngine.capability`. The `timingengine capabilities`
+command emits their schema-versioned records.
+
 | Area | Implemented behavior | Evidence |
 |---|---|---|
 | Liberty | Units, operating conditions, pins, NLDM tables, unate arcs, sequential constraints and power metadata | Parser and native-engine tests |

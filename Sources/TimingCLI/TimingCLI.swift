@@ -51,7 +51,7 @@ struct TimingCLI {
         case "correlate-oracle":
             try await runOracleCorrelation(values)
         case "capabilities":
-            try emit(TimingEngineAPI.nativeCapabilities)
+            try emit(TimingEngineService.nativeCapabilities)
         default:
             throw TimingError.invalidInput(usage)
         }

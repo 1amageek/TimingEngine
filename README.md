@@ -22,7 +22,7 @@ TimingEngine executes analyses and reconstructs retained observations. It does n
 | `TimingCore` | Liberty, SDC, SDF, SPEF, provenance and canonical timing references |
 | `STAEngine` | MMMC setup and hold analysis |
 | `SignalIntegrityEngine` | Coupling-aware crosstalk analysis |
-| `TimingEngine` | Umbrella API, corpus replay, raw correlation and evidence assessment |
+| `TimingEngine` | Native engine composition, corpus replay, raw correlation and evidence assessment |
 | `timingengine` | Deterministic JSON CLI |
 | `opensta-oracle-adapter` | Bounded OpenSTA process integration that emits `STAExecutionResult` |
 
@@ -39,6 +39,11 @@ flowchart LR
 ```
 
 There is no universal result envelope or runtime adapter layer.
+
+Native engines are initialized directly. `NativeSTAEngine.capability` and
+`NativeSignalIntegrityEngine.capability` expose their versioned capability
+records; `TimingEngineService.nativeCapabilities` aggregates those records for
+the CLI without acting as an engine factory.
 
 ## Evidence model
 

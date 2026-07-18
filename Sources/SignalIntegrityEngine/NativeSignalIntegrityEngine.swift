@@ -5,6 +5,14 @@ import PDKCore
 import TimingCore
 
 public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
+    public static let capability = TimingCapability(
+        engineID: "timing.signal-integrity",
+        supportedInputFormats: [.json, .verilog, .sdc, .spef],
+        supportedOutputFormats: [.json],
+        features: ["foundation-request", "coupling-capacitance", "delta-delay", "noise-ratio", "provenance-digests", "artifact-persistence"],
+        limitations: ["waveform-resolved-noise", "process-qualified-signoff"]
+    )
+
     public typealias Request = SignalIntegrityRequest
     public typealias Output = SignalIntegrityExecutionResult
     public let reader: any TimingArtifactReading
