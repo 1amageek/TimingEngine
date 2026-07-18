@@ -25,12 +25,8 @@ public struct TimingLUT: Sendable, Hashable, Codable {
         self.values = values
     }
 
-    public static func constant(_ value: Double) -> TimingLUT {
-        do {
-            return try TimingLUT(inputSlews: [0], outputLoads: [0], values: [[value]])
-        } catch {
-            preconditionFailure("A constant timing LUT must be constructible: \(error)")
-        }
+    public static func constant(_ value: Double) throws -> TimingLUT {
+        try TimingLUT(inputSlews: [0], outputLoads: [0], values: [[value]])
     }
 
     public func lookup(inputSlew: Double, outputLoad: Double) -> Double {

@@ -567,8 +567,9 @@ public struct NativeSTAEngine: STAExecuting {
             for item in ready {
                 result.append(item)
                 if let cell = cells[item.element.name] {
-                    for pin in cell.outputPins where item.element.connections[pin.name] != nil {
-                        available.insert(item.element.connections[pin.name]!)
+                    for pin in cell.outputPins {
+                        guard let net = item.element.connections[pin.name] else { continue }
+                        available.insert(net)
                     }
                 }
             }

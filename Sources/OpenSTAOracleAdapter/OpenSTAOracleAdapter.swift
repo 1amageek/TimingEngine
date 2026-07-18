@@ -443,12 +443,7 @@ struct OpenSTAOracleAdapter {
         message: String,
         suggestedActions: [String]
     ) -> DesignDiagnostic {
-        let diagnosticCode: DiagnosticCode
-        do {
-            diagnosticCode = try DiagnosticCode(rawValue: code)
-        } catch {
-            preconditionFailure("OpenSTA emitted an invalid diagnostic code: \(code)")
-        }
+        let diagnosticCode = DiagnosticCode.trusted(code)
         return DesignDiagnostic(
             code: diagnosticCode,
             severity: severity,

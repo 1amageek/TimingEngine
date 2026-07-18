@@ -69,9 +69,14 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
                 siResult = try await signalIntegrity.execute(request.si)
             }
 
-            let status = staResult?.status ?? siResult!.status
+            guard let status = staResult?.status ?? siResult?.status,
+                  let resultDiagnostics = staResult?.diagnostics ?? siResult?.diagnostics else {
+                throw TimingError.invariantViolation(
+                    "Timing corpus execution produced neither an STA result nor a signal-integrity result."
+                )
+            }
             let observedOutcome = outcome(for: status)
-            let diagnostics = (staResult?.diagnostics ?? siResult!.diagnostics)
+            let diagnostics = resultDiagnostics
                 .map { $0.code.rawValue }
                 .sorted()
             let missingCodes = Set(corpusCase.expectedDiagnosticCodes).subtracting(diagnostics).sorted()

@@ -150,8 +150,9 @@ public struct TimingReferenceAnalyzer: Sendable {
         var loads: [String: Double] = [:]
         for instance in design.instances {
             guard let cell = cells[instance.name] else { continue }
-            for pin in cell.inputPins where instance.connections[pin.name] != nil {
-                loads[instance.connections[pin.name]!, default: 0] += pin.capacitance
+            for pin in cell.inputPins {
+                guard let net = instance.connections[pin.name] else { continue }
+                loads[net, default: 0] += pin.capacitance
             }
         }
         for net in design.nets { loads[net.name, default: 0] += net.capacitance }

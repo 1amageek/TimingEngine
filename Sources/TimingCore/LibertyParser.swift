@@ -386,8 +386,8 @@ private struct LibertyGrammar {
         var result: [LibertyNode] = []
         while true {
             if case .end = peek() {
-                if closing != nil {
-                    throw error("Missing closing '\(closing!)'.")
+                if let closing {
+                    throw error("Missing closing '\(closing)'.")
                 }
                 return result
             }

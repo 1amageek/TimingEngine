@@ -5,6 +5,15 @@ import Testing
 
 @Suite("TimingCore parsers")
 struct TimingCoreTests {
+    @Test("constant LUT validates public numeric input")
+    func constantLUTValidation() throws {
+        let lut = try TimingLUT.constant(0.25)
+        #expect(lut.lookup(inputSlew: 1, outputLoad: 1) == 0.25)
+        #expect(throws: TimingError.self) {
+            try TimingLUT.constant(.nan)
+        }
+    }
+
     @Test("Liberty parses combinational and sequential timing arcs")
     func libertyParser() throws {
         let library = try LibertyParser().parse(Data(Self.liberty.utf8))
