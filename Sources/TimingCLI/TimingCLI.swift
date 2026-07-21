@@ -19,6 +19,7 @@ struct TimingCLI {
             } catch {
                 print("{\"message\":\"timingengine failed\"}")
             }
+            Foundation.exit(1)
         }
     }
 
@@ -145,6 +146,9 @@ struct TimingCLI {
         }
         let result = try await NativeSTAEngine(artifactStore: store, workspaceRoot: workspaceRoot).execute(request)
         try emit(result)
+        guard result.status == .completed else {
+            Foundation.exit(1)
+        }
     }
 
     private static func makeReference(
@@ -194,6 +198,9 @@ struct TimingCLI {
             }
         }
         try emit(report)
+        guard report.isValid else {
+            Foundation.exit(1)
+        }
     }
 
     private static func runEvidenceAssessment(_ values: [String]) async throws {
@@ -275,6 +282,9 @@ struct TimingCLI {
             }
         }
         try emit(report)
+        guard report.outcome == .passed else {
+            Foundation.exit(1)
+        }
     }
 
     private static func runOracleCorrelation(_ values: [String]) async throws {
@@ -317,11 +327,22 @@ struct TimingCLI {
         guard pdkEvidence.isComplete else {
             throw TimingError.invalidInput("PDK evidence must be complete before external correlation is retained.")
         }
+        let referenceBuilder = TimingArtifactReferenceBuilder()
+        let oracleExecutableArtifact = try referenceBuilder.makeReference(
+            at: URL(filePath: oracleExecutablePath),
+            relativeTo: workspaceRoot,
+            kind: try ArtifactKind(rawValue: "tool.executable"),
+            format: try ArtifactFormat(rawValue: "binary")
+        )
         let matchingTools = oracle.evidence.provenance.supportingTools.filter {
-            $0.identifier == oracleID && $0.version == oracleVersion
+            $0.identifier == oracleID
+                && $0.version == oracleVersion
+                && $0.build?.caseInsensitiveCompare(
+                    oracleExecutableArtifact.digest.hexadecimalValue
+                ) == .orderedSame
         }
         guard matchingTools.count == 1, let oracleTool = matchingTools.first else {
-            throw TimingError.invalidInput("Oracle result does not retain the requested tool identity and version.")
+            throw TimingError.invalidInput("Oracle result does not retain the requested tool identity, version and executable digest.")
         }
         let tolerance = option("--tolerance", in: values).flatMap(Double.init) ?? 1e-15
         let result: TimingCorrelationResult
@@ -339,7 +360,6 @@ struct TimingCLI {
                 oracleID: oracleID
             )
         }
-        let referenceBuilder = TimingArtifactReferenceBuilder()
         let corpusEvidenceArtifact = try referenceBuilder.makeReference(
             at: URL(filePath: corpusPath),
             relativeTo: workspaceRoot,
@@ -355,12 +375,7 @@ struct TimingCLI {
             corpusEvidenceArtifact: corpusEvidenceArtifact,
             nativeEngine: native.evidence.provenance.producer,
             oracleTool: oracleTool,
-            oracleExecutableArtifact: try referenceBuilder.makeReference(
-                at: URL(filePath: oracleExecutablePath),
-                relativeTo: workspaceRoot,
-                kind: try ArtifactKind(rawValue: "tool.executable"),
-                format: try ArtifactFormat(rawValue: "binary")
-            ),
+            oracleExecutableArtifact: oracleExecutableArtifact,
             inputArtifacts: native.evidence.provenance.inputs,
             nativeOutputArtifact: try referenceBuilder.makeReference(
                 at: URL(filePath: nativePath),
@@ -406,6 +421,9 @@ struct TimingCLI {
             }
         }
         try emit(report)
+        guard report.correlation.status == .passed else {
+            Foundation.exit(1)
+        }
     }
 
     private static func decodeSTAReport(path: String) throws -> STAExecutionResult {

@@ -9,7 +9,24 @@ struct OpenSTAOracleAdapter {
     static func main() async {
         let arguments = Array(CommandLine.arguments.dropFirst())
         do {
-            try emit(try await execute(arguments: arguments))
+            let executionResult = try await execute(arguments: arguments)
+            try emit(executionResult)
+            guard executionResult.status == .completed else {
+                Foundation.exit(1)
+            }
+        } catch let error as OpenSTAExecutableValidationError {
+            let runID = option("--run-id", in: arguments) ?? "opensta-oracle-run"
+            do {
+                try emit(failureResult(
+                    runID: runID,
+                    code: error.diagnosticCode,
+                    message: error.localizedDescription,
+                    suggestedActions: error.suggestedActions
+                ))
+            } catch {
+                print("{\"status\":\"failed\",\"message\":\"opensta oracle adapter failed\"}")
+            }
+            Foundation.exit(1)
         } catch {
             let runID = option("--run-id", in: arguments) ?? "opensta-oracle-run"
             do {
@@ -17,6 +34,7 @@ struct OpenSTAOracleAdapter {
             } catch {
                 print("{\"status\":\"failed\",\"message\":\"opensta oracle adapter failed\"}")
             }
+            Foundation.exit(1)
         }
     }
 
@@ -32,12 +50,19 @@ struct OpenSTAOracleAdapter {
         let top = try required("--top", in: arguments)
         let modeID = option("--mode", in: arguments) ?? "default"
         let cornerID = option("--corner", in: arguments) ?? "default"
-        let timeoutSeconds = option("--timeout", in: arguments).flatMap(Double.init) ?? 300
+        let timeoutSeconds = try timeout(in: arguments)
         let spefPath = option("--spef", in: arguments)
         let workspaceRoot = option("--workspace-root", in: arguments).map {
             URL(filePath: $0, directoryHint: .isDirectory)
                 .standardizedFileURL.resolvingSymlinksInPath()
         }
+        let executableValidator = OpenSTAExecutableValidator()
+        let executable = try await executableValidator.validate(
+            path: staPath,
+            expectedVersion: oracleVersion,
+            timeoutSeconds: timeoutSeconds
+        )
+        let resolvedSTAPath = executable.url.path(percentEncoded: false)
 
         let referenceBuilder = TimingArtifactReferenceBuilder()
         let designReference = try makeReference(
@@ -105,17 +130,40 @@ struct OpenSTAOracleAdapter {
             format: try ArtifactFormat(rawValue: "tcl")
         )
         let process = Process()
-        process.executableURL = URL(filePath: staPath)
+        process.executableURL = executable.url
         process.arguments = ["-exit", scriptURL.path(percentEncoded: false)]
         process.currentDirectoryURL = scriptURL.deletingLastPathComponent()
         let invocation = try ExecutionInvocation.externalProcess(
-            executable: staPath,
+            executable: resolvedSTAPath,
             arguments: process.arguments ?? [],
             workingDirectory: process.currentDirectoryURL?.path(percentEncoded: false)
         )
 
         do {
             let processResult = try await TimedProcessRunner(timeoutSeconds: timeoutSeconds).run(process: process)
+            do {
+                try executableValidator.revalidate(executable)
+            } catch let validationError as OpenSTAExecutableValidationError {
+                return try result(
+                    runID: runID,
+                    status: .failed,
+                    diagnostics: [diagnostic(
+                        severity: .error,
+                        code: validationError.diagnosticCode,
+                        message: validationError.localizedDescription,
+                        suggestedActions: validationError.suggestedActions
+                    )],
+                    payload: emptyPayload(modeID: modeID, cornerID: cornerID, provenance: provenance),
+                    startedAt: startedAt,
+                    oracleID: oracleID,
+                    oracleVersion: oracleVersion,
+                    oracleBuild: executable.digest.hexadecimalValue,
+                    inputs: inputs,
+                    invocation: invocation,
+                    designRevision: designReference.digest,
+                    artifacts: [scriptReference]
+                )
+            }
             let payload = makePayload(
                 stdout: processResult.standardOutput,
                 modeID: modeID,
@@ -138,6 +186,7 @@ struct OpenSTAOracleAdapter {
                     startedAt: startedAt,
                     oracleID: oracleID,
                     oracleVersion: oracleVersion,
+                    oracleBuild: executable.digest.hexadecimalValue,
                     inputs: inputs,
                     invocation: invocation,
                     designRevision: designReference.digest,
@@ -153,12 +202,36 @@ struct OpenSTAOracleAdapter {
                 startedAt: startedAt,
                 oracleID: oracleID,
                 oracleVersion: oracleVersion,
+                oracleBuild: executable.digest.hexadecimalValue,
                 inputs: inputs,
                 invocation: invocation,
                 designRevision: designReference.digest,
                 artifacts: [scriptReference]
             )
         } catch let error as TimedProcessError {
+            do {
+                try executableValidator.revalidate(executable)
+            } catch let validationError as OpenSTAExecutableValidationError {
+                return try result(
+                    runID: runID,
+                    status: .failed,
+                    diagnostics: [diagnostic(
+                        severity: .error,
+                        code: validationError.diagnosticCode,
+                        message: validationError.localizedDescription,
+                        suggestedActions: validationError.suggestedActions
+                    )],
+                    payload: emptyPayload(modeID: modeID, cornerID: cornerID, provenance: provenance),
+                    startedAt: startedAt,
+                    oracleID: oracleID,
+                    oracleVersion: oracleVersion,
+                    oracleBuild: executable.digest.hexadecimalValue,
+                    inputs: inputs,
+                    invocation: invocation,
+                    designRevision: designReference.digest,
+                    artifacts: [scriptReference]
+                )
+            }
             return try result(
                 runID: runID,
                 status: .failed,
@@ -172,6 +245,7 @@ struct OpenSTAOracleAdapter {
                 startedAt: startedAt,
                 oracleID: oracleID,
                 oracleVersion: oracleVersion,
+                oracleBuild: executable.digest.hexadecimalValue,
                 inputs: inputs,
                 invocation: invocation,
                 designRevision: designReference.digest,
@@ -379,6 +453,7 @@ struct OpenSTAOracleAdapter {
         startedAt: Date,
         oracleID: String,
         oracleVersion: String,
+        oracleBuild: String,
         inputs: [ArtifactReference],
         invocation: ExecutionInvocation,
         designRevision: ContentDigest?,
@@ -395,7 +470,8 @@ struct OpenSTAOracleAdapter {
             supportingTools: [try ProducerIdentity(
                 kind: .tool,
                 identifier: oracleID,
-                version: oracleVersion
+                version: oracleVersion,
+                build: oracleBuild
             )],
             inputs: inputs,
             invocation: invocation,
@@ -416,7 +492,8 @@ struct OpenSTAOracleAdapter {
     private static func failureResult(
         runID: String,
         code: String,
-        message: String
+        message: String,
+        suggestedActions: [String] = ["inspect_adapter_arguments"]
     ) throws -> STAExecutionResult {
         let producer = try ProducerIdentity(
             kind: .tool,
@@ -432,7 +509,12 @@ struct OpenSTAOracleAdapter {
             runID: runID,
             status: .failed,
             payload: STAPayload(worstSetupSlack: nil, worstHoldSlack: nil, analyzedCorners: [], analyzedModes: []),
-            diagnostics: [diagnostic(severity: .error, code: code, message: message, suggestedActions: ["inspect_adapter_arguments"])],
+            diagnostics: [diagnostic(
+                severity: .error,
+                code: code,
+                message: message,
+                suggestedActions: suggestedActions
+            )],
             provenance: provenance
         )
     }
@@ -467,6 +549,16 @@ struct OpenSTAOracleAdapter {
             throw TimingError.invalidInput("Missing \(key).")
         }
         return value
+    }
+
+    private static func timeout(in arguments: [String]) throws -> Double {
+        guard let value = option("--timeout", in: arguments) else {
+            return 300
+        }
+        guard let seconds = Double(value), seconds.isFinite, seconds > 0 else {
+            throw TimingError.invalidInput("--timeout must be positive finite seconds.")
+        }
+        return seconds
     }
 
     private static func option(_ key: String, in arguments: [String]) -> String? {

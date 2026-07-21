@@ -215,6 +215,10 @@ struct CorpusTests {
         let executableURL = executableDirectory.appending(path: "true")
         try FileManager.default.copyItem(at: URL(filePath: "/usr/bin/true"), to: executableURL)
         let executablePath = executableURL.path(percentEncoded: false)
+        let executableDigest = try SHA256ContentDigester().digest(
+            fileAt: executableURL,
+            using: .sha256
+        )
         let pdkReference = try TimingArtifactReferenceBuilder().makeReference(
             at: fixtureDirectory.appending(path: "pdk.json"),
             relativeTo: workspaceRoot,
@@ -233,7 +237,8 @@ struct CorpusTests {
         let oracleTool = try ProducerIdentity(
             kind: .tool,
             identifier: "fixture-oracle",
-            version: "1"
+            version: "1",
+            build: executableDigest.hexadecimalValue
         )
         let nativeEngine = try ProducerIdentity(
             kind: .engine,
@@ -372,6 +377,32 @@ struct CorpusTests {
         )
         #expect(blocked.outcome == .blocked)
         #expect(blocked.findings.contains("external_correlation_corpus_digest_mismatch"))
+
+        var substitutedExecutableIdentity = correlation
+        substitutedExecutableIdentity.oracleTool = try ProducerIdentity(
+            kind: .tool,
+            identifier: oracleTool.identifier,
+            version: oracleTool.version,
+            build: String(repeating: "0", count: 64)
+        )
+        let substitutedIdentity = await evaluator.evaluate(
+            corpus: corpus,
+            pdk: pdk,
+            modeIDs: ["functional"],
+            cornerIDs: ["typical"],
+            externalOracle: TimingExternalOracleEvidence(
+                oracleID: oracleTool.identifier,
+                status: .available,
+                executablePath: executablePath,
+                version: oracleTool.version,
+                details: "retained fixture"
+            ),
+            externalCorrelation: substitutedExecutableIdentity,
+            pdkEvidence: pdkEvidence,
+            workspaceRoot: workspaceRoot
+        )
+        #expect(substitutedIdentity.outcome == .blocked)
+        #expect(substitutedIdentity.findings.contains("external_oracle_correlation_invalid"))
 
         try Data("tampered-corpus-output".utf8).write(to: corpusURL, options: .atomic)
         let tamperedCorpus = await evaluator.evaluate(

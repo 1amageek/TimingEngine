@@ -18,6 +18,7 @@ flowchart LR
 | Native STA/SI subset | Complete | Typed APIs, CLI and focused tests |
 | Retained corpus | Complete | Positive, blocked and SI cases |
 | External process safety | Complete | Timeout, process-tree cleanup and structured failures |
+| Executable identity | Complete | Resolved regular-file validation, measured version, before/after SHA-256 mutation detection and producer-build binding |
 | External raw correlation | Complete | Workspace-relative artifacts, digest/size checks, identity/input binding and metric reconstruction |
 | Evidence assessment | Complete | Outcome derived from findings; serialized verdict injection is ignored |
 | PDK observation | Complete | Manifest and asset digests rebuilt under an explicit workspace root |
@@ -41,7 +42,8 @@ flowchart LR
 
 - `swift build`
 - focused `CorpusTests` through `xcodebuild` with a 30-second external timeout
-- artifact tampering tests for corpus and oracle output
+- artifact and executable tampering tests for corpus and oracle output
+- external adapter tests for version mismatch and exact executable SHA-256 provenance
 - persisted assessment verdict injection test
 - workspace-relative containment and digest reconstruction through the correlation verifier
 

@@ -3,7 +3,7 @@ import Foundation
 import TimingCore
 
 public struct TimingExternalCorrelationReport: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 4
 
     public var schemaVersion: Int
     public var processID: String
@@ -90,6 +90,13 @@ public struct TimingExternalCorrelationReport: Sendable, Hashable, Codable {
         }
         guard correlation.oracleID == oracleTool.identifier else {
             throw TimingError.invalidInput("External correlation oracle identity does not match its tool identity.")
+        }
+        guard let oracleBuild = oracleTool.build,
+              Self.isSHA256(oracleBuild),
+              oracleBuild.caseInsensitiveCompare(
+                oracleExecutableArtifact.digest.hexadecimalValue
+              ) == .orderedSame else {
+            throw TimingError.invalidInput("External correlation oracle identity must match the executable SHA-256 digest.")
         }
         guard nativeEngine != oracleTool else {
             throw TimingError.invalidInput("Native and oracle timing tools must be independent.")

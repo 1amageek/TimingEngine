@@ -156,5 +156,11 @@ public struct LocalTimingExternalCorrelationVerifier: TimingExternalCorrelationV
         guard artifactURL == invocationURL, artifactURL == evidenceURL else {
             throw TimingError.invalidInput("Oracle executable artifact, invocation and selection do not match.")
         }
+        guard let oracleBuild = report.oracleTool.build,
+              oracleBuild.caseInsensitiveCompare(
+                report.oracleExecutableArtifact.digest.hexadecimalValue
+              ) == .orderedSame else {
+            throw TimingError.invalidInput("Oracle producer build does not match the retained executable digest.")
+        }
     }
 }

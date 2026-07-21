@@ -249,9 +249,16 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
             producer: ProducerIdentity(
                 kind: .engine,
                 identifier: "timing.signal-integrity",
-                version: "1.1.0"
+                version: "1.1.0",
+                build: TimingRuntimeIdentity.currentExecutableDigest()
             ),
             inputs: inputs,
+            invocation: ExecutionInvocation.inProcess(
+                entryPoint: "SignalIntegrityEngine.NativeSignalIntegrityEngine.execute"
+            ),
+            environment: try TimingRuntimeIdentity.environmentFingerprint(
+                toolchain: "timing.signal-integrity-1.1.0"
+            ),
             startedAt: startedAt,
             completedAt: completedAt
         )

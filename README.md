@@ -24,7 +24,7 @@ TimingEngine executes analyses and reconstructs retained observations. It does n
 | `SignalIntegrityEngine` | Coupling-aware crosstalk analysis |
 | `TimingEngine` | Native engine composition, corpus replay, raw correlation and evidence assessment |
 | `timingengine` | Deterministic JSON CLI |
-| `opensta-oracle-adapter` | Bounded OpenSTA process integration that emits `STAExecutionResult` |
+| `opensta-oracle-adapter` | Bounded OpenSTA process integration that verifies and fingerprints the resolved executable before emitting `STAExecutionResult` |
 
 ## CircuiteFoundation conformance
 
@@ -127,6 +127,8 @@ swift run timingengine assess-evidence \
 ```
 
 The oracle executable must be retained inside the declared workspace for correlation. Availability alone is not evidence.
+
+The OpenSTA adapter resolves symlinks, requires a regular executable file, queries `-version`, and compares the reported version with `--oracle-version`. It hashes the resolved executable with SHA-256 before the version probe and verifies the same digest after both the probe and timing run. The measured digest is recorded in `ExecutionProvenance.supportingTools[].build`; a version mismatch, unreadable binary, or executable mutation produces a failed `STAExecutionResult` with a structured diagnostic and a nonzero process exit.
 
 ## Sky130A retained profile
 

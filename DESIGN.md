@@ -31,11 +31,13 @@ The following states are independent:
 
 Persisted decision fields are not trusted. `TimingEvidenceAssessment.outcome` is derived from findings. External correlation is accepted only after workspace containment, digest, byte-count, producer, invocation, input and metric reconstruction checks.
 
+The OpenSTA execution boundary does not trust a caller-declared tool identity. The adapter resolves the executable, validates that it is a regular executable file, measures its SHA-256, verifies its reported version, and detects binary or file-metadata mutation after the version probe and analysis process. The observed digest is stored as the supporting tool producer build so ToolQualification can bind the result to its independently verified `binaryDigest`.
+
 The checked-in Sky130A directory is an input manifest, not a foundry corpus. Its required Liberty file is deliberately external; absence or digest drift is reported as incomplete PDK evidence. No checked-in decision artifact may convert that missing input into qualification.
 
 ## Artifact boundary
 
-Correlation artifacts must use workspace-relative `ArtifactLocation` values. The caller supplies one explicit workspace root. Symlink-resolved files outside that root are rejected. Native and oracle outputs must retain the same input artifact identities and an independent oracle executable identity.
+Correlation artifacts must use workspace-relative `ArtifactLocation` values. The caller supplies one explicit workspace root. Symlink-resolved files outside that root are rejected. Native and oracle outputs must retain the same input artifact identities and an independent oracle executable identity. A declared executable version without a matching measured digest is not production evidence.
 
 ## Dependency direction
 
