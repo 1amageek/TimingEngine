@@ -52,7 +52,26 @@ struct TimingCLIProcessTests {
         #expect(execution.status == .completed)
         #expect(execution.evidence.provenance.supportingTools.count == 1)
         #expect(execution.evidence.provenance.supportingTools[0].build == executableDigest.hexadecimalValue)
-        #expect(execution.evidence.provenance.invocation?.executable == fixture.executable.path(percentEncoded: false))
+        let invocationExecutable = try #require(
+            execution.evidence.provenance.invocation?.executable
+        )
+        #expect(invocationExecutable != fixture.executable.path(percentEncoded: false))
+        #expect(invocationExecutable.hasPrefix(
+            fixture.root.appending(path: ".timingengine/runs/opensta-process-fixture/opensta").path
+        ))
+        let standardOutput = try #require(execution.artifacts.first {
+            $0.artifactID == "opensta-standard-output"
+        })
+        let standardError = try #require(execution.artifacts.first {
+            $0.artifactID == "opensta-standard-error"
+        })
+        #expect(LocalArtifactVerifier().verify(standardOutput, relativeTo: fixture.root).isVerified)
+        #expect(LocalArtifactVerifier().verify(standardError, relativeTo: fixture.root).isVerified)
+        let standardOutputURL = try standardOutput.locator.location.resolvedFileURL(
+            relativeTo: fixture.root
+        )
+        #expect(try String(contentsOf: standardOutputURL, encoding: .utf8)
+            .contains("TIMINGENGINE_SETUP_BEGIN"))
     }
 
     @Test("OpenSTA adapter rejects a declared version not reported by the executable")
@@ -101,15 +120,15 @@ struct TimingCLIProcessTests {
     func openSTAAdapterRejectsExecutableMutation() throws {
         let fixture = try OpenSTAProcessFixture(
             toolBody: """
-            mv "$0.replacement" "$0"
+            chmod u+w "$0"
+            printf '%s\n' '# mutated during analysis' >> "$0"
             printf '%s\n' 'TIMINGENGINE_SETUP_BEGIN'
             printf '%s\n' 'slack (MET) 0.100'
             printf '%s\n' 'TIMINGENGINE_SETUP_END'
             printf '%s\n' 'TIMINGENGINE_HOLD_BEGIN'
             printf '%s\n' 'slack (MET) 0.050'
             printf '%s\n' 'TIMINGENGINE_HOLD_END'
-            """,
-            replacementBody: "exit 17"
+            """
         )
         defer { fixture.remove() }
 
@@ -125,6 +144,37 @@ struct TimingCLIProcessTests {
         )
         #expect(execution.status == .failed)
         #expect(execution.diagnostics.map(\.code.rawValue) == ["OPENSTA_EXECUTABLE_MUTATED"])
+        #expect(execution.artifacts.contains {
+            $0.artifactID == "opensta-standard-output"
+        })
+        #expect(execution.artifacts.contains {
+            $0.artifactID == "opensta-standard-error"
+        })
+    }
+
+    @Test("OpenSTA adapter rejects run identifiers that are not stable path identities")
+    func openSTAAdapterRejectsInvalidRunIdentifier() throws {
+        let fixture = try OpenSTAProcessFixture(toolBody: "exit 0")
+        defer { fixture.remove() }
+        var arguments = fixture.arguments(version: "3.1.0")
+        let runIDIndex = try #require(arguments.firstIndex(of: "--run-id")).advanced(by: 1)
+        arguments[runIDIndex] = "../colliding-run"
+
+        let result = try runExecutable(
+            named: "opensta-oracle-adapter",
+            arguments: arguments
+        )
+
+        #expect(result.exitCode != 0)
+        let execution = try JSONDecoder().decode(
+            STAExecutionResult.self,
+            from: Data(result.standardOutput.utf8)
+        )
+        #expect(execution.status == .failed)
+        #expect(execution.diagnostics.map(\.code.rawValue) == ["OPENSTA_ADAPTER_INPUT_INVALID"])
+        #expect(!FileManager.default.fileExists(
+            atPath: fixture.root.appending(path: ".timingengine/runs/__colliding-run").path
+        ))
     }
 
     private func runExecutable(

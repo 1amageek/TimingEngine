@@ -52,9 +52,13 @@ struct OpenSTAOracleAdapter {
         let cornerID = option("--corner", in: arguments) ?? "default"
         let timeoutSeconds = try timeout(in: arguments)
         let spefPath = option("--spef", in: arguments)
-        let workspaceRoot = option("--workspace-root", in: arguments).map {
+        guard let workspaceRoot = option("--workspace-root", in: arguments).map({
             URL(filePath: $0, directoryHint: .isDirectory)
                 .standardizedFileURL.resolvingSymlinksInPath()
+        }) else {
+            throw TimingError.invalidInput(
+                "OpenSTA execution requires --workspace-root for immutable inputs and retained outputs."
+            )
         }
         let executableValidator = OpenSTAExecutableValidator()
         let executable = try await executableValidator.validate(
@@ -62,8 +66,6 @@ struct OpenSTAOracleAdapter {
             expectedVersion: oracleVersion,
             timeoutSeconds: timeoutSeconds
         )
-        let resolvedSTAPath = executable.url.path(percentEncoded: false)
-
         let referenceBuilder = TimingArtifactReferenceBuilder()
         let designReference = try makeReference(
             path: designPath,
@@ -111,16 +113,28 @@ struct OpenSTAOracleAdapter {
         )
         let inputs = [designReference, libraryReference, constraintReference, pdkReference]
             + (parasiticsReference.map { [$0] } ?? [])
-        let timeUnitScale = try libertyTimeUnitScale(path: libraryPath)
+        let executionWorkspace = try OpenSTAExecutionWorkspace.create(
+            workspaceRoot: workspaceRoot,
+            runID: runID,
+            executable: executable,
+            design: designReference,
+            library: libraryReference,
+            constraints: constraintReference,
+            pdk: pdkReference,
+            parasitics: parasiticsReference
+        )
+        let timeUnitScale = try libertyTimeUnitScale(
+            path: executionWorkspace.libraryURL.path(percentEncoded: false)
+        )
         let startedAt = Date()
         let scriptURL = try makeScript(
             runID: runID,
-            workingDirectory: URL(filePath: libraryPath).deletingLastPathComponent(),
-            designPath: designPath,
-            libraryPath: libraryPath,
-            constraintsPath: constraintsPath,
+            workingDirectory: executionWorkspace.root,
+            designPath: executionWorkspace.designURL.path(percentEncoded: false),
+            libraryPath: executionWorkspace.libraryURL.path(percentEncoded: false),
+            constraintsPath: executionWorkspace.constraintsURL.path(percentEncoded: false),
             top: top,
-            spefPath: spefPath
+            spefPath: executionWorkspace.spefURL?.path(percentEncoded: false)
         )
         let scriptReference = try makeReference(
             path: scriptURL.path(percentEncoded: false),
@@ -130,19 +144,29 @@ struct OpenSTAOracleAdapter {
             format: try ArtifactFormat(rawValue: "tcl")
         )
         let process = Process()
-        process.executableURL = executable.url
+        process.executableURL = executionWorkspace.executable.url
         process.arguments = ["-exit", scriptURL.path(percentEncoded: false)]
-        process.currentDirectoryURL = scriptURL.deletingLastPathComponent()
+        process.currentDirectoryURL = executionWorkspace.root
         let invocation = try ExecutionInvocation.externalProcess(
-            executable: resolvedSTAPath,
+            executable: executionWorkspace.executable.url.path(percentEncoded: false),
             arguments: process.arguments ?? [],
             workingDirectory: process.currentDirectoryURL?.path(percentEncoded: false)
         )
 
         do {
             let processResult = try await TimedProcessRunner(timeoutSeconds: timeoutSeconds).run(process: process)
+            let streamReferences = try persistProcessStreams(
+                runID: runID,
+                standardOutput: processResult.standardOutput,
+                standardError: processResult.standardError,
+                directory: executionWorkspace.root,
+                workspaceRoot: workspaceRoot,
+                builder: referenceBuilder
+            )
+            let retainedArtifacts = executionWorkspace.snapshotReferences
+                + [scriptReference] + streamReferences
             do {
-                try executableValidator.revalidate(executable)
+                try executableValidator.revalidate(executionWorkspace.executable)
             } catch let validationError as OpenSTAExecutableValidationError {
                 return try result(
                     runID: runID,
@@ -161,7 +185,28 @@ struct OpenSTAOracleAdapter {
                     inputs: inputs,
                     invocation: invocation,
                     designRevision: designReference.digest,
-                    artifacts: [scriptReference]
+                    artifacts: retainedArtifacts
+                )
+            }
+            guard executionWorkspace.verifySnapshots() else {
+                return try result(
+                    runID: runID,
+                    status: .failed,
+                    diagnostics: [diagnostic(
+                        severity: .error,
+                        code: "OPENSTA_INPUT_SNAPSHOT_CHANGED",
+                        message: "An OpenSTA execution snapshot changed during execution.",
+                        suggestedActions: ["inspect_retained_opensta_inputs"]
+                    )],
+                    payload: emptyPayload(modeID: modeID, cornerID: cornerID, provenance: provenance),
+                    startedAt: startedAt,
+                    oracleID: oracleID,
+                    oracleVersion: oracleVersion,
+                    oracleBuild: executable.digest.hexadecimalValue,
+                    inputs: inputs,
+                    invocation: invocation,
+                    designRevision: designReference.digest,
+                    artifacts: retainedArtifacts
                 )
             }
             let payload = makePayload(
@@ -190,7 +235,7 @@ struct OpenSTAOracleAdapter {
                     inputs: inputs,
                     invocation: invocation,
                     designRevision: designReference.digest,
-                    artifacts: [scriptReference]
+                    artifacts: retainedArtifacts
                 )
             }
             let reportDiagnostics = reportDiagnostics(for: payload, stderr: processResult.standardError)
@@ -206,11 +251,22 @@ struct OpenSTAOracleAdapter {
                 inputs: inputs,
                 invocation: invocation,
                 designRevision: designReference.digest,
-                artifacts: [scriptReference]
+                artifacts: retainedArtifacts
             )
         } catch let error as TimedProcessError {
+            let captured = capturedOutput(from: error)
+            let streamReferences = try persistProcessStreams(
+                runID: runID,
+                standardOutput: captured.standardOutput,
+                standardError: captured.standardError,
+                directory: executionWorkspace.root,
+                workspaceRoot: workspaceRoot,
+                builder: referenceBuilder
+            )
+            let retainedArtifacts = executionWorkspace.snapshotReferences
+                + [scriptReference] + streamReferences
             do {
-                try executableValidator.revalidate(executable)
+                try executableValidator.revalidate(executionWorkspace.executable)
             } catch let validationError as OpenSTAExecutableValidationError {
                 return try result(
                     runID: runID,
@@ -229,7 +285,28 @@ struct OpenSTAOracleAdapter {
                     inputs: inputs,
                     invocation: invocation,
                     designRevision: designReference.digest,
-                    artifacts: [scriptReference]
+                    artifacts: retainedArtifacts
+                )
+            }
+            guard executionWorkspace.verifySnapshots() else {
+                return try result(
+                    runID: runID,
+                    status: .failed,
+                    diagnostics: [diagnostic(
+                        severity: .error,
+                        code: "OPENSTA_INPUT_SNAPSHOT_CHANGED",
+                        message: "An OpenSTA execution snapshot changed during execution.",
+                        suggestedActions: ["inspect_retained_opensta_inputs"]
+                    )],
+                    payload: emptyPayload(modeID: modeID, cornerID: cornerID, provenance: provenance),
+                    startedAt: startedAt,
+                    oracleID: oracleID,
+                    oracleVersion: oracleVersion,
+                    oracleBuild: executable.digest.hexadecimalValue,
+                    inputs: inputs,
+                    invocation: invocation,
+                    designRevision: designReference.digest,
+                    artifacts: retainedArtifacts
                 )
             }
             return try result(
@@ -249,8 +326,66 @@ struct OpenSTAOracleAdapter {
                 inputs: inputs,
                 invocation: invocation,
                 designRevision: designReference.digest,
-                artifacts: [scriptReference]
+                artifacts: retainedArtifacts
             )
+        }
+    }
+
+    private static func persistProcessStreams(
+        runID: String,
+        standardOutput: String,
+        standardError: String,
+        directory: URL,
+        workspaceRoot: URL?,
+        builder: TimingArtifactReferenceBuilder
+    ) throws -> [ArtifactReference] {
+        let safeRunID = String(runID.map {
+            $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" ? $0 : "_"
+        })
+        let streams = [
+            (
+                suffix: "stdout",
+                content: standardOutput,
+                artifactID: "opensta-standard-output"
+            ),
+            (
+                suffix: "stderr",
+                content: standardError,
+                artifactID: "opensta-standard-error"
+            ),
+        ]
+        return try streams.map { stream in
+            let url = directory.appending(path: ".timingengine-opensta-\(safeRunID).\(stream.suffix).log")
+            do {
+                try Data(stream.content.utf8).write(to: url, options: .atomic)
+            } catch {
+                throw TimingError.artifactWriteFailed(
+                    path: url.path(percentEncoded: false),
+                    message: error.localizedDescription
+                )
+            }
+            return try makeReference(
+                path: url.path(percentEncoded: false),
+                workspaceRoot: workspaceRoot,
+                builder: builder,
+                role: .output,
+                kind: .log,
+                format: .text,
+                artifactID: stream.artifactID
+            )
+        }
+    }
+
+    private static func capturedOutput(
+        from error: TimedProcessError
+    ) -> (standardOutput: String, standardError: String) {
+        switch error {
+        case .cancellationCheckFailed(_, _, let standardOutput, let standardError),
+             .cancelled(_, let standardOutput, let standardError),
+             .timedOut(_, _, let standardOutput, let standardError):
+            (standardOutput, standardError)
+        case .invalidConfiguration, .launchFailed:
+            ("", "")
         }
     }
 
@@ -258,18 +393,28 @@ struct OpenSTAOracleAdapter {
         path: String,
         workspaceRoot: URL?,
         builder: TimingArtifactReferenceBuilder,
+        role: ArtifactRole = .input,
         kind: ArtifactKind,
-        format: ArtifactFormat
+        format: ArtifactFormat,
+        artifactID: String? = nil
     ) throws -> ArtifactReference {
         if let workspaceRoot {
             return try builder.makeReference(
                 at: URL(filePath: path),
                 relativeTo: workspaceRoot,
+                role: role,
                 kind: kind,
-                format: format
+                format: format,
+                artifactID: artifactID
             )
         }
-        return try builder.makeReference(path: path, kind: kind, format: format)
+        return try builder.makeReference(
+            path: path,
+            role: role,
+            kind: kind,
+            format: format,
+            artifactID: artifactID
+        )
     }
 
     private static func makePayload(
