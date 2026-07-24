@@ -43,8 +43,14 @@ struct OpenSTAExecutionWorkspace {
             || canonicalRunsRoot.path.hasPrefix(canonicalWorkspaceRoot.path + "/") else {
             throw TimingError.invalidInput("OpenSTA output root escapes the workspace.")
         }
-        let root = canonicalRunsRoot
+        let runRoot = canonicalRunsRoot
             .appending(path: runID, directoryHint: .isDirectory)
+        try fileManager.createDirectory(at: runRoot, withIntermediateDirectories: true)
+        let canonicalRunRoot = runRoot.resolvingSymlinksInPath()
+        guard canonicalRunRoot.path.hasPrefix(canonicalRunsRoot.path + "/") else {
+            throw TimingError.invalidInput("OpenSTA run workspace escapes the timing runs directory.")
+        }
+        let root = canonicalRunRoot
             .appending(path: "opensta", directoryHint: .isDirectory)
         guard !fileManager.fileExists(atPath: root.path) else {
             throw TimingError.artifactWriteFailed(
@@ -52,75 +58,133 @@ struct OpenSTAExecutionWorkspace {
                 message: "The immutable OpenSTA run workspace already exists."
             )
         }
-        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
-        let inputs = root.appending(path: "inputs", directoryHint: .isDirectory)
-        try fileManager.createDirectory(at: inputs, withIntermediateDirectories: false)
+        let stagingRoot = canonicalRunRoot.appending(
+            path: ".opensta-preparing-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        try fileManager.createDirectory(at: stagingRoot, withIntermediateDirectories: false)
+        do {
+            let stagingInputs = stagingRoot.appending(path: "inputs", directoryHint: .isDirectory)
+            try fileManager.createDirectory(
+                at: stagingInputs,
+                withIntermediateDirectories: false
+            )
 
-        let executableURL = inputs.appending(path: "opensta")
-        try fileManager.copyItem(at: executable.url, to: executableURL)
-        try fileManager.setAttributes(
-            [.posixPermissions: 0o500],
-            ofItemAtPath: executableURL.path
-        )
-        let executableSnapshot = OpenSTAExecutableValidator.ValidatedExecutable(
-            url: executableURL,
-            digest: executable.digest
-        )
-        try OpenSTAExecutableValidator().revalidate(executableSnapshot)
+            let stagingExecutableURL = stagingInputs.appending(path: "opensta")
+            try fileManager.copyItem(at: executable.url, to: stagingExecutableURL)
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o500],
+                ofItemAtPath: stagingExecutableURL.path
+            )
+            try OpenSTAExecutableValidator().revalidate(
+                OpenSTAExecutableValidator.ValidatedExecutable(
+                    url: stagingExecutableURL,
+                    digest: executable.digest
+                )
+            )
 
-        var references: [ArtifactReference] = []
-        let designURL = try snapshot(
-            design,
-            named: "design.\(design.locator.format.rawValue)",
-            in: inputs,
-            relativeTo: canonicalWorkspaceRoot
-        )
-        references.append(try snapshotReference(design, at: designURL))
-        let libraryURL = try snapshot(
-            library,
-            named: "library.lib",
-            in: inputs,
-            relativeTo: canonicalWorkspaceRoot
-        )
-        references.append(try snapshotReference(library, at: libraryURL))
-        let constraintsURL = try snapshot(
-            constraints,
-            named: "constraints.sdc",
-            in: inputs,
-            relativeTo: canonicalWorkspaceRoot
-        )
-        references.append(try snapshotReference(constraints, at: constraintsURL))
-        let pdkURL = try snapshot(
-            pdk,
-            named: "pdk.json",
-            in: inputs,
-            relativeTo: canonicalWorkspaceRoot
-        )
-        references.append(try snapshotReference(pdk, at: pdkURL))
-        let spefURL: URL?
-        if let parasitics {
-            let url = try snapshot(
-                parasitics,
-                named: "parasitics.spef",
-                in: inputs,
+            let designName = "design.\(design.locator.format.rawValue)"
+            _ = try snapshot(
+                design,
+                named: designName,
+                in: stagingInputs,
                 relativeTo: canonicalWorkspaceRoot
             )
-            references.append(try snapshotReference(parasitics, at: url))
-            spefURL = url
-        } else {
-            spefURL = nil
-        }
+            _ = try snapshot(
+                library,
+                named: "library.lib",
+                in: stagingInputs,
+                relativeTo: canonicalWorkspaceRoot
+            )
+            _ = try snapshot(
+                constraints,
+                named: "constraints.sdc",
+                in: stagingInputs,
+                relativeTo: canonicalWorkspaceRoot
+            )
+            _ = try snapshot(
+                pdk,
+                named: "pdk.json",
+                in: stagingInputs,
+                relativeTo: canonicalWorkspaceRoot
+            )
+            if let parasitics {
+                _ = try snapshot(
+                    parasitics,
+                    named: "parasitics.spef",
+                    in: stagingInputs,
+                    relativeTo: canonicalWorkspaceRoot
+                )
+            }
 
-        return Self(
-            root: root,
-            executable: executableSnapshot,
-            designURL: designURL,
-            libraryURL: libraryURL,
-            constraintsURL: constraintsURL,
-            pdkURL: pdkURL,
-            spefURL: spefURL,
-            snapshotReferences: references
-        )
+            try fileManager.moveItem(at: stagingRoot, to: root)
+            let inputs = root.appending(path: "inputs", directoryHint: .isDirectory)
+            let executableURL = inputs.appending(path: "opensta")
+            let executableSnapshot = OpenSTAExecutableValidator.ValidatedExecutable(
+                url: executableURL,
+                digest: executable.digest
+            )
+            try OpenSTAExecutableValidator().revalidate(executableSnapshot)
+
+            let designURL = inputs.appending(path: designName)
+            let libraryURL = inputs.appending(path: "library.lib")
+            let constraintsURL = inputs.appending(path: "constraints.sdc")
+            let pdkURL = inputs.appending(path: "pdk.json")
+            var references = [
+                try snapshotReference(design, at: designURL),
+                try snapshotReference(library, at: libraryURL),
+                try snapshotReference(constraints, at: constraintsURL),
+                try snapshotReference(pdk, at: pdkURL),
+            ]
+            let spefURL: URL?
+            if let parasitics {
+                let url = inputs.appending(path: "parasitics.spef")
+                references.append(try snapshotReference(parasitics, at: url))
+                spefURL = url
+            } else {
+                spefURL = nil
+            }
+            guard references.allSatisfy({
+                LocalArtifactVerifier().verify($0).isVerified
+            }) else {
+                throw TimingError.artifactReadFailed(
+                    path: root.path,
+                    message: "Committed OpenSTA snapshots failed integrity verification."
+                )
+            }
+
+            return Self(
+                root: root,
+                executable: executableSnapshot,
+                designURL: designURL,
+                libraryURL: libraryURL,
+                constraintsURL: constraintsURL,
+                pdkURL: pdkURL,
+                spefURL: spefURL,
+                snapshotReferences: references
+            )
+        } catch {
+            if fileManager.fileExists(atPath: stagingRoot.path) {
+                do {
+                    try fileManager.removeItem(at: stagingRoot)
+                } catch let cleanupError {
+                    throw TimingError.artifactWriteFailed(
+                        path: stagingRoot.path,
+                        message: "\(error.localizedDescription); staging cleanup failed: \(cleanupError.localizedDescription)"
+                    )
+                }
+            } else if fileManager.fileExists(atPath: root.path) {
+                do {
+                    try fileManager.removeItem(at: root)
+                } catch let cleanupError {
+                    throw TimingError.artifactWriteFailed(
+                        path: root.path,
+                        message: "\(error.localizedDescription); committed workspace cleanup failed: \(cleanupError.localizedDescription)"
+                    )
+                }
+            }
+            throw error
+        }
     }
 
     func verifySnapshots() -> Bool {

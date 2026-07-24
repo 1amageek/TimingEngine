@@ -134,6 +134,7 @@ let package = Package(
                 "STAEngine",
                 "SignalIntegrityEngine",
                 "TimingEngine",
+                "OpenSTAOracleAdapter",
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 .product(name: "ToolQualification", package: "ToolQualification")
             ],
