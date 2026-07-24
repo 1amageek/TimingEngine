@@ -198,6 +198,12 @@ public struct NativeSTAEngine: STAExecuting {
             guard let constraint = constraints[modeID] else {
                 throw TimingError.invalidInput("No constraints were parsed for mode '\(modeID)'.")
             }
+            guard constraint.caseAnalyses.isEmpty else {
+                throw TimingError.unsupportedSemantic(
+                    format: "STA",
+                    semantic: "conditional timing arc pruning for set_case_analysis"
+                )
+            }
             for cornerID in cornerIDs {
                 let scenario = try analyzeScenario(
                     request: request,

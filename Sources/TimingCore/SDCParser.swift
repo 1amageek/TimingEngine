@@ -47,13 +47,48 @@ public struct SDCParser: TimingConstraintParsing {
                 result.pathGroups.append(parsePathGroup(tokens, line: lineNumber))
             case "set_clock_groups":
                 result.clockGroups.append(try parseClockGroups(tokens, line: lineNumber))
-            case "set_driving_cell", "set_load", "set_case_analysis", "set_disable_timing":
+            case "set_case_analysis":
+                result.caseAnalyses.append(try parseCaseAnalysis(tokens, line: lineNumber))
+            case "set_driving_cell", "set_load", "set_disable_timing":
                 throw TimingError.unsupportedSemantic(format: "SDC", semantic: command)
             default:
                 throw TimingError.unsupportedSemantic(format: "SDC", semantic: command)
             }
         }
         return result
+    }
+
+    private func parseCaseAnalysis(
+        _ tokens: [String],
+        line: Int
+    ) throws -> TimingConstraintSet.CaseAnalysis {
+        guard tokens.count >= 3 else {
+            throw TimingError.parseFailure(
+                format: "SDC",
+                line: line,
+                message: "Case analysis requires a binary value and one target."
+            )
+        }
+        let value: TimingConstraintSet.CaseAnalysis.Value
+        switch tokens[1] {
+        case "0":
+            value = .zero
+        case "1":
+            value = .one
+        default:
+            throw TimingError.unsupportedSemantic(
+                format: "SDC",
+                semantic: "set_case_analysis value \(tokens[1])"
+            )
+        }
+        guard let target = targetName(tokens) else {
+            throw TimingError.parseFailure(
+                format: "SDC",
+                line: line,
+                message: "Case analysis has no target."
+            )
+        }
+        return TimingConstraintSet.CaseAnalysis(target: target, value: value)
     }
 
     private func parseClock(_ tokens: [String], line: Int) throws -> TimingConstraintSet.Clock {

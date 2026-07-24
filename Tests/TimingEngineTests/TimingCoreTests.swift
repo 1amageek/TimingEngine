@@ -136,10 +136,18 @@ struct TimingCoreTests {
         #expect(design.instances[1].connections["A"] == "n1")
     }
 
-    @Test("unsupported SDC semantics fail with a typed diagnostic error")
-    func unsupportedSDC() {
+    @Test("SDC case analysis retains the constrained binary mode")
+    func parsesSDCCaseAnalysis() throws {
+        let constraints = try SDCParser().parse(
+            Data("set_case_analysis 1 [get_ports scan_enable]".utf8)
+        )
+        #expect(constraints.caseAnalyses == [
+            TimingConstraintSet.CaseAnalysis(target: "scan_enable", value: .one)
+        ])
         #expect(throws: TimingError.self) {
-            _ = try SDCParser().parse(Data("set_case_analysis 1 [get_ports scan_enable]".utf8))
+            _ = try SDCParser().parse(
+                Data("set_case_analysis rise [get_ports scan_enable]".utf8)
+            )
         }
     }
 

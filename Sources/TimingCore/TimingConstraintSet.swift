@@ -93,6 +93,21 @@ public struct TimingConstraintSet: Sendable, Hashable, Codable {
         }
     }
 
+    public struct CaseAnalysis: Sendable, Hashable, Codable {
+        public enum Value: Int, Sendable, Hashable, Codable {
+            case zero = 0
+            case one = 1
+        }
+
+        public var target: String
+        public var value: Value
+
+        public init(target: String, value: Value) {
+            self.target = target
+            self.value = value
+        }
+    }
+
     public static let currentSchemaVersion = 1
     public var schemaVersion: Int
     public var modeID: String
@@ -100,6 +115,7 @@ public struct TimingConstraintSet: Sendable, Hashable, Codable {
     public var generatedClocks: [GeneratedClock]
     public var inputDelays: [PortDelay]
     public var outputDelays: [PortDelay]
+    public var caseAnalyses: [CaseAnalysis]
     public var exceptions: [PathException]
     public var pathGroups: [TimingPathGroup]
     public var clockGroups: [TimingClockGroup]
@@ -112,6 +128,7 @@ public struct TimingConstraintSet: Sendable, Hashable, Codable {
         generatedClocks: [GeneratedClock] = [],
         inputDelays: [PortDelay] = [],
         outputDelays: [PortDelay] = [],
+        caseAnalyses: [CaseAnalysis] = [],
         exceptions: [PathException] = [],
         pathGroups: [TimingPathGroup] = [],
         clockGroups: [TimingClockGroup] = [],
@@ -124,6 +141,7 @@ public struct TimingConstraintSet: Sendable, Hashable, Codable {
         self.generatedClocks = generatedClocks
         self.inputDelays = inputDelays
         self.outputDelays = outputDelays
+        self.caseAnalyses = caseAnalyses
         self.exceptions = exceptions
         self.pathGroups = pathGroups
         self.clockGroups = clockGroups
@@ -156,6 +174,7 @@ public struct TimingConstraintSet: Sendable, Hashable, Codable {
         case generatedClocks
         case inputDelays
         case outputDelays
+        case caseAnalyses
         case exceptions
         case pathGroups
         case clockGroups
@@ -171,6 +190,10 @@ public struct TimingConstraintSet: Sendable, Hashable, Codable {
             generatedClocks: try container.decode([GeneratedClock].self, forKey: .generatedClocks),
             inputDelays: try container.decode([PortDelay].self, forKey: .inputDelays),
             outputDelays: try container.decode([PortDelay].self, forKey: .outputDelays),
+            caseAnalyses: try container.decodeIfPresent(
+                [CaseAnalysis].self,
+                forKey: .caseAnalyses
+            ) ?? [],
             exceptions: try container.decode([PathException].self, forKey: .exceptions),
             pathGroups: try container.decode([TimingPathGroup].self, forKey: .pathGroups),
             clockGroups: try container.decode([TimingClockGroup].self, forKey: .clockGroups),
@@ -187,6 +210,7 @@ public struct TimingConstraintSet: Sendable, Hashable, Codable {
         try container.encode(generatedClocks, forKey: .generatedClocks)
         try container.encode(inputDelays, forKey: .inputDelays)
         try container.encode(outputDelays, forKey: .outputDelays)
+        try container.encode(caseAnalyses, forKey: .caseAnalyses)
         try container.encode(exceptions, forKey: .exceptions)
         try container.encode(pathGroups, forKey: .pathGroups)
         try container.encode(clockGroups, forKey: .clockGroups)
