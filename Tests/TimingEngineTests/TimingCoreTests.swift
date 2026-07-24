@@ -85,6 +85,19 @@ struct TimingCoreTests {
         #expect(constraints.outputDelays.first?.isMax == true)
     }
 
+    @Test("SDC port delays expand port collections without treating the clock as a port")
+    func sdcPortDelayCollections() throws {
+        let constraints = try SDCParser().parse(
+            Data(
+                "set_input_delay 1 -clock [get_clocks clk] [get_ports {a b}]"
+                    .utf8
+            )
+        )
+
+        #expect(constraints.inputDelays.map(\.port) == ["a", "b"])
+        #expect(constraints.inputDelays.allSatisfy { $0.clock == "clk" })
+    }
+
     @Test("SPEF preserves ground and coupling capacitance")
     func spefParser() throws {
         let spef = """
@@ -147,6 +160,30 @@ struct TimingCoreTests {
         #expect(throws: TimingError.self) {
             _ = try SDCParser().parse(
                 Data("set_case_analysis rise [get_ports scan_enable]".utf8)
+            )
+        }
+    }
+
+    @Test("SDC case analysis expands collections and rejects conflicts")
+    func parsesSDCCaseAnalysisCollections() throws {
+        let constraints = try SDCParser().parse(
+            Data("set_case_analysis 1 [get_ports {scan_enable test_mode}]".utf8),
+            modeID: "test"
+        )
+        #expect(constraints.modeID == "test")
+        #expect(constraints.caseAnalyses == [
+            TimingConstraintSet.CaseAnalysis(target: "scan_enable", value: .one),
+            TimingConstraintSet.CaseAnalysis(target: "test_mode", value: .one),
+        ])
+
+        #expect(throws: TimingError.self) {
+            _ = try SDCParser().parse(
+                Data(
+                    """
+                    set_case_analysis 0 [get_ports test_mode]
+                    set_case_analysis 1 [get_ports test_mode]
+                    """.utf8
+                )
             )
         }
     }

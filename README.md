@@ -66,15 +66,19 @@ All retained correlation artifacts must be workspace-relative. `--workspace-root
 | Timing library | Liberty (`.lib`) |
 | Constraints | SDC (`.sdc`) |
 | Parasitics | SPEF (`.spef`) |
-
-`SDCParser` retains binary `set_case_analysis` constraints in
-`TimingConstraintSet`. Native STA currently blocks when such constraints reach
-analysis because conditional Liberty-arc pruning is not yet implemented; it
-does not silently ignore the mode constraint. DFT consumers may use the typed
-case-analysis contract for test-mode prerequisite validation.
 | Delay annotation | SDF (`.sdf`) |
 | Design graph | Canonical JSON IR or supported structural Verilog |
 | Results and evidence | Versioned JSON with SHA-256 provenance |
+
+`SDCParser` expands every target in a `get_ports` collection and retains binary
+`set_case_analysis` constraints in the mode-specific `TimingConstraintSet`.
+Duplicate assignments are normalized, while conflicting assignments in one
+mode fail parsing. Input/output delays are emitted once per selected port and a
+`get_clocks` option is never misclassified as a port target. Native STA
+currently blocks when case analysis reaches analysis because conditional
+Liberty-arc pruning is not yet implemented; it does not silently ignore the
+mode constraint. Consumers such as DFTEngine own the decision about which
+independently parsed modes are required for their operation.
 
 ## Build
 

@@ -9,7 +9,7 @@ command emits their schema-versioned records.
 | Area | Implemented behavior | Evidence |
 |---|---|---|
 | Liberty | Units, operating conditions, pins, NLDM tables, unate arcs, sequential constraints and power metadata | Parser and native-engine tests |
-| SDC | Clocks, IO delays, uncertainty, exceptions, path groups and clock groups | Parser tests |
+| SDC | Clocks, IO delays, uncertainty, exceptions, path groups, clock groups and mode-specific binary case analysis with collection expansion and conflict rejection | Parser tests |
 | Design graph | Canonical JSON IR and deterministic structural Verilog subset | `TimingDesignParser` |
 | MMMC STA | Requested mode/corner expansion, rise/fall propagation and setup/hold checks | `NativeSTAEngine` |
 | Variation | Declared early/late cell and interconnect derates | Native STA tests |

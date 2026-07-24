@@ -26,9 +26,13 @@ public struct SDCParser: TimingConstraintParsing {
                 let generated = try parseGeneratedClock(tokens, line: lineNumber)
                 result.generatedClocks.append(generated)
             case "set_input_delay":
-                result.inputDelays.append(try parsePortDelay(tokens, line: lineNumber, isInput: true))
+                result.inputDelays.append(
+                    contentsOf: try parsePortDelays(tokens, line: lineNumber)
+                )
             case "set_output_delay":
-                result.outputDelays.append(try parsePortDelay(tokens, line: lineNumber, isInput: false))
+                result.outputDelays.append(
+                    contentsOf: try parsePortDelays(tokens, line: lineNumber)
+                )
             case "set_clock_uncertainty":
                 let uncertainty = try parseTime(requiredValue(after: "set_clock_uncertainty", in: tokens, line: lineNumber), line: lineNumber)
                 let clocks = targets(after: "set_clock_uncertainty", in: tokens)
@@ -48,7 +52,21 @@ public struct SDCParser: TimingConstraintParsing {
             case "set_clock_groups":
                 result.clockGroups.append(try parseClockGroups(tokens, line: lineNumber))
             case "set_case_analysis":
-                result.caseAnalyses.append(try parseCaseAnalysis(tokens, line: lineNumber))
+                let analyses = try parseCaseAnalyses(tokens, line: lineNumber)
+                for analysis in analyses {
+                    if let existing = result.caseAnalyses.first(where: {
+                        $0.target == analysis.target
+                    }), existing.value != analysis.value {
+                        throw TimingError.parseFailure(
+                            format: "SDC",
+                            line: lineNumber,
+                            message: "Case analysis assigns conflicting values to \(analysis.target)."
+                        )
+                    }
+                    if !result.caseAnalyses.contains(analysis) {
+                        result.caseAnalyses.append(analysis)
+                    }
+                }
             case "set_driving_cell", "set_load", "set_disable_timing":
                 throw TimingError.unsupportedSemantic(format: "SDC", semantic: command)
             default:
@@ -58,15 +76,15 @@ public struct SDCParser: TimingConstraintParsing {
         return result
     }
 
-    private func parseCaseAnalysis(
+    private func parseCaseAnalyses(
         _ tokens: [String],
         line: Int
-    ) throws -> TimingConstraintSet.CaseAnalysis {
+    ) throws -> [TimingConstraintSet.CaseAnalysis] {
         guard tokens.count >= 3 else {
             throw TimingError.parseFailure(
                 format: "SDC",
                 line: line,
-                message: "Case analysis requires a binary value and one target."
+                message: "Case analysis requires a binary value and at least one target."
             )
         }
         let value: TimingConstraintSet.CaseAnalysis.Value
@@ -81,14 +99,24 @@ public struct SDCParser: TimingConstraintParsing {
                 semantic: "set_case_analysis value \(tokens[1])"
             )
         }
-        guard let target = targetName(tokens) else {
+        let targets = targetNames(tokens)
+        guard !targets.isEmpty else {
             throw TimingError.parseFailure(
                 format: "SDC",
                 line: line,
                 message: "Case analysis has no target."
             )
         }
-        return TimingConstraintSet.CaseAnalysis(target: target, value: value)
+        guard Set(targets).count == targets.count else {
+            throw TimingError.parseFailure(
+                format: "SDC",
+                line: line,
+                message: "Case analysis contains duplicate targets."
+            )
+        }
+        return targets.map {
+            TimingConstraintSet.CaseAnalysis(target: $0, value: value)
+        }
     }
 
     private func parseClock(_ tokens: [String], line: Int) throws -> TimingConstraintSet.Clock {
@@ -117,25 +145,33 @@ public struct SDCParser: TimingConstraintParsing {
         )
     }
 
-    private func parsePortDelay(_ tokens: [String], line: Int, isInput: Bool) throws -> TimingConstraintSet.PortDelay {
+    private func parsePortDelays(
+        _ tokens: [String],
+        line: Int
+    ) throws -> [TimingConstraintSet.PortDelay] {
         guard tokens.count > 1 else {
             throw TimingError.parseFailure(format: "SDC", line: line, message: "Port delay is missing its value.")
         }
-        _ = isInput
         let value = try parseTime(portDelayValue(in: tokens, line: line), line: line)
         let clock = optionTargetName("-clock", in: tokens)
-        let targets = targetNames(tokens)
-        guard let port = targets.first else {
+        let ports = tokens.flatMap { token -> [String] in
+            collectionCommand(token) == "get_ports"
+                ? collectionValues(token)
+                : []
+        }
+        guard !ports.isEmpty else {
             throw TimingError.parseFailure(format: "SDC", line: line, message: "Port delay has no target.")
         }
         let isMax = !tokens.contains("-min")
-        return TimingConstraintSet.PortDelay(
-            port: port,
-            clock: clock,
-            rise: value,
-            fall: value,
-            isMax: isMax
-        )
+        return ports.map {
+            TimingConstraintSet.PortDelay(
+                port: $0,
+                clock: clock,
+                rise: value,
+                fall: value,
+                isMax: isMax
+            )
+        }
     }
 
     private func portDelayValue(in tokens: [String], line: Int) throws -> String {
@@ -289,11 +325,9 @@ public struct SDCParser: TimingConstraintParsing {
     }
 
     private func targetNames(_ tokens: [String]) -> [String] {
-        tokens.compactMap { token in
-            guard token.hasPrefix("["), token.hasSuffix("]") else { return nil }
-            let content = token.dropFirst().dropLast()
-            let pieces = content.split(whereSeparator: \.isWhitespace)
-            return pieces.last.map(String.init)
+        tokens.reduce(into: [String]()) { result, token in
+            guard token.hasPrefix("["), token.hasSuffix("]") else { return }
+            result.append(contentsOf: collectionValues(token))
         }
     }
 
@@ -301,7 +335,7 @@ public struct SDCParser: TimingConstraintParsing {
         guard let index = tokens.firstIndex(of: key), tokens.index(after: index) < tokens.endIndex else { return nil }
         let token = tokens[tokens.index(after: index)]
         if token.hasPrefix("[") && token.hasSuffix("]") {
-            return token.dropFirst().dropLast().split(whereSeparator: \.isWhitespace).last.map(String.init)
+            return collectionValues(token).first
         }
         return token
     }
@@ -310,7 +344,7 @@ public struct SDCParser: TimingConstraintParsing {
         guard let index = tokens.firstIndex(of: key), tokens.index(after: index) < tokens.endIndex else { return [] }
         let token = tokens[tokens.index(after: index)]
         if token.hasPrefix("[") && token.hasSuffix("]") {
-            return token.dropFirst().dropLast().split(whereSeparator: \.isWhitespace).dropFirst().map(String.init)
+            return collectionValues(token)
         }
         return [token]
     }
@@ -337,6 +371,16 @@ public struct SDCParser: TimingConstraintParsing {
             .dropFirst()
             .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "{}")) }
             .filter { !$0.isEmpty }
+    }
+
+    private func collectionCommand(_ token: String) -> String? {
+        guard token.hasPrefix("["), token.hasSuffix("]") else { return nil }
+        return token
+            .dropFirst()
+            .dropLast()
+            .split(whereSeparator: \.isWhitespace)
+            .first
+            .map(String.init)
     }
 
     private func parseTime(_ value: String, line: Int) throws -> Double {
