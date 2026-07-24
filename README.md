@@ -128,7 +128,22 @@ swift run timingengine assess-evidence \
 
 The oracle executable must be retained inside the declared workspace for correlation. Availability alone is not evidence.
 
-The OpenSTA adapter resolves symlinks, requires a regular executable file, queries `-version`, and compares the reported version with `--oracle-version`. It hashes the resolved executable with SHA-256 before the version probe and verifies the same digest after both the probe and timing run. The measured digest is recorded in `ExecutionProvenance.supportingTools[].build`; a version mismatch, unreadable binary, or executable mutation produces a failed `STAExecutionResult` with a structured diagnostic and a nonzero process exit.
+The OpenSTA adapter resolves symlinks, requires a regular executable file, queries `-version`, and compares the reported version with `--oracle-version`. It hashes the resolved executable with SHA-256, then copies the executable and every declared input into the create-only directory `<workspace-root>/.timingengine/runs/<run-id>/opensta/`. OpenSTA receives only those snapshot paths. Generated Tcl, stdout, stderr, and input references are retained in the same run directory; executable and input bytes are verified again after analysis. The measured executable digest is recorded in `ExecutionProvenance.supportingTools[].build`. An invalid run ID, reused run workspace, version mismatch, unreadable binary, or snapshot mutation produces a failed `STAExecutionResult` with a structured diagnostic and a nonzero process exit.
+
+The adapter is a separate executable and requires an explicit workspace root:
+
+```bash
+swift run opensta-oracle-adapter \
+  --run-id <stable-run-id> \
+  --workspace-root <workspace-root> \
+  --sta <workspace-root>/tools/opensta \
+  --oracle-version <version> \
+  --design <workspace-root>/design.v \
+  --library <workspace-root>/library.lib \
+  --constraints <workspace-root>/constraints.sdc \
+  --pdk-manifest <workspace-root>/pdk.json \
+  --top <top-module>
+```
 
 ## Sky130A retained profile
 
