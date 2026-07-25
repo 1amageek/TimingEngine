@@ -36,18 +36,19 @@ jobs:
           key: sky130A-opensta-${{ env.OPENSTA_REVISION }}-${{ env.SKY130_REVISION }}
 
       - name: Install OpenSTA build dependencies
-        run: brew install bison boost cmake eigen flex swig tcl-tk
+        run: brew install bison boost cmake eigen flex mht208/formal/cudd swig tcl-tk
 
       - name: Build pinned OpenSTA
         run: |
           if [ ! -x "$PWD/.opensta-install/bin/sta" ]; then
             export PATH="$(brew --prefix bison)/bin:$(brew --prefix flex)/bin:$PATH"
-            export CMAKE_INCLUDE_PATH="$(brew --prefix flex)/include"
-            export CMAKE_LIBRARY_PATH="$(brew --prefix flex)/lib;$(brew --prefix bison)/lib"
+            export CMAKE_INCLUDE_PATH="$(brew --prefix flex)/include:$(brew --prefix mht208/formal/cudd)/include"
+            export CMAKE_LIBRARY_PATH="$(brew --prefix flex)/lib:$(brew --prefix bison)/lib:$(brew --prefix mht208/formal/cudd)/lib"
             cmake \
               -S .opensta-source \
               -B .opensta-build \
               -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_PREFIX_PATH="$(brew --prefix mht208/formal/cudd)" \
               -DCMAKE_INSTALL_PREFIX="$PWD/.opensta-install"
             cmake --build .opensta-build --parallel 3
             cmake --install .opensta-build
