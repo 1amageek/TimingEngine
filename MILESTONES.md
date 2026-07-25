@@ -27,6 +27,6 @@ TimingEngine owns the path through `Assessed`. The last two transitions are exte
 
 ## Known blockers
 
-- Broader PVT, library-family, SPEF and SI corpus coverage remains necessary for signoff-oriented use.
-- The independent OpenSTA executable is an environment prerequisite.
+- Broader library-family and waveform-resolved SI coverage remains outside the retained SS/TT/FF profile.
+- Local qualification requires an independent OpenSTA executable; CI builds and fingerprints a pinned revision.
 - Foundry rule/equivalence evidence is outside this package.

@@ -5,6 +5,18 @@
   "displayName": "Sky130A Volare qualification fixture",
   "assets": [
     {
+      "assetID": "sky130_fd_sc_hd_ss_liberty",
+      "role": "liberty",
+      "path": "sky130_ss.lib",
+      "kind": "model",
+      "format": "LIBERTY",
+      "required": true,
+      "sha256": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+      "byteCount": 12845260,
+      "cornerIDs": ["ss-100C-1v60"],
+      "metadata": {}
+    },
+    {
       "assetID": "sky130_fd_sc_hd_tt_liberty",
       "role": "liberty",
       "path": "sky130_tt.lib",
@@ -14,6 +26,18 @@
       "sha256": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
       "byteCount": 12841637,
       "cornerIDs": ["tt-025C-1v80"],
+      "metadata": {}
+    },
+    {
+      "assetID": "sky130_fd_sc_hd_ff_liberty",
+      "role": "liberty",
+      "path": "sky130_ff.lib",
+      "kind": "model",
+      "format": "LIBERTY",
+      "required": true,
+      "sha256": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+      "byteCount": 12918504,
+      "cornerIDs": ["ff-n40C-1v95"],
       "metadata": {}
     }
   ],
@@ -43,6 +67,16 @@
   ],
   "corners": [
     {
+      "cornerID": "ss-100C-1v60",
+      "pvt": {
+        "process": { "name": "ss", "nominal": false },
+        "voltage": 1.6,
+        "temperatureCelsius": 100.0
+      },
+      "assetIDs": ["sky130_fd_sc_hd_ss_liberty"],
+      "viewMappings": { "liberty": "sky130_fd_sc_hd_ss_liberty" }
+    },
+    {
       "cornerID": "tt-025C-1v80",
       "pvt": {
         "process": { "name": "tt", "nominal": true },
@@ -51,11 +85,31 @@
       },
       "assetIDs": ["sky130_fd_sc_hd_tt_liberty"],
       "viewMappings": { "liberty": "sky130_fd_sc_hd_tt_liberty" }
+    },
+    {
+      "cornerID": "ff-n40C-1v95",
+      "pvt": {
+        "process": { "name": "ff", "nominal": false },
+        "voltage": 1.95,
+        "temperatureCelsius": -40.0
+      },
+      "assetIDs": ["sky130_fd_sc_hd_ff_liberty"],
+      "viewMappings": { "liberty": "sky130_fd_sc_hd_ff_liberty" }
     }
   ],
   "crossViewMappings": [
     {
-      "mappingID": "sky130-liberty-corner",
+      "mappingID": "sky130-liberty-ss-corner",
+      "view": "liberty",
+      "assetID": "sky130_fd_sc_hd_ss_liberty",
+      "logicalNames": [],
+      "physicalNames": [],
+      "layerIDs": [],
+      "deviceIDs": ["sky130_fd_sc_hd_standard_cell"],
+      "cornerIDs": ["ss-100C-1v60"]
+    },
+    {
+      "mappingID": "sky130-liberty-tt-corner",
       "view": "liberty",
       "assetID": "sky130_fd_sc_hd_tt_liberty",
       "logicalNames": [],
@@ -63,11 +117,22 @@
       "layerIDs": [],
       "deviceIDs": ["sky130_fd_sc_hd_standard_cell"],
       "cornerIDs": ["tt-025C-1v80"]
+    },
+    {
+      "mappingID": "sky130-liberty-ff-corner",
+      "view": "liberty",
+      "assetID": "sky130_fd_sc_hd_ff_liberty",
+      "logicalNames": [],
+      "physicalNames": [],
+      "layerIDs": [],
+      "deviceIDs": ["sky130_fd_sc_hd_standard_cell"],
+      "cornerIDs": ["ff-n40C-1v95"]
     }
   ],
   "metadata": {
     "source": "local-volare",
     "sourceRoot": "~/.volare/sky130A",
-    "library": "sky130_fd_sc_hd__tt_025C_1v80.lib"
+    "libraryFamily": "sky130_fd_sc_hd",
+    "profile": "ss-100C-1v60,tt-025C-1v80,ff-n40C-1v95"
   }
 }

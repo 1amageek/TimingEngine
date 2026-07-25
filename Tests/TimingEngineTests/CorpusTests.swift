@@ -38,8 +38,8 @@ struct CorpusTests {
         #expect(reference.byteCount > 0)
     }
 
-    @Test("checked-in Sky130A profile remains blocked without the exact external Liberty artifact")
-    func sky130ProfileRequiresRetainedLiberty() throws {
+    @Test("checked-in Sky130A profile requires every exact multi-corner Liberty artifact")
+    func sky130ProfileRequiresRetainedLiberties() throws {
         let profileRoot = try TimingTestResources.qualificationRoot.appending(path: "sky130A")
         let manifestURL = profileRoot.appending(path: "pdk.json")
         let manifestReference = try TimingArtifactReferenceBuilder().makeReference(
@@ -59,8 +59,56 @@ struct CorpusTests {
         ).build(for: pdk)
 
         #expect(!evidence.isComplete)
-        #expect(evidence.findings.contains("pdk_required_asset_missing:sky130_fd_sc_hd_tt_liberty"))
-        #expect(evidence.assets.first?.present == false)
+        #expect(Set(evidence.findings) == [
+            "pdk_required_asset_missing:sky130_fd_sc_hd_ss_liberty",
+            "pdk_required_asset_missing:sky130_fd_sc_hd_tt_liberty",
+            "pdk_required_asset_missing:sky130_fd_sc_hd_ff_liberty",
+        ])
+        #expect(evidence.assets.count == 3)
+        #expect(evidence.assets.allSatisfy { !$0.present })
+    }
+
+    @Test("checked-in Sky130A corpus binds three PVT corners and retained parasitics")
+    func sky130CorpusBindsMultiCornerInputs() throws {
+        let profileRoot = try TimingTestResources.qualificationRoot.appending(path: "sky130A")
+        let manifestData = try Data(contentsOf: profileRoot.appending(path: "corpus.json"))
+        let manifest = try JSONDecoder().decode(TimingCorpusManifest.self, from: manifestData)
+
+        #expect(manifest.cases.count == 3)
+        #expect(Set(manifest.cases.flatMap(\.cornerIDs)) == [
+            "ss-100C-1v60",
+            "tt-025C-1v80",
+            "ff-n40C-1v95",
+        ])
+        #expect(Set(manifest.cases.flatMap(\.libraryPaths)) == [
+            "sky130_ss.lib",
+            "sky130_tt.lib",
+            "sky130_ff.lib",
+        ])
+        #expect(manifest.cases.allSatisfy { $0.parasiticsPath == "sky130.spef" })
+        #expect(manifest.cases.allSatisfy { $0.constraintPath == "sky130.sdc" })
+
+        let parasitics = try SPEFParser().parse(
+            Data(contentsOf: profileRoot.appending(path: "sky130.spef"))
+        )
+        #expect(parasitics.network(named: "q")?.groundCapacitance == 0.012e-12)
+    }
+
+    @Test("Sky130A qualification builds once and reuses executable products")
+    func sky130QualificationReusesBuiltProducts() throws {
+        let packageRoot = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let script = try String(
+            contentsOf: packageRoot.appending(path: "Scripts/qualify-sky130A.sh"),
+            encoding: .utf8
+        )
+
+        #expect(!script.contains("swift run"))
+        #expect(script.components(separatedBy: "\nswift build\n").count == 2)
+        #expect(script.contains("\"$TIMING_BIN\" run-sta"))
+        #expect(script.contains("\"$ADAPTER_BIN\""))
     }
 
     @Test("evidence assessment blocks when an external oracle is unavailable")

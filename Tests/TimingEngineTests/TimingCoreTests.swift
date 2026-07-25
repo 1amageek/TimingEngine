@@ -102,8 +102,8 @@ struct TimingCoreTests {
     func spefParser() throws {
         let spef = """
         *SPEF "IEEE 1481-1998"
-        *CAP_UNIT 1 PF
-        *RES_UNIT 1 OHM
+        *C_UNIT 1 PF
+        *R_UNIT 1 OHM
         *D_NET n1 0.03
         *CONN
         *P n1 O

@@ -1,0 +1,20 @@
+*SPEF "IEEE 1481-1998"
+*DESIGN "top"
+*DATE "2026-07-26"
+*VENDOR "TimingEngine qualification fixture"
+*PROGRAM "retained-fixture"
+*VERSION "1"
+*DESIGN_FLOW "NAME_SCOPE LOCAL"
+*DIVIDER /
+*DELIMITER :
+*BUS_DELIMITER [ ]
+*T_UNIT 1 NS
+*C_UNIT 1 PF
+*R_UNIT 1 OHM
+*L_UNIT 1 HENRY
+*D_NET q 0.012
+*CONN
+*P q O
+*CAP
+1 q 0.012
+*END

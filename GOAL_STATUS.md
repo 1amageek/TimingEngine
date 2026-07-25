@@ -49,9 +49,9 @@ flowchart LR
 
 ## Remaining limitations
 
-- Broader PVT, cell-family, parasitic and SI corpus coverage is required for signoff-oriented use.
-- The independent OpenSTA binary is an environment prerequisite.
-- The retained Sky130A TT profile is evidence for that scope only.
+- Broader cell-family and waveform-resolved SI corpus coverage remains outside the retained profile.
+- Local qualification requires an independent OpenSTA binary; the mandatory CI lane builds a pinned revision.
+- The retained Sky130A profile covers one cell family at SS/TT/FF with exact Liberty, SDC, SPEF and PDK inputs.
 - Foundry signoff equivalence is not claimed.
 
 This file records implementation maturity, not a production qualification decision.

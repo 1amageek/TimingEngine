@@ -40,11 +40,11 @@ public struct SPEFParser: TimingParasiticParsing {
             guard !line.isEmpty else { continue }
             let fields = line.split(whereSeparator: \.isWhitespace).map(String.init)
             guard let first = fields.first else { continue }
-            if first == "*CAP_UNIT", fields.count >= 3 {
+            if first == "*C_UNIT" || first == "*CAP_UNIT", fields.count >= 3 {
                 capacitanceScale = unitScale(value: fields[1], unit: fields[2])
                 continue
             }
-            if first == "*RES_UNIT", fields.count >= 3 {
+            if first == "*R_UNIT" || first == "*RES_UNIT", fields.count >= 3 {
                 resistanceScale = unitScale(value: fields[1], unit: fields[2])
                 continue
             }

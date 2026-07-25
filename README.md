@@ -157,15 +157,16 @@ swift run opensta-oracle-adapter \
 
 ## Sky130A retained profile
 
-The repository contains a narrow Sky130A TT input profile and a reproducible script. It does not contain retained qualification evidence. The exact PDK Liberty asset and OpenSTA executable are external prerequisites and are copied into a temporary evidence workspace before execution. Their declared SHA-256 digests and byte counts are verified; a missing or different asset is a blocked input, never a passing profile.
+The repository contains a Sky130A `sky130_fd_sc_hd` SS/TT/FF input profile with an SDC and retained SPEF fixture. It does not contain retained qualification outputs. The three exact PDK Liberty assets and an independent OpenSTA executable are external prerequisites and are copied into an evidence workspace before execution. Their declared SHA-256 digests and byte counts are verified; a missing or different asset is a blocked input, never a passing profile.
 
 ```bash
 OPENSTA_BIN=<opensta-executable> \
+OPENSTA_VERSION=<exact-version-token-from-opensta--version> \
 SKY130_ROOT=<sky130A-root> \
 ./Scripts/qualify-sky130A.sh
 ```
 
-The script writes raw native output, raw oracle output, correlation, corpus and evidence-assessment artifacts. ToolQualification must independently reconstruct trust from those retained bytes. These artifacts demonstrate the selected profile only; they do not establish foundry signoff equivalence.
+The script builds the Swift products once, then reuses the same executable bytes for the corpus and every corner. It writes raw native output, raw oracle output, correlation, corpus and evidence-assessment artifacts for each PVT corner. ToolQualification must independently reconstruct trust from those retained bytes. These artifacts demonstrate the selected cell family and profile only; they do not establish foundry signoff equivalence.
 
 ## Test
 
@@ -186,7 +187,7 @@ TimingEngine is independently usable through its typed API and CLI. A runtime su
 
 - The native backend implements a deterministic standards-constrained subset.
 - Advanced statistical variation and waveform-resolved crosstalk are not implemented.
-- The Sky130A retained profile covers a narrow TT scope.
+- The Sky130A retained profile covers one standard-cell family at three PVT corners; broader cell families and foundry signoff acceptance remain external qualification work.
 - Foundry signoff equivalence is not claimed.
 
 See `DESIGN.md`, `INTERFACES.md`, `CAPABILITY.md`, `MILESTONES.md` and `GOAL_STATUS.md` for the complete contracts and status.

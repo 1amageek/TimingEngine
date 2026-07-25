@@ -5,19 +5,58 @@
   "version": "c6d73a35f524070e85faff4a6a9eef49553ebc2b",
   "cases": [
     {
-      "caseID": "sky130-dfxtp-tt-functional",
+      "caseID": "sky130-dfxtp-ss-functional",
       "engine": "sta",
-      "description": "Sky130A standard-cell DFF setup and hold at TT 1.8 V 25 C.",
+      "description": "Sky130A standard-cell DFF with retained parasitics at SS 1.60 V 100 C.",
       "expectedOutcome": "completed",
+      "expectedDiagnosticCodes": [],
       "designPath": "sky130_top.v",
       "topDesignName": "top",
-      "libraryPaths": ["sky130_tt.lib"],
+      "libraryPaths": ["sky130_ss.lib"],
       "constraintPath": "sky130.sdc",
+      "parasiticsPath": "sky130.spef",
       "pdkManifestPath": "pdk.json",
       "processID": "sky130A",
       "pdkVersion": "c6d73a35f524070e85faff4a6a9eef49553ebc2b",
       "modeIDs": ["functional"],
-      "cornerIDs": ["tt-025C-1v80"]
+      "cornerIDs": ["ss-100C-1v60"],
+      "requiresPostLayoutInputs": true
+    },
+    {
+      "caseID": "sky130-dfxtp-tt-functional",
+      "engine": "sta",
+      "description": "Sky130A standard-cell DFF with retained parasitics at TT 1.80 V 25 C.",
+      "expectedOutcome": "completed",
+      "expectedDiagnosticCodes": [],
+      "designPath": "sky130_top.v",
+      "topDesignName": "top",
+      "libraryPaths": ["sky130_tt.lib"],
+      "constraintPath": "sky130.sdc",
+      "parasiticsPath": "sky130.spef",
+      "pdkManifestPath": "pdk.json",
+      "processID": "sky130A",
+      "pdkVersion": "c6d73a35f524070e85faff4a6a9eef49553ebc2b",
+      "modeIDs": ["functional"],
+      "cornerIDs": ["tt-025C-1v80"],
+      "requiresPostLayoutInputs": true
+    },
+    {
+      "caseID": "sky130-dfxtp-ff-functional",
+      "engine": "sta",
+      "description": "Sky130A standard-cell DFF with retained parasitics at FF 1.95 V -40 C.",
+      "expectedOutcome": "completed",
+      "expectedDiagnosticCodes": [],
+      "designPath": "sky130_top.v",
+      "topDesignName": "top",
+      "libraryPaths": ["sky130_ff.lib"],
+      "constraintPath": "sky130.sdc",
+      "parasiticsPath": "sky130.spef",
+      "pdkManifestPath": "pdk.json",
+      "processID": "sky130A",
+      "pdkVersion": "c6d73a35f524070e85faff4a6a9eef49553ebc2b",
+      "modeIDs": ["functional"],
+      "cornerIDs": ["ff-n40C-1v95"],
+      "requiresPostLayoutInputs": true
     }
   ]
 }
