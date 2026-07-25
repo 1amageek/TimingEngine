@@ -67,7 +67,7 @@ jobs:
           opensta_bin="$PWD/.opensta-install/bin/sta"
           opensta_version=$(
             "$opensta_bin" -version 2>&1 |
-              awk '{ for (index = 1; index <= NF; index += 1) if ($index ~ /^[0-9]+([.][0-9]+)+/) { print $index; exit } }'
+              awk '{ for (field = 1; field <= NF; field += 1) if ($field ~ /^[0-9]+([.][0-9]+)+/) { print $field; exit } }'
           )
           if [ -z "$opensta_version" ]; then
             echo "Unable to resolve the exact OpenSTA version token." >&2
