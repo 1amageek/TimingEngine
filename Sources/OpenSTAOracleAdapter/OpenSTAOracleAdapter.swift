@@ -462,7 +462,7 @@ struct OpenSTAOracleAdapter {
                 continue
             }
             guard currentSection == section, let range = line.range(of: "slack (") else { continue }
-            let candidate = line[range.upperBound...]
+            let candidate = line[..<range.lowerBound]
                 .split(whereSeparator: \.isWhitespace)
                 .last
                 .map(String.init)

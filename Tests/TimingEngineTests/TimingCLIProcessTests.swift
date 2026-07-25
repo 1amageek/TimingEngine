@@ -26,10 +26,10 @@ struct TimingCLIProcessTests {
         let fixture = try OpenSTAProcessFixture(
             toolBody: """
             printf '%s\n' 'TIMINGENGINE_SETUP_BEGIN'
-            printf '%s\n' 'slack (MET) 0.100'
+            printf '%s\n' '  1.000e-01   slack (MET)'
             printf '%s\n' 'TIMINGENGINE_SETUP_END'
             printf '%s\n' 'TIMINGENGINE_HOLD_BEGIN'
-            printf '%s\n' 'slack (MET) 0.050'
+            printf '%s\n' ' -5.000e-02   slack (VIOLATED)'
             printf '%s\n' 'TIMINGENGINE_HOLD_END'
             """
         )
@@ -50,6 +50,8 @@ struct TimingCLIProcessTests {
             using: .sha256
         )
         #expect(execution.status == .completed)
+        #expect(abs(try #require(execution.payload.worstSetupSlack) - 1e-10) < 1e-24)
+        #expect(abs(try #require(execution.payload.worstHoldSlack) + 5e-11) < 1e-24)
         #expect(execution.evidence.provenance.supportingTools.count == 1)
         #expect(execution.evidence.provenance.supportingTools[0].build == executableDigest.hexadecimalValue)
         let invocationExecutable = try #require(
@@ -123,10 +125,10 @@ struct TimingCLIProcessTests {
             chmod u+w "$0"
             printf '%s\n' '# mutated during analysis' >> "$0"
             printf '%s\n' 'TIMINGENGINE_SETUP_BEGIN'
-            printf '%s\n' 'slack (MET) 0.100'
+            printf '%s\n' ' 0.100   slack (MET)'
             printf '%s\n' 'TIMINGENGINE_SETUP_END'
             printf '%s\n' 'TIMINGENGINE_HOLD_BEGIN'
-            printf '%s\n' 'slack (MET) 0.050'
+            printf '%s\n' ' 0.050   slack (MET)'
             printf '%s\n' 'TIMINGENGINE_HOLD_END'
             """
         )
