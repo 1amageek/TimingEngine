@@ -109,6 +109,11 @@ struct CorpusTests {
         #expect(script.components(separatedBy: "\nswift build\n").count == 2)
         #expect(script.contains("\"$TIMING_BIN\" run-sta"))
         #expect(script.contains("\"$ADAPTER_BIN\""))
+        #expect(script.contains("observed_opensta_bin=$(jq -r"))
+        #expect(script.components(
+            separatedBy: "--oracle-path \"$executed_opensta_bin\""
+        ).count == 3)
+        #expect(!script.contains("--oracle-path \"$RETAINED_OPENSTA_BIN\""))
     }
 
     @Test("evidence assessment blocks when an external oracle is unavailable")

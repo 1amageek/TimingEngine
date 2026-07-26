@@ -34,6 +34,7 @@ else
     fi
     mkdir -p "$OUTPUT_ROOT"
 fi
+OUTPUT_ROOT=$(CDPATH= cd -- "$OUTPUT_ROOT" && pwd)
 RUNTIME_ROOT="$OUTPUT_ROOT/runtime"
 mkdir -p "$RUNTIME_ROOT"
 cp "$SCRIPT_DIR/Qualification/sky130A/pdk.json" "$RUNTIME_ROOT/pdk.json"
@@ -120,6 +121,13 @@ do
         --top top \
         --run-id "sky130-$corner-opensta" > "$oracle_report"
 
+    executed_opensta_bin="$OUTPUT_ROOT/.timingengine/runs/sky130-$corner-opensta/opensta/inputs/opensta"
+    observed_opensta_bin=$(jq -r '.evidence.provenance.invocation.executable // empty' "$oracle_report")
+    if [ "$observed_opensta_bin" != "$executed_opensta_bin" ] || [ ! -x "$executed_opensta_bin" ]; then
+        echo "OpenSTA result does not identify the immutable executed snapshot: $observed_opensta_bin" >&2
+        exit 2
+    fi
+
     "$TIMING_BIN" correlate-oracle \
         --workspace-root "$OUTPUT_ROOT" \
         --native-report "$native_report" \
@@ -130,7 +138,7 @@ do
         --pdk-version c6d73a35f524070e85faff4a6a9eef49553ebc2b \
         --oracle-id opensta \
         --oracle-version "$OPENSTA_VERSION" \
-        --oracle-path "$RETAINED_OPENSTA_BIN" \
+        --oracle-path "$executed_opensta_bin" \
         --tolerance 1e-12 \
         --out "$correlation_report" > /dev/null
 
@@ -144,7 +152,7 @@ do
         --corner "$corner" \
         --oracle-id opensta \
         --oracle-version "$OPENSTA_VERSION" \
-        --oracle-path "$RETAINED_OPENSTA_BIN" \
+        --oracle-path "$executed_opensta_bin" \
         --correlation-report "$correlation_report" \
         --out "$assessment_report" > /dev/null
 done

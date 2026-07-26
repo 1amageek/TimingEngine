@@ -83,7 +83,10 @@ jobs:
         run: |
           for corner in ss-100C-1v60 tt-025C-1v80 ff-n40C-1v95
           do
-            jq -e '.outcome == "passed"' \
+            jq -e '
+              (.findings | length) == 0
+              and .externalCorrelation.correlation.status == "passed"
+            ' \
               "qualification-evidence/sky130-$corner-evidence-assessment.json"
           done
 

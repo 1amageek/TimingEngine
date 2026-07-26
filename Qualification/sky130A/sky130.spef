@@ -15,6 +15,7 @@
 *D_NET q 0.012
 *CONN
 *P q O
+*I u0:Q O
 *CAP
-1 q 0.012
+1 u0:Q 0.012
 *END

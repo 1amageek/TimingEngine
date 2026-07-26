@@ -136,7 +136,11 @@ swift run timingengine assess-evidence \
   --oracle-path <workspace-root>/tools/oracle
 ```
 
-The oracle executable must be retained inside the declared workspace for correlation. Availability alone is not evidence.
+The oracle executable must be retained inside the declared workspace for
+correlation. When an adapter snapshots the executable before execution,
+`--oracle-path` must identify that immutable executed snapshot recorded by
+`ExecutionProvenance.invocation.executable`, not the mutable source path from
+which it was copied. Availability alone is not evidence.
 
 The OpenSTA adapter resolves symlinks, requires a regular executable file, queries `-version`, and compares the reported version with `--oracle-version`. It hashes the resolved executable with SHA-256, then prepares the executable and every declared input in a private sibling directory. Only after every snapshot passes integrity verification is that directory atomically committed as the create-only directory `<workspace-root>/.timingengine/runs/<run-id>/opensta/`. Failed preparation removes the private directory and does not consume the run ID, so the same request can be retried after its input problem is corrected. OpenSTA receives only committed snapshot paths. Generated Tcl, stdout, stderr, and input references are retained in the same run directory; executable and input bytes are verified again after analysis. The measured executable digest is recorded in `ExecutionProvenance.supportingTools[].build`. An invalid run ID, reused committed workspace, version mismatch, unreadable binary, or snapshot mutation produces a failed `STAExecutionResult` with a structured diagnostic and a nonzero process exit.
 
