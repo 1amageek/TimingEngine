@@ -161,7 +161,7 @@ swift run opensta-oracle-adapter \
 
 ## Sky130A retained profile
 
-The repository contains a Sky130A `sky130_fd_sc_hd` SS/TT/FF input profile with an SDC and retained SPEF fixture. It does not contain retained qualification outputs. The three exact PDK Liberty assets and an independent OpenSTA executable are external prerequisites and are copied into an evidence workspace before execution. Their declared SHA-256 digests and byte counts are verified; a missing or different asset is a blocked input, never a passing profile.
+The repository contains a Sky130A `sky130_fd_sc_hd` SS/TT/FF input profile with an SDC and retained SPEF fixture. Qualification outputs are retained as CI artifacts rather than committed generated files. The three exact PDK Liberty assets and an independent OpenSTA executable are external prerequisites and are copied into an evidence workspace before execution. Their declared SHA-256 digests and byte counts are verified; a missing or different asset is a blocked input, never a passing profile.
 
 ```bash
 OPENSTA_BIN=<opensta-executable> \
@@ -171,6 +171,11 @@ SKY130_ROOT=<sky130A-root> \
 ```
 
 The script builds the Swift products once, then reuses the same executable bytes for the corpus and every corner. It writes raw native output, raw oracle output, correlation, corpus and evidence-assessment artifacts for each PVT corner. ToolQualification must independently reconstruct trust from those retained bytes. These artifacts demonstrate the selected cell family and profile only; they do not establish foundry signoff equivalence.
+
+The mandatory qualification workflow passed for SS, TT and FF with pinned
+OpenSTA 3.1.0 and the declared Sky130A assets in GitHub Actions run
+`30180622789`. The workflow artifact is the retained evidence handoff; the run
+identifier is evidence provenance, not a production qualification claim.
 
 ## Test
 

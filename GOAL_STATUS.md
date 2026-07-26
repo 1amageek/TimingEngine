@@ -46,6 +46,8 @@ flowchart LR
 - seven focused external-adapter process tests covering invalid invocation, version mismatch, non-executable input, invalid run identity, exact executable SHA-256 provenance, and mutation detection
 - persisted assessment verdict injection test
 - workspace-relative containment and digest reconstruction through the correlation verifier
+- mandatory SS/TT/FF qualification workflow with pinned OpenSTA 3.1.0 and
+  declared Sky130A inputs: GitHub Actions run `30180622789` passed
 
 ## Remaining limitations
 

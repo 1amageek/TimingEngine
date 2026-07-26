@@ -9,6 +9,9 @@ raw OpenSTA output, deterministic correlation, and tamper verification.
 Remaining work expands signoff breadth without moving trust decisions into
 TimingEngine.
 
+The mandatory retained qualification lane passed for all three declared
+corners in GitHub Actions run `30180622789`.
+
 ## Remaining tasks
 
 | ID | Priority | Owner | Task | Exit criteria |
