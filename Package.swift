@@ -24,7 +24,7 @@ let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default
     ? .package(path: "../PDKKit")
     : .package(
         url: "https://github.com/1amageek/PDKKit.git",
-        revision: "7903ccd69a3aa24ebf8ab1076910fab88670ecc1"
+        revision: "3ab7e3b6094d2de672b582d90076cf58b6527766"
     )
 
 let signoffToolSupportDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
