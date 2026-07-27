@@ -120,7 +120,7 @@ struct TimingCLI {
             runID: runID,
             design: designReference,
             topDesignName: top,
-            designRevision: try option("--design-digest", in: values).map { try ContentDigest(algorithm: .sha256, hexadecimalValue: $0) } ?? designReference.digest,
+            canonicalDesignDigest: try option("--design-digest", in: values).map { try ContentDigest(algorithm: .sha256, hexadecimalValue: $0) } ?? designReference.digest,
             libraries: [TimingLibraryReference(artifact: libraryReference, cornerIDs: cornerIDs)],
             constraints: constraintReference,
             requestedModeIDs: modeIDs,

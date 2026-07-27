@@ -15,7 +15,7 @@ let logicDesignDependency: Package.Dependency = isLSIWorkspace && FileManager.de
     ? .package(path: "../LogicDesign")
     : .package(
         url: "https://github.com/1amageek/LogicDesign.git",
-        revision: "e8f8e1dace0445ddd816929c4ca0fe17cca12a7b"
+        revision: "1ad3b929412e9d459be45a7cb3a426d99aa9417b"
     )
 
 let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
@@ -42,7 +42,7 @@ let circuiteFoundationDependency: Package.Dependency = isLSIWorkspace && FileMan
     ? .package(path: "../CircuiteFoundation")
     : .package(
         url: "https://github.com/1amageek/CircuiteFoundation.git",
-        revision: "dc792c88e189c822c9f83ea86cf139ee68560dca"
+        revision: "1dd75ecf2b8758c54c4e008ff5fd59e263cce0e6"
     )
 
 let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(

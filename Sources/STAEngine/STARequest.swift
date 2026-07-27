@@ -11,7 +11,7 @@ public struct STARequest: Sendable, Hashable, Codable {
     public let inputs: [ArtifactReference]
     public let design: ArtifactReference
     public let topDesignName: String
-    public let designRevision: ContentDigest?
+    public let canonicalDesignDigest: ContentDigest?
     public let libraries: [TimingLibraryReference]
     public let constraints: ArtifactReference
     public let requestedModeIDs: [String]
@@ -32,7 +32,7 @@ public struct STARequest: Sendable, Hashable, Codable {
         runID: String,
         design: ArtifactReference,
         topDesignName: String,
-        designRevision: ContentDigest? = nil,
+        canonicalDesignDigest: ContentDigest? = nil,
         libraries: [TimingLibraryReference],
         constraints: ArtifactReference,
         requestedModeIDs: [String] = [],
@@ -53,7 +53,7 @@ public struct STARequest: Sendable, Hashable, Codable {
         self.runID = runID
         self.design = design
         self.topDesignName = topDesignName
-        self.designRevision = designRevision
+        self.canonicalDesignDigest = canonicalDesignDigest
         self.libraries = libraries
         self.constraints = constraints
         self.requestedModeIDs = requestedModeIDs

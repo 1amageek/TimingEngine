@@ -10,7 +10,7 @@ public struct SignalIntegrityRequest: Sendable, Hashable, Codable {
     public let inputs: [ArtifactReference]
     public let design: ArtifactReference
     public let topDesignName: String
-    public let designRevision: ContentDigest?
+    public let canonicalDesignDigest: ContentDigest?
     public let constraints: ArtifactReference
     public let requestedModeIDs: [String]
     public let pdkManifest: ArtifactReference
@@ -27,7 +27,7 @@ public struct SignalIntegrityRequest: Sendable, Hashable, Codable {
         runID: String,
         design: ArtifactReference,
         topDesignName: String,
-        designRevision: ContentDigest? = nil,
+        canonicalDesignDigest: ContentDigest? = nil,
         constraints: ArtifactReference,
         requestedModeIDs: [String] = [],
         pdkManifest: ArtifactReference,
@@ -44,7 +44,7 @@ public struct SignalIntegrityRequest: Sendable, Hashable, Codable {
         self.runID = runID
         self.design = design
         self.topDesignName = topDesignName
-        self.designRevision = designRevision
+        self.canonicalDesignDigest = canonicalDesignDigest
         self.constraints = constraints
         self.requestedModeIDs = requestedModeIDs
         self.pdkManifest = pdkManifest

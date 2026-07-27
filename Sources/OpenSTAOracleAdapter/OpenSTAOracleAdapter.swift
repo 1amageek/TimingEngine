@@ -184,7 +184,6 @@ struct OpenSTAOracleAdapter {
                     oracleBuild: executable.digest.hexadecimalValue,
                     inputs: inputs,
                     invocation: invocation,
-                    designRevision: designReference.digest,
                     artifacts: retainedArtifacts
                 )
             }
@@ -205,7 +204,6 @@ struct OpenSTAOracleAdapter {
                     oracleBuild: executable.digest.hexadecimalValue,
                     inputs: inputs,
                     invocation: invocation,
-                    designRevision: designReference.digest,
                     artifacts: retainedArtifacts
                 )
             }
@@ -234,7 +232,6 @@ struct OpenSTAOracleAdapter {
                     oracleBuild: executable.digest.hexadecimalValue,
                     inputs: inputs,
                     invocation: invocation,
-                    designRevision: designReference.digest,
                     artifacts: retainedArtifacts
                 )
             }
@@ -250,7 +247,6 @@ struct OpenSTAOracleAdapter {
                 oracleBuild: executable.digest.hexadecimalValue,
                 inputs: inputs,
                 invocation: invocation,
-                designRevision: designReference.digest,
                 artifacts: retainedArtifacts
             )
         } catch let error as TimedProcessError {
@@ -284,7 +280,6 @@ struct OpenSTAOracleAdapter {
                     oracleBuild: executable.digest.hexadecimalValue,
                     inputs: inputs,
                     invocation: invocation,
-                    designRevision: designReference.digest,
                     artifacts: retainedArtifacts
                 )
             }
@@ -305,7 +300,6 @@ struct OpenSTAOracleAdapter {
                     oracleBuild: executable.digest.hexadecimalValue,
                     inputs: inputs,
                     invocation: invocation,
-                    designRevision: designReference.digest,
                     artifacts: retainedArtifacts
                 )
             }
@@ -325,7 +319,6 @@ struct OpenSTAOracleAdapter {
                 oracleBuild: executable.digest.hexadecimalValue,
                 inputs: inputs,
                 invocation: invocation,
-                designRevision: designReference.digest,
                 artifacts: retainedArtifacts
             )
         }
@@ -601,7 +594,6 @@ struct OpenSTAOracleAdapter {
         oracleBuild: String,
         inputs: [ArtifactReference],
         invocation: ExecutionInvocation,
-        designRevision: ContentDigest?,
         artifacts: [ArtifactReference] = []
     ) throws -> STAExecutionResult {
         let producer = try ProducerIdentity(
@@ -620,7 +612,6 @@ struct OpenSTAOracleAdapter {
             )],
             inputs: inputs,
             invocation: invocation,
-            designRevision: designRevision,
             startedAt: startedAt,
             completedAt: Date()
         )

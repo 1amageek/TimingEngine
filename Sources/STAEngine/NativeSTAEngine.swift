@@ -780,7 +780,7 @@ public struct NativeSTAEngine: STAExecuting {
 
     private func provenance(for request: STARequest) -> TimingArtifactProvenance {
         TimingArtifactProvenance(
-            designDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
+            designDigest: request.canonicalDesignDigest?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
             libraryDigests: request.libraries.map { $0.artifact.digest.hexadecimalValue },
             constraintDigest: request.constraints.digest.hexadecimalValue,
             pdkDigest: request.pdkDigest?.hexadecimalValue ?? request.pdkManifest.digest.hexadecimalValue,
@@ -792,9 +792,9 @@ public struct NativeSTAEngine: STAExecuting {
         LogicDesignReference(
             artifact: request.design,
             topDesignName: request.topDesignName,
-            designDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
+            designDigest: request.canonicalDesignDigest?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
             provenance: LogicDesignProvenance(
-                sourceDesignDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
+                sourceDesignDigest: request.canonicalDesignDigest?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
                 inputDesignDigest: request.design.digest.hexadecimalValue,
                 producerID: "timing.sta",
                 producerVersion: "1",

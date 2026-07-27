@@ -224,8 +224,13 @@ struct ExecutionContractTests {
             #expect(result.diagnostics.contains {
                 $0.code.rawValue == "timing.signal_integrity.si_crosstalk_violation"
             })
-            #expect(result.diagnostics.contains {
-                $0.subject?.kind == .net && $0.subject?.identifier == "victim"
+            #expect(result.diagnostics.contains { diagnostic in
+                guard case .path(let subject) = diagnostic.subject else {
+                    return false
+                }
+                return subject.facetID.rawValue == "timing"
+                    && subject.kindID.rawValue == "net"
+                    && subject.localIdentifier == "victim"
             })
         }
     }

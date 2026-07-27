@@ -88,7 +88,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
                 )
             }
             let provenance = TimingArtifactProvenance(
-                designDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
+                designDigest: request.canonicalDesignDigest?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
                 libraryDigests: [],
                 constraintDigest: request.constraints.digest.hexadecimalValue,
                 pdkDigest: request.pdkDigest?.hexadecimalValue ?? request.pdkManifest.digest.hexadecimalValue,
@@ -129,7 +129,13 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
                     code: try DiagnosticCode(rawValue: "timing.signal_integrity.si_crosstalk_violation"),
                     severity: .error,
                     summary: "Crosstalk on \(violation.victimNet) from \(violation.aggressorNet) exceeds the configured limit.",
-                    subject: try DesignObjectReference(kind: .net, identifier: violation.victimNet),
+                    subject: .path(
+                        try DesignPathReference(
+                            facetID: DesignFacetID(rawValue: "timing"),
+                            kindID: DesignEntityKindID(rawValue: "net"),
+                            localIdentifier: violation.victimNet
+                        )
+                    ),
                     suggestedActions: violation.suggestedActions.map { SuggestedAction(code: $0, summary: $0) }
                 )
             } + provenanceDiagnostics
@@ -267,9 +273,9 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
         LogicDesignReference(
             artifact: request.design,
             topDesignName: request.topDesignName,
-            designDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
+            designDigest: request.canonicalDesignDigest?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
             provenance: LogicDesignProvenance(
-                sourceDesignDigest: request.designRevision?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
+                sourceDesignDigest: request.canonicalDesignDigest?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
                 inputDesignDigest: request.design.digest.hexadecimalValue,
                 producerID: "timing.signal-integrity",
                 producerVersion: "1",
