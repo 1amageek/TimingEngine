@@ -1,4 +1,6 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
+import CircuiteFoundationFoundation
 import Foundation
 import LogicIR
 import PDKCore
@@ -37,7 +39,7 @@ struct NativeEngineTests {
             try artifact(path: "constraints.sdc", data: constraintsData, kind: .constraints, format: .sdc),
             try artifact(path: "pdk.json", data: pdkData, kind: .technology, format: .json)
         ]
-        let request = STARequest(
+        let request = try STARequest(
             runID: "run-001",
             design: references[0],
             topDesignName: "top",
@@ -50,10 +52,10 @@ struct NativeEngineTests {
             pdkVersion: "1"
         )
         let reader = InMemoryTimingArtifactReader(artifacts: [
-            "design.json": designData,
-            "library.lib": libraryData,
-            "constraints.sdc": constraintsData,
-            "pdk.json": pdkData
+            references[0].id: designData,
+            references[1].id: libraryData,
+            references[2].id: constraintsData,
+            references[3].id: pdkData
         ])
         let result = try await NativeSTAEngine(reader: reader).execute(request)
                 #expect(result.status == .completed)
@@ -67,7 +69,7 @@ struct NativeEngineTests {
     @Test("blocks a post-layout request without required timing inputs")
     func blocksMissingParasitics() async throws {
         let reference = try artifact(path: "missing.json", data: Data("{}".utf8), kind: .netlist, format: .json)
-        let request = STARequest(
+        let request = try STARequest(
             runID: "blocked-run",
             design: reference,
             topDesignName: "top",
@@ -88,16 +90,22 @@ struct NativeEngineTests {
         data: Data,
         kind: ArtifactKind,
         format: ArtifactFormat
-    ) throws -> ArtifactReference {
-        ArtifactReference(
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
-                role: .input,
-                kind: kind,
-                format: format
-            ),
-            digest: try SHA256ContentDigester().digest(data: data, using: .sha256),
-            byteCount: UInt64(data.count)
+    ) throws -> TimingArtifactBinding {
+        let descriptor = ArtifactDescriptor(role: .input, kind: kind, format: format)
+        let reference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: data, using: .sha256),
+            byteCount: UInt64(data.count),
+            descriptor: descriptor
+        )
+        return try TimingArtifactBinding(
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: TimingArtifactBinding.workspaceRootIdentifier),
+                relativePath: ArtifactRelativePath(
+                    segments: path.split(separator: "/").map(String.init)
+                )
+            )
         )
     }
 }

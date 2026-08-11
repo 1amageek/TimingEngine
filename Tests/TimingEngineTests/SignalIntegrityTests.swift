@@ -1,4 +1,6 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
+import CircuiteFoundationFoundation
 import Foundation
 import SignalIntegrityEngine
 import Testing
@@ -10,7 +12,7 @@ struct SignalIntegrityTests {
     func reportsCrosstalk() async throws {
         let designData = Data("{}".utf8)
         let constraintsData = Data("create_clock -name clk -period 10ns [get_ports clk]".utf8)
-        let pdkData = Data("{}".utf8)
+        let pdkData = Data("{\"process\":\"test\"}".utf8)
         let spefData = Data("""
         *SPEF "IEEE 1481-1998"
         *CAP_UNIT 1 PF
@@ -28,12 +30,12 @@ struct SignalIntegrityTests {
         let pdk = try artifact(path: "pdk.json", data: pdkData, kind: .technology, format: .json)
         let parasitics = try artifact(path: "parasitics.spef", data: spefData, kind: .parasitics, format: .spef)
         let reader = InMemoryTimingArtifactReader(artifacts: [
-            "design.json": designData,
-            "constraints.sdc": constraintsData,
-            "pdk.json": pdkData,
-            "parasitics.spef": spefData
+            design.id: designData,
+            constraints.id: constraintsData,
+            pdk.id: pdkData,
+            parasitics.id: spefData
         ])
-        let request = SignalIntegrityRequest(
+        let request = try SignalIntegrityRequest(
             runID: "si-run",
             design: design,
             topDesignName: "top",
@@ -58,16 +60,22 @@ struct SignalIntegrityTests {
         data: Data,
         kind: ArtifactKind,
         format: ArtifactFormat
-    ) throws -> ArtifactReference {
-        ArtifactReference(
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
-                role: .input,
-                kind: kind,
-                format: format
-            ),
-            digest: try SHA256ContentDigester().digest(data: data, using: .sha256),
-            byteCount: UInt64(data.count)
+    ) throws -> TimingArtifactBinding {
+        let descriptor = ArtifactDescriptor(role: .input, kind: kind, format: format)
+        let reference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: data, using: .sha256),
+            byteCount: UInt64(data.count),
+            descriptor: descriptor
+        )
+        return try TimingArtifactBinding(
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: TimingArtifactBinding.workspaceRootIdentifier),
+                relativePath: ArtifactRelativePath(
+                    segments: path.split(separator: "/").map(String.init)
+                )
+            )
         )
     }
 }

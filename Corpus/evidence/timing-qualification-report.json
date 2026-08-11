@@ -1,5 +1,5 @@
 {
-  "corpusEvidenceDigest" : "0a9d49484ef18f096f44590e24c069817554722592454d745f5674b5d288f0ac",
+  "corpusEvidenceDigest" : "affd5a4160fa13b42681299b68b693cd5432f04ac5c9e973964c1bfb96e18eb0",
   "corpusSuiteID" : "timingengine-retained-fixture",
   "decision" : "blocked",
   "externalOracle" : {
@@ -8,7 +8,7 @@
     "status" : "unavailable"
   },
   "findings" : ["external_sta_oracle_unavailable"],
-  "pdkDigest" : "d0b548ec009954ae9568645b30206b04e4cd1f5289f20af123644eee53ba4ae9",
+  "pdkDigest" : "ae0e1a02eae77915a82ff703a7e9866abbe01e98bf2e243114daac196745f547",
   "pdkEvidence" : {
     "assets" : [
       {
@@ -24,12 +24,12 @@
     "cornerIDs" : ["typical"],
     "findings" : [],
     "isComplete" : true,
-    "manifestDigest" : "d0b548ec009954ae9568645b30206b04e4cd1f5289f20af123644eee53ba4ae9",
+    "manifestDigest" : "ae0e1a02eae77915a82ff703a7e9866abbe01e98bf2e243114daac196745f547",
     "manifestIsValid" : true,
     "processID" : "fixture-process",
     "version" : "1"
   },
-  "pdkManifestDigest" : "d0b548ec009954ae9568645b30206b04e4cd1f5289f20af123644eee53ba4ae9",
+  "pdkManifestDigest" : "ae0e1a02eae77915a82ff703a7e9866abbe01e98bf2e243114daac196745f547",
   "pdkVersion" : "1",
   "processID" : "fixture-process",
   "requiredCornerIDs" : ["typical"],

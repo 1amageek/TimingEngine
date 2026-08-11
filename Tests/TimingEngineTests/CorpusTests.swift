@@ -1,5 +1,8 @@
 import Foundation
 import CircuiteFoundation
+import CircuiteFoundationCrypto
+import CircuiteFoundationFileSystem
+import CircuiteFoundationFoundation
 import Testing
 @testable import TimingEngine
 import TimingCore
@@ -29,7 +32,7 @@ struct CorpusTests {
     func buildsArtifactReference() throws {
         let fixture = try TimingTestResources.corpusRoot
             .appending(path: "fixtures/simple/library.lib")
-        let reference = try TimingArtifactReferenceBuilder().makeReference(
+        let reference = try TimingArtifactReferenceBuilder().makeBinding(
             path: fixture.path(percentEncoded: false),
             kind: try ArtifactKind(rawValue: "timing.library"),
             format: .liberty
@@ -39,10 +42,10 @@ struct CorpusTests {
     }
 
     @Test("checked-in Sky130A profile requires every exact multi-corner Liberty artifact")
-    func sky130ProfileRequiresRetainedLiberties() throws {
+    func sky130ProfileRequiresRetainedLiberties() async throws {
         let profileRoot = try TimingTestResources.qualificationRoot.appending(path: "sky130A")
         let manifestURL = profileRoot.appending(path: "pdk.json")
-        let manifestReference = try TimingArtifactReferenceBuilder().makeReference(
+        let manifestReference = try TimingArtifactReferenceBuilder().makeBinding(
             at: manifestURL,
             relativeTo: profileRoot,
             kind: .technology,
@@ -54,7 +57,7 @@ struct CorpusTests {
             version: "c6d73a35f524070e85faff4a6a9eef49553ebc2b",
             digest: manifestReference.digest
         )
-        let evidence = try LocalTimingPDKEvidenceBuilder(
+        let evidence = try await LocalTimingPDKEvidenceBuilder(
             workspaceRoot: profileRoot
         ).build(for: pdk)
 
@@ -126,14 +129,11 @@ struct CorpusTests {
             rootURL: corpusRoot,
             runID: "qualification-test"
         )
-        let pdkReference = try LocalArtifactReferencer().reference(
-            ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: "fixtures/simple/pdk.json"),
-                role: .input,
-                kind: CircuiteFoundation.ArtifactKind.technology,
-                format: .json
-            ),
-            relativeTo: corpusRoot
+        let pdkReference = try TimingArtifactReferenceBuilder().makeBinding(
+            at: corpusRoot.appending(path: "fixtures/simple/pdk.json"),
+            relativeTo: corpusRoot,
+            kind: CircuiteFoundation.ArtifactKind.technology,
+            format: .json
         )
         let pdk = try TimingPDKReference(
             manifest: pdkReference,
@@ -141,7 +141,7 @@ struct CorpusTests {
             version: "1",
             digest: pdkReference.digest
         )
-        let pdkEvidence = try LocalTimingPDKEvidenceBuilder(
+        let pdkEvidence = try await LocalTimingPDKEvidenceBuilder(
             workspaceRoot: corpusRoot
         ).build(for: pdk)
         let report = await TimingEvidenceEvaluator().evaluate(
@@ -222,7 +222,7 @@ struct CorpusTests {
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
 
         #expect(throws: TimingError.self) {
-            try TimingArtifactReferenceBuilder().makeReference(
+            try TimingArtifactReferenceBuilder().makeBinding(
                 at: link,
                 relativeTo: root,
                 kind: .evidence,
@@ -272,7 +272,7 @@ struct CorpusTests {
             fileAt: executableURL,
             using: .sha256
         )
-        let pdkReference = try TimingArtifactReferenceBuilder().makeReference(
+        let pdkReference = try TimingArtifactReferenceBuilder().makeBinding(
             at: fixtureDirectory.appending(path: "pdk.json"),
             relativeTo: workspaceRoot,
             kind: CircuiteFoundation.ArtifactKind.technology,
@@ -284,7 +284,7 @@ struct CorpusTests {
             version: "1",
             digest: pdkReference.digest
         )
-        let pdkEvidence = try LocalTimingPDKEvidenceBuilder(
+        let pdkEvidence = try await LocalTimingPDKEvidenceBuilder(
             workspaceRoot: workspaceRoot
         ).build(for: pdk)
         let oracleTool = try ProducerIdentity(
@@ -303,7 +303,7 @@ struct CorpusTests {
             identifier: "timing.sta.external",
             version: "1"
         )
-        let executableArtifact = try TimingArtifactReferenceBuilder().makeReference(
+        let executableArtifact = try TimingArtifactReferenceBuilder().makeBinding(
             at: executableURL,
             relativeTo: workspaceRoot,
             kind: try ArtifactKind(rawValue: "tool.executable"),
@@ -316,7 +316,7 @@ struct CorpusTests {
         let corpusURL = evidenceDirectory.appending(path: "corpus.json")
         let corpusData = try JSONEncoder().encode(corpus)
         try corpusData.write(to: corpusURL, options: .atomic)
-        let corpusArtifact = try TimingArtifactReferenceBuilder().makeReference(
+        let corpusArtifact = try TimingArtifactReferenceBuilder().makeBinding(
             at: corpusURL,
             relativeTo: workspaceRoot,
             kind: .report,
@@ -330,25 +330,27 @@ struct CorpusTests {
             provenance: TimingArtifactProvenance(pdkDigest: pdkReference.digest.hexadecimalValue)
         )
         let now = Date(timeIntervalSince1970: 1)
-        let native = STAExecutionResult(
+        let native = try STAExecutionResult(
             runID: "native-correlation",
             status: .completed,
             payload: payload,
+            inputBindings: [pdkReference],
             provenance: try ExecutionProvenance(
                 producer: nativeEngine,
-                inputs: [pdkReference],
+                inputs: [pdkReference.reference],
                 startedAt: now,
                 completedAt: now
             )
         )
-        let oracle = STAExecutionResult(
+        let oracle = try STAExecutionResult(
             runID: "oracle-correlation",
             status: .completed,
             payload: payload,
+            inputBindings: [pdkReference],
             provenance: try ExecutionProvenance(
                 producer: oracleAdapter,
                 supportingTools: [oracleTool],
-                inputs: [pdkReference],
+                inputs: [pdkReference.reference],
                 invocation: try ExecutionInvocation.externalProcess(executable: executablePath),
                 startedAt: now,
                 completedAt: now
@@ -358,14 +360,14 @@ struct CorpusTests {
         let oracleURL = outputDirectory.appending(path: "oracle.json")
         try JSONEncoder().encode(native).write(to: nativeURL, options: .atomic)
         try JSONEncoder().encode(oracle).write(to: oracleURL, options: .atomic)
-        let nativeOutput = try TimingArtifactReferenceBuilder().makeReference(
+        let nativeOutput = try TimingArtifactReferenceBuilder().makeBinding(
             at: nativeURL,
             relativeTo: workspaceRoot,
             role: .output,
             kind: .report,
             format: .json
         )
-        let oracleOutput = try TimingArtifactReferenceBuilder().makeReference(
+        let oracleOutput = try TimingArtifactReferenceBuilder().makeBinding(
             at: oracleURL,
             relativeTo: workspaceRoot,
             role: .output,
@@ -582,7 +584,7 @@ struct CorpusTests {
             identifier: "timing.external",
             version: "1"
         )
-        let oracleResult = STAExecutionResult(
+        let oracleResult = try STAExecutionResult(
             runID: "oracle-envelope",
             status: .completed,
             payload: payload,
@@ -617,7 +619,7 @@ struct CorpusTests {
             identifier: "timing.external",
             version: "1"
         )
-        let oracleResult = STAExecutionResult(
+        let oracleResult = try STAExecutionResult(
             runID: "different-run",
             status: .completed,
             payload: STAPayload(

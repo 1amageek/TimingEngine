@@ -18,7 +18,7 @@ public struct LocalTimingExternalCorrelationVerifier: TimingExternalCorrelationV
         try report.validateStructure()
         guard report.processID == pdk.processID,
               report.pdkVersion == pdk.version,
-              report.pdkManifestArtifact == pdk.manifest,
+              report.pdkManifestArtifact.reference == pdk.manifest.reference,
               report.pdkManifestDigest.caseInsensitiveCompare(
                 pdk.manifest.digest.hexadecimalValue
               ) == .orderedSame else {
@@ -54,7 +54,7 @@ public struct LocalTimingExternalCorrelationVerifier: TimingExternalCorrelationV
             _ = try await reader.read(artifact)
         }
 
-        let retainedPDK = try LocalTimingPDKEvidenceBuilder(
+        let retainedPDK = try await LocalTimingPDKEvidenceBuilder(
             workspaceRoot: canonicalRoot
         ).build(for: pdk)
         guard retainedPDK.isComplete,
@@ -84,11 +84,12 @@ public struct LocalTimingExternalCorrelationVerifier: TimingExternalCorrelationV
               report.oracleTool != native.evidence.provenance.producer else {
             throw TimingError.invalidInput("Native and oracle outputs do not come from independent implementations.")
         }
-        guard native.evidence.provenance.inputs == report.inputArtifacts,
-              oracle.evidence.provenance.inputs == report.inputArtifacts else {
+        let retainedInputReferences = report.inputArtifacts.map(\.reference)
+        guard native.evidence.provenance.inputs == retainedInputReferences,
+              oracle.evidence.provenance.inputs == retainedInputReferences else {
             throw TimingError.invalidInput("Native and oracle outputs are not bound to the same retained inputs.")
         }
-        guard report.inputArtifacts.contains(report.pdkManifestArtifact) else {
+        guard retainedInputReferences.contains(report.pdkManifestArtifact.reference) else {
             throw TimingError.invalidInput("The selected PDK manifest is missing from correlated inputs.")
         }
         try verifyExecutableBinding(
@@ -119,7 +120,7 @@ public struct LocalTimingExternalCorrelationVerifier: TimingExternalCorrelationV
     }
 
     private func decode<Value: Decodable>(
-        _ artifact: ArtifactReference,
+        _ artifact: TimingArtifactBinding,
         as type: Value.Type,
         format: String,
         reader: FileSystemTimingArtifactReader
@@ -147,8 +148,9 @@ public struct LocalTimingExternalCorrelationVerifier: TimingExternalCorrelationV
               let evidencePath = externalOracle.executablePath else {
             throw TimingError.invalidInput("Oracle output does not retain its external executable invocation.")
         }
-        let artifactURL = try report.oracleExecutableArtifact.locator.location
-            .resolvedFileURL(relativeTo: workspaceRoot).resolvingSymlinksInPath().standardizedFileURL
+        let artifactURL = try report.oracleExecutableArtifact
+            .localFileURL(relativeTo: workspaceRoot)
+            .resolvingSymlinksInPath().standardizedFileURL
         let invocationURL = URL(filePath: invocationPath)
             .resolvingSymlinksInPath().standardizedFileURL
         let evidenceURL = URL(filePath: evidencePath)

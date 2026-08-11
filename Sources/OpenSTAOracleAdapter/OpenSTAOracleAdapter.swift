@@ -67,28 +67,28 @@ struct OpenSTAOracleAdapter {
             timeoutSeconds: timeoutSeconds
         )
         let referenceBuilder = TimingArtifactReferenceBuilder()
-        let designReference = try makeReference(
+        let designReference = try makeBinding(
             path: designPath,
             workspaceRoot: workspaceRoot,
             builder: referenceBuilder,
             kind: .netlist,
             format: designFormat(for: designPath)
         )
-        let libraryReference = try makeReference(
+        let libraryReference = try makeBinding(
             path: libraryPath,
             workspaceRoot: workspaceRoot,
             builder: referenceBuilder,
             kind: try ArtifactKind(rawValue: "timing.library"),
             format: .liberty
         )
-        let constraintReference = try makeReference(
+        let constraintReference = try makeBinding(
             path: constraintsPath,
             workspaceRoot: workspaceRoot,
             builder: referenceBuilder,
             kind: CircuiteFoundation.ArtifactKind.constraints,
             format: try ArtifactFormat(rawValue: "sdc")
         )
-        let pdkReference = try makeReference(
+        let pdkReference = try makeBinding(
             path: pdkPath,
             workspaceRoot: workspaceRoot,
             builder: referenceBuilder,
@@ -96,7 +96,7 @@ struct OpenSTAOracleAdapter {
             format: .json
         )
         let parasiticsReference = try spefPath.map {
-            try makeReference(
+            try makeBinding(
                 path: $0,
                 workspaceRoot: workspaceRoot,
                 builder: referenceBuilder,
@@ -113,7 +113,7 @@ struct OpenSTAOracleAdapter {
         )
         let inputs = [designReference, libraryReference, constraintReference, pdkReference]
             + (parasiticsReference.map { [$0] } ?? [])
-        let executionWorkspace = try OpenSTAExecutionWorkspace.create(
+        let executionWorkspace = try await OpenSTAExecutionWorkspace.create(
             workspaceRoot: workspaceRoot,
             runID: runID,
             executable: executable,
@@ -136,7 +136,7 @@ struct OpenSTAOracleAdapter {
             top: top,
             spefPath: executionWorkspace.spefURL?.path(percentEncoded: false)
         )
-        let scriptReference = try makeReference(
+        let scriptReference = try makeBinding(
             path: scriptURL.path(percentEncoded: false),
             workspaceRoot: workspaceRoot,
             builder: referenceBuilder,
@@ -187,7 +187,7 @@ struct OpenSTAOracleAdapter {
                     artifacts: retainedArtifacts
                 )
             }
-            guard executionWorkspace.verifySnapshots() else {
+            guard await executionWorkspace.verifySnapshots() else {
                 return try result(
                     runID: runID,
                     status: .failed,
@@ -283,7 +283,7 @@ struct OpenSTAOracleAdapter {
                     artifacts: retainedArtifacts
                 )
             }
-            guard executionWorkspace.verifySnapshots() else {
+            guard await executionWorkspace.verifySnapshots() else {
                 return try result(
                     runID: runID,
                     status: .failed,
@@ -331,20 +331,18 @@ struct OpenSTAOracleAdapter {
         directory: URL,
         workspaceRoot: URL?,
         builder: TimingArtifactReferenceBuilder
-    ) throws -> [ArtifactReference] {
+    ) throws -> [TimingArtifactBinding] {
         let safeRunID = String(runID.map {
             $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" ? $0 : "_"
         })
         let streams = [
             (
                 suffix: "stdout",
-                content: standardOutput,
-                artifactID: "opensta-standard-output"
+                content: standardOutput
             ),
             (
                 suffix: "stderr",
-                content: standardError,
-                artifactID: "opensta-standard-error"
+                content: standardError
             ),
         ]
         return try streams.map { stream in
@@ -357,14 +355,13 @@ struct OpenSTAOracleAdapter {
                     message: error.localizedDescription
                 )
             }
-            return try makeReference(
+            return try makeBinding(
                 path: url.path(percentEncoded: false),
                 workspaceRoot: workspaceRoot,
                 builder: builder,
                 role: .output,
                 kind: .log,
-                format: .text,
-                artifactID: stream.artifactID
+                format: .text
             )
         }
     }
@@ -382,31 +379,28 @@ struct OpenSTAOracleAdapter {
         }
     }
 
-    private static func makeReference(
+    private static func makeBinding(
         path: String,
         workspaceRoot: URL?,
         builder: TimingArtifactReferenceBuilder,
         role: ArtifactRole = .input,
         kind: ArtifactKind,
-        format: ArtifactFormat,
-        artifactID: String? = nil
-    ) throws -> ArtifactReference {
+        format: ArtifactFormat
+    ) throws -> TimingArtifactBinding {
         if let workspaceRoot {
-            return try builder.makeReference(
+            return try builder.makeBinding(
                 at: URL(filePath: path),
                 relativeTo: workspaceRoot,
                 role: role,
                 kind: kind,
-                format: format,
-                artifactID: artifactID
+                format: format
             )
         }
-        return try builder.makeReference(
+        return try builder.makeBinding(
             path: path,
             role: role,
             kind: kind,
-            format: format,
-            artifactID: artifactID
+            format: format
         )
     }
 
@@ -592,9 +586,9 @@ struct OpenSTAOracleAdapter {
         oracleID: String,
         oracleVersion: String,
         oracleBuild: String,
-        inputs: [ArtifactReference],
+        inputs: [TimingArtifactBinding],
         invocation: ExecutionInvocation,
-        artifacts: [ArtifactReference] = []
+        artifacts: [TimingArtifactBinding] = []
     ) throws -> STAExecutionResult {
         let producer = try ProducerIdentity(
             kind: .tool,
@@ -610,16 +604,17 @@ struct OpenSTAOracleAdapter {
                 version: oracleVersion,
                 build: oracleBuild
             )],
-            inputs: inputs,
+            inputs: inputs.map(\.reference),
             invocation: invocation,
             startedAt: startedAt,
             completedAt: Date()
         )
-        return STAExecutionResult(
+        return try STAExecutionResult(
             runID: runID,
             status: status,
             payload: payload,
-            artifacts: artifacts,
+            inputBindings: inputs,
+            artifactBindings: artifacts,
             diagnostics: diagnostics,
             provenance: provenance
         )
@@ -641,7 +636,7 @@ struct OpenSTAOracleAdapter {
             startedAt: Date(),
             completedAt: Date()
         )
-        return STAExecutionResult(
+        return try STAExecutionResult(
             runID: runID,
             status: .failed,
             payload: STAPayload(worstSetupSlack: nil, worstHoldSlack: nil, analyzedCorners: [], analyzedModes: []),

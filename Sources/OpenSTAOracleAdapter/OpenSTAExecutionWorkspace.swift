@@ -1,8 +1,11 @@
 import CircuiteFoundation
+import CircuiteFoundationFileSystem
+import CircuiteFoundationFoundation
 import Foundation
 import TimingCore
 
 struct OpenSTAExecutionWorkspace {
+    let workspaceRoot: URL
     let root: URL
     let executable: OpenSTAExecutableValidator.ValidatedExecutable
     let designURL: URL
@@ -10,18 +13,18 @@ struct OpenSTAExecutionWorkspace {
     let constraintsURL: URL
     let pdkURL: URL
     let spefURL: URL?
-    let snapshotReferences: [ArtifactReference]
+    let snapshotReferences: [TimingArtifactBinding]
 
     static func create(
         workspaceRoot: URL,
         runID: String,
         executable: OpenSTAExecutableValidator.ValidatedExecutable,
-        design: ArtifactReference,
-        library: ArtifactReference,
-        constraints: ArtifactReference,
-        pdk: ArtifactReference,
-        parasitics: ArtifactReference?
-    ) throws -> Self {
+        design: TimingArtifactBinding,
+        library: TimingArtifactBinding,
+        constraints: TimingArtifactBinding,
+        pdk: TimingArtifactBinding,
+        parasitics: TimingArtifactBinding?
+    ) async throws -> Self {
         let fileManager = FileManager.default
         let canonicalWorkspaceRoot = workspaceRoot.standardizedFileURL.resolvingSymlinksInPath()
         let allowedRunIDScalars = CharacterSet(
@@ -83,33 +86,33 @@ struct OpenSTAExecutionWorkspace {
                 )
             )
 
-            let designName = "design.\(design.locator.format.rawValue)"
-            _ = try snapshot(
+            let designName = "design.\(design.descriptor.format.rawValue)"
+            _ = try await snapshot(
                 design,
                 named: designName,
                 in: stagingInputs,
                 relativeTo: canonicalWorkspaceRoot
             )
-            _ = try snapshot(
+            _ = try await snapshot(
                 library,
                 named: "library.lib",
                 in: stagingInputs,
                 relativeTo: canonicalWorkspaceRoot
             )
-            _ = try snapshot(
+            _ = try await snapshot(
                 constraints,
                 named: "constraints.sdc",
                 in: stagingInputs,
                 relativeTo: canonicalWorkspaceRoot
             )
-            _ = try snapshot(
+            _ = try await snapshot(
                 pdk,
                 named: "pdk.json",
                 in: stagingInputs,
                 relativeTo: canonicalWorkspaceRoot
             )
             if let parasitics {
-                _ = try snapshot(
+                _ = try await snapshot(
                     parasitics,
                     named: "parasitics.spef",
                     in: stagingInputs,
@@ -131,22 +134,24 @@ struct OpenSTAExecutionWorkspace {
             let constraintsURL = inputs.appending(path: "constraints.sdc")
             let pdkURL = inputs.appending(path: "pdk.json")
             var references = [
-                try snapshotReference(design, at: designURL),
-                try snapshotReference(library, at: libraryURL),
-                try snapshotReference(constraints, at: constraintsURL),
-                try snapshotReference(pdk, at: pdkURL),
+                try snapshotReference(design, at: designURL, relativeTo: canonicalWorkspaceRoot),
+                try snapshotReference(library, at: libraryURL, relativeTo: canonicalWorkspaceRoot),
+                try snapshotReference(constraints, at: constraintsURL, relativeTo: canonicalWorkspaceRoot),
+                try snapshotReference(pdk, at: pdkURL, relativeTo: canonicalWorkspaceRoot),
             ]
             let spefURL: URL?
             if let parasitics {
                 let url = inputs.appending(path: "parasitics.spef")
-                references.append(try snapshotReference(parasitics, at: url))
+                references.append(try snapshotReference(
+                    parasitics,
+                    at: url,
+                    relativeTo: canonicalWorkspaceRoot
+                ))
                 spefURL = url
             } else {
                 spefURL = nil
             }
-            guard references.allSatisfy({
-                LocalArtifactVerifier().verify($0).isVerified
-            }) else {
+            guard await verify(references, workspaceRoot: canonicalWorkspaceRoot) else {
                 throw TimingError.artifactReadFailed(
                     path: root.path,
                     message: "Committed OpenSTA snapshots failed integrity verification."
@@ -154,6 +159,7 @@ struct OpenSTAExecutionWorkspace {
             }
 
             return Self(
+                workspaceRoot: canonicalWorkspaceRoot,
                 root: root,
                 executable: executableSnapshot,
                 designURL: designURL,
@@ -187,30 +193,50 @@ struct OpenSTAExecutionWorkspace {
         }
     }
 
-    func verifySnapshots() -> Bool {
-        let verifier = LocalArtifactVerifier()
-        return snapshotReferences.allSatisfy { verifier.verify($0).isVerified }
+    func verifySnapshots() async -> Bool {
+        await Self.verify(snapshotReferences, workspaceRoot: workspaceRoot)
+    }
+
+    private static func verify(
+        _ references: [TimingArtifactBinding],
+        workspaceRoot: URL
+    ) async -> Bool {
+        let reader = FileSystemTimingArtifactReader(workspaceRoot: workspaceRoot)
+        for reference in references {
+            do {
+                _ = try await reader.read(reference)
+            } catch {
+                return false
+            }
+        }
+        return true
     }
 
     private static func snapshot(
-        _ reference: ArtifactReference,
+        _ reference: TimingArtifactBinding,
         named name: String,
         in directory: URL,
         relativeTo workspaceRoot: URL
-    ) throws -> URL {
-        let source = try reference.locator.location.resolvedFileURL(relativeTo: workspaceRoot)
+    ) async throws -> URL {
         let destination = directory.appending(path: name)
         // External STA requires filesystem paths. An owned immutable copy closes
         // the digest-check-to-process-use mutation window.
-        try FileManager.default.copyItem(at: source, to: destination)
+        let data = try await FileSystemTimingArtifactReader(
+            workspaceRoot: workspaceRoot
+        ).read(reference)
+        try data.write(to: destination, options: .atomic)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o400],
             ofItemAtPath: destination.path
         )
-        let snapshot = try snapshotReference(reference, at: destination)
-        guard LocalArtifactVerifier().verify(snapshot).isVerified else {
+        let snapshot = try snapshotReference(
+            reference,
+            at: destination,
+            relativeTo: workspaceRoot
+        )
+        guard await verify([snapshot], workspaceRoot: workspaceRoot) else {
             throw TimingError.artifactReadFailed(
-                path: source.path,
+                path: reference.materializationDescription,
                 message: "OpenSTA input snapshot failed integrity verification."
             )
         }
@@ -218,19 +244,22 @@ struct OpenSTAExecutionWorkspace {
     }
 
     private static func snapshotReference(
-        _ reference: ArtifactReference,
-        at url: URL
-    ) throws -> ArtifactReference {
-        ArtifactReference(
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(fileURL: url),
-                role: .input,
-                kind: reference.locator.kind,
-                format: reference.locator.format
-            ),
-            digest: reference.digest,
-            byteCount: reference.byteCount,
-            producer: reference.producer
+        _ reference: TimingArtifactBinding,
+        at url: URL,
+        relativeTo workspaceRoot: URL
+    ) throws -> TimingArtifactBinding {
+        let snapshot = try TimingArtifactReferenceBuilder().makeBinding(
+            at: url,
+            relativeTo: workspaceRoot,
+            role: .input,
+            kind: reference.descriptor.kind,
+            format: reference.descriptor.format
         )
+        guard snapshot.reference == reference.reference else {
+            throw TimingError.artifactDigestMismatch(
+                path: snapshot.materializationDescription
+            )
+        }
+        return snapshot
     }
 }

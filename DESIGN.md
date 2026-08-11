@@ -37,11 +37,11 @@ The checked-in Sky130A directory is an input manifest, not a foundry corpus. Its
 
 ## Artifact boundary
 
-Correlation artifacts must use workspace-relative `ArtifactLocation` values. The caller supplies one explicit workspace root. Symlink-resolved files outside that root are rejected. OpenSTA execution artifacts are retained beneath `.timingengine/runs/<run-id>/opensta/`; an existing run workspace is never replaced, and run IDs must be stable path-safe identities rather than sanitized aliases. Native and oracle outputs must retain the same input artifact identities and an independent oracle executable identity. A declared executable version without a matching measured digest is not production evidence.
+Correlation artifacts keep location-independent `ArtifactReference` identity separate from workspace-root `ArtifactAvailability`. The caller supplies one explicit workspace root, and bounded `ArtifactRootCapability` sessions reject root mismatch, symlink traversal, digest/size drift, budget exhaustion, and close failure. OpenSTA execution artifacts are retained beneath `.timingengine/runs/<run-id>/opensta/`; an existing run workspace is never replaced, and run IDs must be stable path-safe identities rather than sanitized aliases. Native and oracle outputs must retain the same input artifact identities and an independent oracle executable identity. A declared executable version without a matching measured digest is not production evidence.
 
 ## Dependency direction
 
-TimingEngine depends on `CircuiteFoundation` for cross-domain artifacts, evidence, diagnostics and engine protocols. It does not import Xcircuite or circuit-studio. Production trust consumers depend on ToolQualification's validation protocol and inject an asynchronous verified artifact reader.
+TimingEngine depends on the portable `CircuiteFoundation` contracts and opts into Foundation, Crypto, and FileSystem products only in targets that perform serialization, digesting, or local access. It does not import Xcircuite or circuit-studio. ToolQualification remains a downstream trust consumer and is not a dependency of TimingCore.
 
 ## Non-responsibilities
 

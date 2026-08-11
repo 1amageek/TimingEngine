@@ -46,6 +46,7 @@ public struct NativeSTAEngine: STAExecuting {
                 throw TimingError.invalidInput("STA variation derates must be finite and positive.")
             }
             let inputs = try await loadInputs(request)
+            try validateCanonicalInputs(inputs)
             let provenanceIssues = LogicDesignProvenanceValidation.issues(
                 for: logicDesignReference(for: request),
                 requireProvenance: request.requiresPostLayoutInputs
@@ -66,27 +67,27 @@ public struct NativeSTAEngine: STAExecuting {
                 cornerIDs: inputs.cornerIDs,
                 modeIDs: inputs.modeIDs
             )
-            var artifacts: [ArtifactReference] = []
+            var artifactBindings: [TimingArtifactBinding] = []
             if let artifactStore {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 let reportData = try encoder.encode(result.payload)
                 let artifact = try await artifactStore.store(
                     reportData,
-                    artifactID: try ArtifactID(rawValue: "timing-sta-report"),
+                    artifactName: "timing-sta-report",
                     runID: request.runID,
                     kind: .report,
-                    format: .json,
-                    producer: nil
+                    format: .json
                 )
-                artifacts.append(artifact)
+                artifactBindings.append(artifact)
             }
             let completedAt = Date()
-            return STAExecutionResult(
+            return try STAExecutionResult(
                 runID: request.runID,
                 status: result.status,
                 payload: result.payload,
-                artifacts: artifacts,
+                inputBindings: request.artifactBindings,
+                artifactBindings: artifactBindings,
                 diagnostics: result.diagnostics,
                 provenance: try makeProvenance(startedAt: startedAt, completedAt: completedAt, inputs: request.inputs),
                 schemaVersion: STARequest.currentSchemaVersion
@@ -104,10 +105,11 @@ public struct NativeSTAEngine: STAExecuting {
                 message: error.localizedDescription,
                 suggestedActions: ["inspect_input_artifacts", "reproduce_with_timing_cli"]
             )
-            return STAExecutionResult(
+            return try STAExecutionResult(
                 runID: request.runID,
                 status: .failed,
                 payload: emptyPayload(request: request),
+                inputBindings: request.artifactBindings,
                 diagnostics: [diagnostic],
                 provenance: try makeProvenance(startedAt: startedAt, completedAt: completedAt, inputs: request.inputs),
                 schemaVersion: STARequest.currentSchemaVersion
@@ -178,6 +180,29 @@ public struct NativeSTAEngine: STAExecuting {
         let status: TimingExecutionStatus
         let diagnostics: [DesignDiagnostic]
         let payload: STAPayload
+    }
+
+    private func validateCanonicalInputs(_ inputs: LoadedInputs) throws {
+        let validator = TimingCanonicalValidator()
+        for modeID in inputs.modeIDs {
+            guard let constraints = inputs.constraints[modeID] else {
+                throw TimingError.invariantViolation(
+                    "The parsed STA mode is missing its canonical constraint set."
+                )
+            }
+            let report = validator.validate(
+                design: inputs.design,
+                constraints: constraints,
+                libraries: [inputs.library],
+                parasitics: inputs.parasitics
+            )
+            guard report.isValid else {
+                throw TimingError.invalidInput(
+                    "Canonical STA validation failed: "
+                        + report.findings.map(\.code).sorted().joined(separator: ", ")
+                )
+            }
+        }
     }
 
     private func analyze(
@@ -711,10 +736,11 @@ public struct NativeSTAEngine: STAExecuting {
         startedAt: Date,
         error: TimingError
     ) throws -> STAExecutionResult {
-        STAExecutionResult(
+        try STAExecutionResult(
             runID: request.runID,
             status: .blocked,
             payload: emptyPayload(request: request),
+            inputBindings: request.artifactBindings,
             diagnostics: [DesignDiagnostic(
                 severity: .error,
                 code: diagnosticCode(for: error),
@@ -731,10 +757,11 @@ public struct NativeSTAEngine: STAExecuting {
         startedAt: Date,
         issues: [LogicDesignProvenanceValidation.Issue]
     ) throws -> STAExecutionResult {
-        STAExecutionResult(
+        try STAExecutionResult(
             runID: request.runID,
             status: .blocked,
             payload: emptyPayload(request: request),
+            inputBindings: request.artifactBindings,
             diagnostics: issues.map { issue in
                 DesignDiagnostic(
                     severity: .error,
@@ -753,10 +780,11 @@ public struct NativeSTAEngine: STAExecuting {
         startedAt: Date,
         error: TimingError
     ) throws -> STAExecutionResult {
-        STAExecutionResult(
+        try STAExecutionResult(
             runID: request.runID,
             status: .failed,
             payload: emptyPayload(request: request),
+            inputBindings: request.artifactBindings,
             diagnostics: [DesignDiagnostic(
                 severity: .error,
                 code: "timing.sta.artifact_write_failed",
@@ -790,7 +818,7 @@ public struct NativeSTAEngine: STAExecuting {
 
     private func logicDesignReference(for request: STARequest) -> LogicDesignReference {
         LogicDesignReference(
-            artifact: request.design,
+            artifact: request.design.reference,
             topDesignName: request.topDesignName,
             designDigest: request.canonicalDesignDigest?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
             provenance: LogicDesignProvenance(

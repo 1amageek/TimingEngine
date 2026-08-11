@@ -1,5 +1,5 @@
 import Foundation
 
 public protocol TimingPDKEvidenceBuilding: Sendable {
-    func build(for pdk: TimingPDKReference) throws -> TimingPDKEvidence
+    func build(for pdk: TimingPDKReference) async throws -> TimingPDKEvidence
 }

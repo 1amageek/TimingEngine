@@ -157,24 +157,24 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
         runID: String
     ) throws -> CaseRequest {
         let builder = TimingArtifactReferenceBuilder()
-        let design = try builder.makeReference(
+        let design = try builder.makeBinding(
             path: try resolve(corpusCase.designPath, rootURL: rootURL),
             kind: CircuiteFoundation.ArtifactKind.netlist,
             format: format(for: corpusCase.designPath, fallback: .json)
         )
-        let constraint = try builder.makeReference(
+        let constraint = try builder.makeBinding(
             path: try resolve(corpusCase.constraintPath, rootURL: rootURL),
             kind: CircuiteFoundation.ArtifactKind.constraints,
             format: try ArtifactFormat(rawValue: "sdc")
         )
-        let pdkManifest = try builder.makeReference(
+        let pdkManifest = try builder.makeBinding(
             path: try resolve(corpusCase.pdkManifestPath, rootURL: rootURL),
             kind: CircuiteFoundation.ArtifactKind.technology,
             format: .json
         )
         let libraries = try corpusCase.libraryPaths.map {
             try TimingLibraryReference(
-                artifact: builder.makeReference(
+                artifact: builder.makeBinding(
                     path: try resolve($0, rootURL: rootURL),
                     kind: try ArtifactKind(rawValue: "timing.library"),
                     format: .liberty
@@ -183,7 +183,7 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
             )
         }
         let parasitics = try corpusCase.parasiticsPath.map {
-            try builder.makeReference(
+            try builder.makeBinding(
                 path: try resolve($0, rootURL: rootURL),
                 kind: CircuiteFoundation.ArtifactKind.parasitics,
                 format: .spef
@@ -192,7 +192,7 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
         let pdkDigest = try corpusCase.pdkDigest.map {
             try ContentDigest(algorithm: .sha256, hexadecimalValue: $0)
         } ?? pdkManifest.digest
-        let sta = STARequest(
+        let sta = try STARequest(
             runID: runID,
             design: design,
             topDesignName: corpusCase.topDesignName,
@@ -208,12 +208,12 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
             parasitics: parasitics,
             requiresPostLayoutInputs: corpusCase.requiresPostLayoutInputs
         )
-        let siParasitics = try parasitics ?? builder.makeReference(
+        let siParasitics = try parasitics ?? builder.makeBinding(
             path: try resolve(corpusCase.parasiticsPath ?? corpusCase.designPath, rootURL: rootURL),
             kind: CircuiteFoundation.ArtifactKind.parasitics,
             format: .spef
         )
-        let si = SignalIntegrityRequest(
+        let si = try SignalIntegrityRequest(
             runID: runID,
             design: design,
             topDesignName: corpusCase.topDesignName,

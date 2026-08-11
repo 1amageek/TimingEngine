@@ -57,7 +57,7 @@ TimingEngine keeps three concepts separate:
 
 `TimingEvidenceAssessment.outcome` is computed from findings and is never a production qualification. A correlation report is accepted only after reopening its raw artifacts, verifying SHA-256 and byte count, checking producer and executable identity, confirming common inputs, and recomputing metrics.
 
-All retained correlation artifacts must be workspace-relative. `--workspace-root` defines the only permitted containment boundary; symlink-resolved escapes are rejected.
+All retained correlation artifacts bind location-independent content identity to a workspace-root `ArtifactAvailability`. `--workspace-root` defines the only permitted root capability; symlink traversal, content drift, access-budget exhaustion, and close failure are rejected.
 
 ## Supported artifacts
 

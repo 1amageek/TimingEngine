@@ -19,10 +19,10 @@ flowchart LR
 | Retained corpus | Complete | Positive, blocked and SI cases |
 | External process safety | Complete | Timeout, process-tree cleanup, create-only per-run workspace, private input snapshots, and structured failures |
 | Executable identity | Complete | Resolved regular-file validation, measured version, private executable snapshot, before/after SHA-256 mutation detection, and producer-build binding |
-| External raw correlation | Complete | Workspace-relative artifacts, digest/size checks, identity/input binding and metric reconstruction |
+| External raw correlation | Complete | Workspace-root availability, bounded access, digest/size checks, identity/input binding and metric reconstruction |
 | Evidence assessment | Complete | Outcome derived from findings; serialized verdict injection is ignored |
 | PDK observation | Complete | Manifest and asset digests rebuilt under an explicit workspace root |
-| ToolQualification handoff | Complete | Filesystem and in-memory timing readers directly conform to the async verified artifact-reader protocol |
+| ToolQualification handoff | Complete | Timing emits exact raw evidence and bindings; host integration passes them to ToolQualification without a TimingCore reverse dependency |
 | Flow approval/release | External responsibility | DesignFlowKernel policy and human approval |
 
 ## Function matrix

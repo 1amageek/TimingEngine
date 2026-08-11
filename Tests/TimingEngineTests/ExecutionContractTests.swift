@@ -1,11 +1,12 @@
 import CircuiteFoundation
+import CircuiteFoundationFileSystem
+import CircuiteFoundationFoundation
 import Foundation
 import PDKCore
 import SignalIntegrityEngine
 @testable import STAEngine
 import Testing
 import TimingCore
-import ToolQualification
 
 @Suite("CircuiteFoundation timing boundary")
 struct ExecutionContractTests {
@@ -51,7 +52,7 @@ struct ExecutionContractTests {
             )
             try write(Data("{}".utf8), to: root.appending(path: "pdk.json"))
 
-            let request = STARequest(
+            let request = try STARequest(
                 runID: "foundation-sta",
                 design: try reference(
                     root: root,
@@ -135,7 +136,7 @@ struct ExecutionContractTests {
             try write(Data("create_clock -name clk -period 10ns [get_ports clk]".utf8), to: root.appending(path: "constraints.sdc"))
             try write(Data("{}".utf8), to: root.appending(path: "pdk.json"))
 
-            let request = STARequest(
+            let request = try STARequest(
                 runID: "foundation-sta-artifact",
                 design: try reference(root: root, path: "design.json", kind: .netlist, format: .json),
                 topDesignName: "top",
@@ -168,11 +169,13 @@ struct ExecutionContractTests {
 
             let result = try await engine.execute(request)
 
-            let artifact = try #require(result.artifacts.first)
-            #expect(artifact.locator.kind == .report)
-            #expect(artifact.locator.format == .json)
+            let artifact = try #require(result.artifactBindings.first)
+            #expect(artifact.descriptor.kind == .report)
+            #expect(artifact.descriptor.format == .json)
             #expect(artifact.byteCount > 0)
-            #expect(LocalArtifactVerifier().verify(artifact, relativeTo: root).isVerified)
+            #expect(try await FileSystemTimingArtifactReader(
+                workspaceRoot: root
+            ).read(artifact).count == Int(artifact.byteCount))
         }
     }
 
@@ -195,7 +198,7 @@ struct ExecutionContractTests {
             *END
             """.utf8), to: root.appending(path: "parasitics.spef"))
 
-            let request = SignalIntegrityRequest(
+            let request = try SignalIntegrityRequest(
                 runID: "foundation-si",
                 design: try reference(root: root, path: "design.json", kind: .netlist, format: .json),
                 topDesignName: "top",
@@ -240,11 +243,11 @@ struct ExecutionContractTests {
         try await withTemporaryDirectory { root in
             try write(Data("{}".utf8), to: root.appending(path: "design.json"))
             let design = try reference(root: root, path: "design.json", kind: .netlist, format: .json)
-            let request = STARequest(
+            let request = try STARequest(
                 runID: "missing-root",
                 design: design,
                 topDesignName: "top",
-                libraries: [],
+                libraries: [TimingLibraryReference(artifact: design)],
                 constraints: design,
                 pdkManifest: design,
                 processID: "test",
@@ -253,7 +256,7 @@ struct ExecutionContractTests {
 
             let result = try await NativeSTAEngine().execute(request)
             #expect(result.status == .blocked)
-            #expect(result.diagnostics.first?.code.rawValue == "timing.sta.missing_artifact")
+            #expect(result.diagnostics.first?.code.rawValue == "timing.sta.artifact_read_failed")
         }
     }
 
@@ -263,18 +266,21 @@ struct ExecutionContractTests {
             algorithm: .sha256,
             hexadecimalValue: String(repeating: "0", count: 64)
         )
-        let locator = ArtifactLocator(
-            location: try ArtifactLocation(workspaceRelativePath: "design.json"),
-            role: .input,
-            kind: .netlist,
-            format: .json
-        )
-        let artifact = ArtifactReference(
-            locator: locator,
+        let descriptor = ArtifactDescriptor(role: .input, kind: .netlist, format: .json)
+        let reference = try ArtifactReference(
             digest: digest,
-            byteCount: 0
+            byteCount: 0,
+            descriptor: descriptor
         )
-        let request = STARequest(
+        let artifact = try TimingArtifactBinding(
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: TimingArtifactBinding.workspaceRootIdentifier),
+                relativePath: ArtifactRelativePath(segments: ["design.json"])
+            )
+        )
+        let request = try STARequest(
             runID: "expected-run",
             design: artifact,
             topDesignName: "top",
@@ -286,10 +292,46 @@ struct ExecutionContractTests {
         )
         #expect(request.runID == "expected-run")
         #expect(request.inputs.count == 4)
+
+        let encodedRequest = try JSONEncoder().encode(request)
+        var requestObject = try #require(
+            JSONSerialization.jsonObject(with: encodedRequest) as? [String: Any]
+        )
+        requestObject["inputs"] = []
+        let mismatchedRequest = try JSONSerialization.data(withJSONObject: requestObject)
+        #expect(throws: (any Error).self) {
+            _ = try JSONDecoder().decode(STARequest.self, from: mismatchedRequest)
+        }
+
+        let producer = try ProducerIdentity(
+            kind: .engine,
+            identifier: "timing.sta",
+            version: "test"
+        )
+        let now = Date(timeIntervalSince1970: 1)
+        #expect(throws: TimingError.self) {
+            _ = try STAExecutionResult(
+                runID: "expected-run",
+                status: .blocked,
+                payload: STAPayload(
+                    worstSetupSlack: nil,
+                    worstHoldSlack: nil,
+                    analyzedCorners: [],
+                    analyzedModes: []
+                ),
+                inputBindings: [artifact],
+                provenance: ExecutionProvenance(
+                    producer: producer,
+                    inputs: [],
+                    startedAt: now,
+                    completedAt: now
+                )
+            )
+        }
     }
 
-    @Test("Timing artifact readers directly provide verified ToolQualification bytes")
-    func artifactReadersProvideQualificationBytes() async throws {
+    @Test("Timing readers require an exact materialization binding")
+    func artifactReadersVerifyBoundContent() async throws {
         try await withTemporaryDirectory { root in
             let expected = Data("qualification-evidence".utf8)
             try write(expected, to: root.appending(path: "evidence.json"))
@@ -300,15 +342,20 @@ struct ExecutionContractTests {
                 format: .json
             )
 
-            let fileReader: any ToolQualificationArtifactReading = FileSystemTimingArtifactReader(
+            let fileReader: any TimingArtifactReading = FileSystemTimingArtifactReader(
                 workspaceRoot: root
             )
-            #expect(try await fileReader.verifiedData(for: artifact) == expected)
+            #expect(try await fileReader.read(artifact) == expected)
 
-            let memoryReader: any ToolQualificationArtifactReading = InMemoryTimingArtifactReader(
-                artifacts: ["evidence.json": expected]
+            let memoryReader: any TimingArtifactReading = InMemoryTimingArtifactReader(
+                artifacts: [artifact.id: expected]
             )
-            #expect(try await memoryReader.verifiedData(for: artifact) == expected)
+            #expect(try await memoryReader.read(artifact) == expected)
+
+            try write(Data("tampered".utf8), to: root.appending(path: "evidence.json"))
+            await #expect(throws: TimingError.self) {
+                _ = try await fileReader.read(artifact)
+            }
         }
     }
 }
@@ -318,11 +365,12 @@ private func reference(
     path: String,
     kind: ArtifactKind,
     format: ArtifactFormat
-) throws -> ArtifactReference {
-    let location = try ArtifactLocation(workspaceRelativePath: path)
-    return try LocalArtifactReferencer().reference(
-        ArtifactLocator(location: location, role: .input, kind: kind, format: format),
-        relativeTo: root
+) throws -> TimingArtifactBinding {
+    try TimingArtifactReferenceBuilder().makeBinding(
+        at: root.appending(path: path),
+        relativeTo: root,
+        kind: kind,
+        format: format
     )
 }
 

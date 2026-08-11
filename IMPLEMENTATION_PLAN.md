@@ -13,7 +13,7 @@
 
 ## Trust integration
 
-TimingEngine produces raw analysis and correlation artifacts. ToolQualification consumes those artifacts through its asynchronous verified-reader protocol and reconstructs process evidence. DesignFlowKernel applies policy and approval after ToolQualification validation.
+TimingEngine produces exact raw analysis and correlation artifacts with location-independent identity and execution-scoped availability. Host integration presents those artifacts to ToolQualification for process-evidence reconstruction; TimingCore does not reverse-depend on the trust package. DesignFlowKernel applies policy and approval after ToolQualification validation.
 
 ```mermaid
 flowchart LR
@@ -29,7 +29,7 @@ flowchart LR
 - Public APIs remain protocol-first and Sendable.
 - Unsupported semantics produce structured blocked results.
 - Native and external backends produce the same domain result schema.
-- Correlation artifacts remain inside one declared workspace root.
+- Correlation artifacts use bounded access under one declared workspace root capability.
 - Persisted verdicts are recomputed from retained bytes.
 - No TimingEngine type claims production qualification.
 - Xcircuite can execute and persist timing stages without importing UI state into this package.

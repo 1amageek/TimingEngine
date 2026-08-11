@@ -3,21 +3,21 @@ import Foundation
 import TimingCore
 
 public struct TimingExternalCorrelationReport: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 4
+    public static let currentSchemaVersion = 5
 
     public var schemaVersion: Int
     public var processID: String
     public var pdkVersion: String
     public var pdkManifestDigest: String
     public var corpusEvidenceDigest: String
-    public var pdkManifestArtifact: ArtifactReference
-    public var corpusEvidenceArtifact: ArtifactReference
+    public var pdkManifestArtifact: TimingArtifactBinding
+    public var corpusEvidenceArtifact: TimingArtifactBinding
     public var nativeEngine: ProducerIdentity
     public var oracleTool: ProducerIdentity
-    public var oracleExecutableArtifact: ArtifactReference
-    public var inputArtifacts: [ArtifactReference]
-    public var nativeOutputArtifact: ArtifactReference
-    public var oracleOutputArtifact: ArtifactReference
+    public var oracleExecutableArtifact: TimingArtifactBinding
+    public var inputArtifacts: [TimingArtifactBinding]
+    public var nativeOutputArtifact: TimingArtifactBinding
+    public var oracleOutputArtifact: TimingArtifactBinding
     public var correlation: TimingCorrelationResult
 
     public init(
@@ -25,14 +25,14 @@ public struct TimingExternalCorrelationReport: Sendable, Hashable, Codable {
         pdkVersion: String,
         pdkManifestDigest: String,
         corpusEvidenceDigest: String,
-        pdkManifestArtifact: ArtifactReference,
-        corpusEvidenceArtifact: ArtifactReference,
+        pdkManifestArtifact: TimingArtifactBinding,
+        corpusEvidenceArtifact: TimingArtifactBinding,
         nativeEngine: ProducerIdentity,
         oracleTool: ProducerIdentity,
-        oracleExecutableArtifact: ArtifactReference,
-        inputArtifacts: [ArtifactReference],
-        nativeOutputArtifact: ArtifactReference,
-        oracleOutputArtifact: ArtifactReference,
+        oracleExecutableArtifact: TimingArtifactBinding,
+        inputArtifacts: [TimingArtifactBinding],
+        nativeOutputArtifact: TimingArtifactBinding,
+        oracleOutputArtifact: TimingArtifactBinding,
         correlation: TimingCorrelationResult
     ) {
         self.schemaVersion = Self.currentSchemaVersion
@@ -72,20 +72,20 @@ public struct TimingExternalCorrelationReport: Sendable, Hashable, Codable {
             oracleOutputArtifact,
         ] + inputArtifacts
         guard artifacts.allSatisfy(Self.isAuditable),
-              artifacts.allSatisfy({ $0.locator.location.storage == .workspaceRelative }) else {
+              artifacts.allSatisfy(\.isWorkspaceRelative) else {
             throw TimingError.invalidInput("External correlation contains an incomplete artifact reference.")
         }
-        guard pdkManifestArtifact.locator.role == .input,
-              corpusEvidenceArtifact.locator.role == .input,
-              oracleExecutableArtifact.locator.role == .input,
-              inputArtifacts.allSatisfy({ $0.locator.role == .input }),
-              nativeOutputArtifact.locator.role == .output,
-              oracleOutputArtifact.locator.role == .output else {
+        guard pdkManifestArtifact.descriptor.role == .input,
+              corpusEvidenceArtifact.descriptor.role == .input,
+              oracleExecutableArtifact.descriptor.role == .input,
+              inputArtifacts.allSatisfy({ $0.descriptor.role == .input }),
+              nativeOutputArtifact.descriptor.role == .output,
+              oracleOutputArtifact.descriptor.role == .output else {
             throw TimingError.invalidInput("External correlation artifact roles do not match their semantics.")
         }
-        guard pdkManifestArtifact.locator.kind == .technology,
-              corpusEvidenceArtifact.locator.kind == .report,
-              corpusEvidenceArtifact.locator.format == .json else {
+        guard pdkManifestArtifact.descriptor.kind == .technology,
+              corpusEvidenceArtifact.descriptor.kind == .report,
+              corpusEvidenceArtifact.descriptor.format == .json else {
             throw TimingError.invalidInput("External correlation evidence artifact kinds are invalid.")
         }
         guard correlation.oracleID == oracleTool.identifier else {
@@ -119,7 +119,44 @@ public struct TimingExternalCorrelationReport: Sendable, Hashable, Codable {
         }
     }
 
-    private static func isAuditable(_ artifact: ArtifactReference) -> Bool {
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        self.processID = try container.decode(String.self, forKey: .processID)
+        self.pdkVersion = try container.decode(String.self, forKey: .pdkVersion)
+        self.pdkManifestDigest = try container.decode(String.self, forKey: .pdkManifestDigest)
+        self.corpusEvidenceDigest = try container.decode(String.self, forKey: .corpusEvidenceDigest)
+        self.pdkManifestArtifact = try container.decode(
+            TimingArtifactBinding.self,
+            forKey: .pdkManifestArtifact
+        )
+        self.corpusEvidenceArtifact = try container.decode(
+            TimingArtifactBinding.self,
+            forKey: .corpusEvidenceArtifact
+        )
+        self.nativeEngine = try container.decode(ProducerIdentity.self, forKey: .nativeEngine)
+        self.oracleTool = try container.decode(ProducerIdentity.self, forKey: .oracleTool)
+        self.oracleExecutableArtifact = try container.decode(
+            TimingArtifactBinding.self,
+            forKey: .oracleExecutableArtifact
+        )
+        self.inputArtifacts = try container.decode(
+            [TimingArtifactBinding].self,
+            forKey: .inputArtifacts
+        )
+        self.nativeOutputArtifact = try container.decode(
+            TimingArtifactBinding.self,
+            forKey: .nativeOutputArtifact
+        )
+        self.oracleOutputArtifact = try container.decode(
+            TimingArtifactBinding.self,
+            forKey: .oracleOutputArtifact
+        )
+        self.correlation = try container.decode(TimingCorrelationResult.self, forKey: .correlation)
+        try validateStructure()
+    }
+
+    private static func isAuditable(_ artifact: TimingArtifactBinding) -> Bool {
         artifact.digest.algorithm == .sha256
             && isSHA256(artifact.digest.hexadecimalValue)
             && artifact.byteCount > 0

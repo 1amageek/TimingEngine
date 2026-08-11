@@ -2,58 +2,83 @@
   "caseResults" : [
     {
       "caseID" : "si-positive",
-      "expectedDiagnosticCodes" : [],
+      "expectedDiagnosticCodes" : [
+
+      ],
       "expectedOutcome" : "completed",
-      "missingExpectedDiagnosticCodes" : [],
-      "observedDiagnosticCodes" : [],
+      "missingExpectedDiagnosticCodes" : [
+
+      ],
+      "observedDiagnosticCodes" : [
+
+      ],
       "observedOutcome" : "completed",
       "passed" : true,
       "provenance" : {
         "constraintDigest" : "dd64dc7bd4c284ee28a07247489f6b68f9ef4859c7719346850fc7f4c6eb5e8a",
         "designDigest" : "16f391e77b8c7b589f10ec1014d22747ef32ec9719c642b05e9c0b4e945d5bb7",
-        "libraryDigests" : [],
-        "parasiticsDigest" : "245fe588e939ad9b06611cd326aba407b780a7d280b3e00c3f32868610d84ada",
-        "pdkDigest" : "d0b548ec009954ae9568645b30206b04e4cd1f5289f20af123644eee53ba4ae9"
+        "libraryDigests" : [
+
+        ],
+        "parasiticsDigest" : "52bfeee0e0e16485217081ceed6d255daf175f2f40065d6bf1d5d01b81c325fe",
+        "pdkDigest" : "ae0e1a02eae77915a82ff703a7e9866abbe01e98bf2e243114daac196745f547"
       }
     },
     {
       "caseID" : "sta-blocked",
-      "expectedDiagnosticCodes" : ["STA_UNSUPPORTED_SEMANTIC"],
+      "expectedDiagnosticCodes" : [
+        "timing.sta.sta_unsupported_semantic"
+      ],
       "expectedOutcome" : "blocked",
-      "missingExpectedDiagnosticCodes" : [],
-      "observedDiagnosticCodes" : ["STA_UNSUPPORTED_SEMANTIC"],
+      "missingExpectedDiagnosticCodes" : [
+
+      ],
+      "observedDiagnosticCodes" : [
+        "timing.sta.sta_unsupported_semantic"
+      ],
       "observedOutcome" : "blocked",
       "passed" : true,
       "provenance" : {
         "constraintDigest" : "a1150e0071a84985327704811c7b998fb9bd0b720c6113f13f8f2b72b2b5f760",
         "designDigest" : "16f391e77b8c7b589f10ec1014d22747ef32ec9719c642b05e9c0b4e945d5bb7",
-        "libraryDigests" : ["f5e76419120d31ae3b2d0d35ba4a059d38206fcf6b3648c4a2393d0b8356dbf2"],
-        "pdkDigest" : "d0b548ec009954ae9568645b30206b04e4cd1f5289f20af123644eee53ba4ae9"
+        "libraryDigests" : [
+          "f5e76419120d31ae3b2d0d35ba4a059d38206fcf6b3648c4a2393d0b8356dbf2"
+        ],
+        "pdkDigest" : "ae0e1a02eae77915a82ff703a7e9866abbe01e98bf2e243114daac196745f547"
       }
     },
     {
       "caseID" : "sta-positive",
       "correlation" : {
-        "diagnostics" : [],
+        "diagnostics" : [
+
+        ],
         "oracleID" : "timing.reference.scalar-v1",
-        "passed" : true,
         "setupSlackDifference" : 0,
         "status" : "passed",
         "tolerance" : 1e-15
       },
-      "expectedDiagnosticCodes" : [],
+      "expectedDiagnosticCodes" : [
+
+      ],
       "expectedOutcome" : "completed",
-      "missingExpectedDiagnosticCodes" : [],
-      "nativeWorstSetupSlack" : 0,
-      "observedDiagnosticCodes" : [],
+      "missingExpectedDiagnosticCodes" : [
+
+      ],
+      "nativeWorstSetupSlack" : 6.000000000000001e-09,
+      "observedDiagnosticCodes" : [
+
+      ],
       "observedOutcome" : "completed",
       "passed" : true,
       "provenance" : {
         "constraintDigest" : "dd64dc7bd4c284ee28a07247489f6b68f9ef4859c7719346850fc7f4c6eb5e8a",
         "designDigest" : "16f391e77b8c7b589f10ec1014d22747ef32ec9719c642b05e9c0b4e945d5bb7",
-        "libraryDigests" : ["f5e76419120d31ae3b2d0d35ba4a059d38206fcf6b3648c4a2393d0b8356dbf2"],
-        "parasiticsDigest" : "245fe588e939ad9b06611cd326aba407b780a7d280b3e00c3f32868610d84ada",
-        "pdkDigest" : "d0b548ec009954ae9568645b30206b04e4cd1f5289f20af123644eee53ba4ae9"
+        "libraryDigests" : [
+          "f5e76419120d31ae3b2d0d35ba4a059d38206fcf6b3648c4a2393d0b8356dbf2"
+        ],
+        "parasiticsDigest" : "52bfeee0e0e16485217081ceed6d255daf175f2f40065d6bf1d5d01b81c325fe",
+        "pdkDigest" : "ae0e1a02eae77915a82ff703a7e9866abbe01e98bf2e243114daac196745f547"
       }
     }
   ],

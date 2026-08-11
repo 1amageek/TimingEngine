@@ -1,7 +1,11 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
+import CircuiteFoundationFileSystem
+import CircuiteFoundationFoundation
 import Foundation
 import STAEngine
 import Testing
+import TimingCore
 
 @Suite("Timing CLI processes")
 struct TimingCLIProcessTests {
@@ -22,7 +26,7 @@ struct TimingCLIProcessTests {
     }
 
     @Test("OpenSTA adapter records the resolved executable SHA-256")
-    func openSTAAdapterRecordsExecutableDigest() throws {
+    func openSTAAdapterRecordsExecutableDigest() async throws {
         let fixture = try OpenSTAProcessFixture(
             toolBody: """
             printf '%s\n' 'TIMINGENGINE_SETUP_BEGIN'
@@ -61,18 +65,16 @@ struct TimingCLIProcessTests {
         #expect(invocationExecutable.hasPrefix(
             fixture.root.appending(path: ".timingengine/runs/opensta-process-fixture/opensta").path
         ))
-        let standardOutput = try #require(execution.artifacts.first {
-            $0.artifactID == "opensta-standard-output"
+        let standardOutput = try #require(execution.artifactBindings.first {
+            $0.materializationDescription.contains("stdout.log")
         })
-        let standardError = try #require(execution.artifacts.first {
-            $0.artifactID == "opensta-standard-error"
+        let standardError = try #require(execution.artifactBindings.first {
+            $0.materializationDescription.contains("stderr.log")
         })
-        #expect(LocalArtifactVerifier().verify(standardOutput, relativeTo: fixture.root).isVerified)
-        #expect(LocalArtifactVerifier().verify(standardError, relativeTo: fixture.root).isVerified)
-        let standardOutputURL = try standardOutput.locator.location.resolvedFileURL(
-            relativeTo: fixture.root
-        )
-        #expect(try String(contentsOf: standardOutputURL, encoding: .utf8)
+        let reader = FileSystemTimingArtifactReader(workspaceRoot: fixture.root)
+        let standardOutputData = try await reader.read(standardOutput)
+        _ = try await reader.read(standardError)
+        #expect(String(decoding: standardOutputData, as: UTF8.self)
             .contains("TIMINGENGINE_SETUP_BEGIN"))
     }
 
@@ -146,11 +148,11 @@ struct TimingCLIProcessTests {
         )
         #expect(execution.status == .failed)
         #expect(execution.diagnostics.map(\.code.rawValue) == ["OPENSTA_EXECUTABLE_MUTATED"])
-        #expect(execution.artifacts.contains {
-            $0.artifactID == "opensta-standard-output"
+        #expect(execution.artifactBindings.contains {
+            $0.materializationDescription.contains("stdout.log")
         })
-        #expect(execution.artifacts.contains {
-            $0.artifactID == "opensta-standard-error"
+        #expect(execution.artifactBindings.contains {
+            $0.materializationDescription.contains("stderr.log")
         })
     }
 

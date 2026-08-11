@@ -73,28 +73,28 @@ struct TimingCLI {
         let cornerIDs = option("--corner", in: values).map { [$0] } ?? ["default"]
         let outputDirectory = option("--out", in: values).map { URL(filePath: $0) }
         let referenceBuilder = TimingArtifactReferenceBuilder()
-        let designReference = try makeReference(
+        let designReference = try makeBinding(
             path: designPath,
             workspaceRoot: workspaceRoot,
             builder: referenceBuilder,
             kind: CircuiteFoundation.ArtifactKind.netlist,
             format: format(for: designPath, fallback: .json)
         )
-        let libraryReference = try makeReference(
+        let libraryReference = try makeBinding(
             path: libraryPath,
             workspaceRoot: workspaceRoot,
             builder: referenceBuilder,
             kind: try ArtifactKind(rawValue: "timing.library"),
             format: .liberty
         )
-        let constraintReference = try makeReference(
+        let constraintReference = try makeBinding(
             path: constraintsPath,
             workspaceRoot: workspaceRoot,
             builder: referenceBuilder,
             kind: CircuiteFoundation.ArtifactKind.constraints,
             format: try ArtifactFormat(rawValue: "sdc")
         )
-        let pdkManifestReference = try makeReference(
+        let pdkManifestReference = try makeBinding(
             path: pdkPath,
             workspaceRoot: workspaceRoot,
             builder: referenceBuilder,
@@ -108,7 +108,7 @@ struct TimingCLI {
             hexadecimalValue: option("--pdk-digest", in: values) ?? pdkManifestReference.digest.hexadecimalValue
         )
         let parasitics = try option("--spef", in: values).map {
-            try makeReference(
+            try makeBinding(
                 path: $0,
                 workspaceRoot: workspaceRoot,
                 builder: referenceBuilder,
@@ -116,7 +116,7 @@ struct TimingCLI {
                 format: .spef
             )
         }
-        let request = STARequest(
+        let request = try STARequest(
             runID: runID,
             design: designReference,
             topDesignName: top,
@@ -151,22 +151,22 @@ struct TimingCLI {
         }
     }
 
-    private static func makeReference(
+    private static func makeBinding(
         path: String,
         workspaceRoot: URL?,
         builder: TimingArtifactReferenceBuilder,
         kind: ArtifactKind,
         format: ArtifactFormat
-    ) throws -> ArtifactReference {
+    ) throws -> TimingArtifactBinding {
         if let workspaceRoot {
-            return try builder.makeReference(
+            return try builder.makeBinding(
                 at: URL(filePath: path),
                 relativeTo: workspaceRoot,
                 kind: kind,
                 format: format
             )
         }
-        return try builder.makeReference(path: path, kind: kind, format: format)
+        return try builder.makeBinding(path: path, kind: kind, format: format)
     }
 
     private static func runCorpus(_ values: [String]) async throws {
@@ -221,7 +221,7 @@ struct TimingCLI {
         } catch {
             throw TimingError.parseFailure(format: "Timing corpus report", line: 1, message: error.localizedDescription)
         }
-        let pdkManifest = try TimingArtifactReferenceBuilder().makeReference(
+        let pdkManifest = try TimingArtifactReferenceBuilder().makeBinding(
             at: URL(filePath: pdkPath),
             relativeTo: workspaceRoot,
             kind: CircuiteFoundation.ArtifactKind.technology,
@@ -237,7 +237,7 @@ struct TimingCLI {
             version: option("--pdk-version", in: values) ?? "unknown",
             digest: pdkDigest
         )
-        let pdkEvidence = try LocalTimingPDKEvidenceBuilder(
+        let pdkEvidence = try await LocalTimingPDKEvidenceBuilder(
             workspaceRoot: workspaceRoot
         ).build(for: pdk)
         let externalOracle = TimingExternalOracleEvidence(
@@ -309,7 +309,7 @@ struct TimingCLI {
         } catch {
             throw TimingError.parseFailure(format: "Timing corpus report", line: 1, message: error.localizedDescription)
         }
-        let pdkManifest = try TimingArtifactReferenceBuilder().makeReference(
+        let pdkManifest = try TimingArtifactReferenceBuilder().makeBinding(
             at: URL(filePath: pdkPath),
             relativeTo: workspaceRoot,
             kind: CircuiteFoundation.ArtifactKind.technology,
@@ -321,14 +321,14 @@ struct TimingCLI {
             version: pdkVersion,
             digest: pdkManifest.digest
         )
-        let pdkEvidence = try LocalTimingPDKEvidenceBuilder(
+        let pdkEvidence = try await LocalTimingPDKEvidenceBuilder(
             workspaceRoot: workspaceRoot
         ).build(for: pdk)
         guard pdkEvidence.isComplete else {
             throw TimingError.invalidInput("PDK evidence must be complete before external correlation is retained.")
         }
         let referenceBuilder = TimingArtifactReferenceBuilder()
-        let oracleExecutableArtifact = try referenceBuilder.makeReference(
+        let oracleExecutableArtifact = try referenceBuilder.makeBinding(
             at: URL(filePath: oracleExecutablePath),
             relativeTo: workspaceRoot,
             kind: try ArtifactKind(rawValue: "tool.executable"),
@@ -360,7 +360,7 @@ struct TimingCLI {
                 oracleID: oracleID
             )
         }
-        let corpusEvidenceArtifact = try referenceBuilder.makeReference(
+        let corpusEvidenceArtifact = try referenceBuilder.makeBinding(
             at: URL(filePath: corpusPath),
             relativeTo: workspaceRoot,
             kind: .report,
@@ -376,15 +376,15 @@ struct TimingCLI {
             nativeEngine: native.evidence.provenance.producer,
             oracleTool: oracleTool,
             oracleExecutableArtifact: oracleExecutableArtifact,
-            inputArtifacts: native.evidence.provenance.inputs,
-            nativeOutputArtifact: try referenceBuilder.makeReference(
+            inputArtifacts: native.inputBindings,
+            nativeOutputArtifact: try referenceBuilder.makeBinding(
                 at: URL(filePath: nativePath),
                 relativeTo: workspaceRoot,
                 role: .output,
                 kind: .report,
                 format: .json
             ),
-            oracleOutputArtifact: try referenceBuilder.makeReference(
+            oracleOutputArtifact: try referenceBuilder.makeBinding(
                 at: URL(filePath: oraclePath),
                 relativeTo: workspaceRoot,
                 role: .output,

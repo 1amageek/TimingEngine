@@ -48,6 +48,14 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
                 _ = try constraintParser.parse(constraintsData, modeID: modeID)
             }
             let parasitics = try parasiticParser.parse(try await reader.read(request.parasitics))
+            let canonicalReport = TimingCanonicalValidator()
+                .validateSignalIntegrityParasitics(parasitics)
+            guard canonicalReport.isValid else {
+                throw TimingError.invalidInput(
+                    "Canonical signal-integrity validation failed: "
+                        + canonicalReport.findings.map(\.code).sorted().joined(separator: ", ")
+                )
+            }
             let provenanceIssues = LogicDesignProvenanceValidation.issues(for: logicDesignReference(for: request))
             guard provenanceIssues.isEmpty else {
                 return try provenanceBlockedEnvelope(
@@ -111,17 +119,16 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
                 violations: violations,
                 provenance: provenance
             )
-            var artifacts: [ArtifactReference] = []
+            var artifactBindings: [TimingArtifactBinding] = []
             if let artifactStore {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                artifacts.append(try await artifactStore.store(
+                artifactBindings.append(try await artifactStore.store(
                     try encoder.encode(payload),
-                    artifactID: try ArtifactID(rawValue: "timing-signal-integrity-report"),
+                    artifactName: "timing-signal-integrity-report",
                     runID: request.runID,
                     kind: .report,
-                    format: .json,
-                    producer: nil
+                    format: .json
                 ))
             }
             let diagnostics = try violations.map { violation in
@@ -139,11 +146,12 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
                     suggestedActions: violation.suggestedActions.map { SuggestedAction(code: $0, summary: $0) }
                 )
             } + provenanceDiagnostics
-            return SignalIntegrityExecutionResult(
+            return try SignalIntegrityExecutionResult(
                 runID: request.runID,
                 status: .completed,
                 payload: payload,
-                artifacts: artifacts,
+                inputBindings: request.artifactBindings,
+                artifactBindings: artifactBindings,
                 diagnostics: diagnostics,
                 provenance: try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
                 schemaVersion: SignalIntegrityRequest.currentSchemaVersion
@@ -154,10 +162,11 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
             }
             return try blockedEnvelope(request: request, startedAt: startedAt, error: error)
         } catch {
-            return SignalIntegrityExecutionResult(
+            return try SignalIntegrityExecutionResult(
                 runID: request.runID,
                 status: .failed,
                 payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil),
+                inputBindings: request.artifactBindings,
                 diagnostics: [DesignDiagnostic(
                     severity: .error,
                     code: "timing.signal_integrity.execution_failed",
@@ -175,10 +184,11 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
         startedAt: Date,
         error: TimingError
     ) throws -> SignalIntegrityExecutionResult {
-        SignalIntegrityExecutionResult(
+        try SignalIntegrityExecutionResult(
             runID: request.runID,
             status: .blocked,
             payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil),
+            inputBindings: request.artifactBindings,
             diagnostics: [DesignDiagnostic(
                 severity: .error,
                 code: code(for: error),
@@ -195,10 +205,11 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
         startedAt: Date,
         issues: [LogicDesignProvenanceValidation.Issue]
     ) throws -> SignalIntegrityExecutionResult {
-        SignalIntegrityExecutionResult(
+        try SignalIntegrityExecutionResult(
             runID: request.runID,
             status: .blocked,
             payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil),
+            inputBindings: request.artifactBindings,
             diagnostics: issues.map { issue in
                 DesignDiagnostic(
                     severity: .error,
@@ -217,10 +228,11 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
         startedAt: Date,
         error: TimingError
     ) throws -> SignalIntegrityExecutionResult {
-        SignalIntegrityExecutionResult(
+        try SignalIntegrityExecutionResult(
             runID: request.runID,
             status: .failed,
             payload: SignalIntegrityPayload(violationCount: 0, worstDeltaDelay: nil),
+            inputBindings: request.artifactBindings,
             diagnostics: [DesignDiagnostic(
                 severity: .error,
                 code: "timing.signal_integrity.artifact_write_failed",
@@ -271,7 +283,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
     }
     private func logicDesignReference(for request: SignalIntegrityRequest) -> LogicDesignReference {
         LogicDesignReference(
-            artifact: request.design,
+            artifact: request.design.reference,
             topDesignName: request.topDesignName,
             designDigest: request.canonicalDesignDigest?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
             provenance: LogicDesignProvenance(

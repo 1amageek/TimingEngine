@@ -1,10 +1,76 @@
 import CircuiteFoundation
+import CircuiteFoundationFoundation
 import Foundation
 import Testing
 @testable import TimingCore
 
 @Suite("TimingCore parsers")
 struct TimingCoreTests {
+    @Test("artifact binding rejects availability identity drift")
+    func artifactBindingRejectsDescriptorDrift() throws {
+        let reference = try ArtifactReference(
+            digest: ContentDigest(
+                algorithm: .sha256,
+                hexadecimalValue: String(repeating: "0", count: 64)
+            ),
+            byteCount: 1,
+            descriptor: ArtifactDescriptor(role: .input, kind: .netlist, format: .json)
+        )
+        let otherReference = try ArtifactReference(
+            digest: ContentDigest(
+                algorithm: .sha256,
+                hexadecimalValue: String(repeating: "1", count: 64)
+            ),
+            byteCount: 1,
+            descriptor: reference.descriptor
+        )
+
+        #expect(throws: TimingArtifactBindingError.availabilityIdentityMismatch) {
+            _ = try TimingArtifactBinding(
+                reference: reference,
+                availability: .local(
+                    artifactID: otherReference.id,
+                    rootID: ArtifactRootID(rawValue: TimingArtifactBinding.workspaceRootIdentifier),
+                    relativePath: ArtifactRelativePath(segments: ["report.json"])
+                )
+            )
+        }
+    }
+
+    @Test("artifact relocation preserves identity and changes availability")
+    func artifactRelocationPreservesIdentity() throws {
+        let reference = try ArtifactReference(
+            digest: ContentDigest(
+                algorithm: .sha256,
+                hexadecimalValue: String(repeating: "2", count: 64)
+            ),
+            byteCount: 8,
+            descriptor: ArtifactDescriptor(role: .input, kind: .report, format: .json)
+        )
+        let rootID = try ArtifactRootID(
+            rawValue: TimingArtifactBinding.workspaceRootIdentifier
+        )
+        let first = try TimingArtifactBinding(
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: rootID,
+                relativePath: ArtifactRelativePath(segments: ["first", "report.json"])
+            )
+        )
+        let relocated = try TimingArtifactBinding(
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: rootID,
+                relativePath: ArtifactRelativePath(segments: ["second", "report.json"])
+            )
+        )
+
+        #expect(first.reference == relocated.reference)
+        #expect(first.availability != relocated.availability)
+    }
+
     @Test("constant LUT validates public numeric input")
     func constantLUTValidation() throws {
         let lut = try TimingLUT.constant(0.25)
@@ -199,46 +265,37 @@ struct TimingCoreTests {
                 Issue.record("Temporary artifact cleanup failed: \(error.localizedDescription)")
             }
         }
-        let producer = try ProducerIdentity(
-            kind: .engine,
-            identifier: "timing.test",
-            version: "1.0.0"
-        )
         let data = Data("timing evidence".utf8)
         let store = try FileSystemTimingArtifactStore(workspaceRoot: root, outputDirectory: root)
         let reference = try await store.store(
             data,
-            artifactID: try ArtifactID(rawValue: "test-report"),
+            artifactName: "test-report",
             runID: "round-trip",
             kind: .report,
-            format: .json,
-            producer: producer
+            format: .json
         )
         let reader = FileSystemTimingArtifactReader(workspaceRoot: root)
         #expect(try await reader.read(reference) == data)
-        #expect(reference.id.rawValue == "test-report")
         #expect(reference.digest.algorithm == .sha256)
         #expect(reference.byteCount == UInt64(data.count))
-        #expect(reference.producer == producer)
+        #expect(reference.descriptor.role == .output)
 
         let replayed = try await store.store(
             data,
-            artifactID: try ArtifactID(rawValue: "test-report"),
+            artifactName: "test-report",
             runID: "round-trip",
             kind: .report,
-            format: .json,
-            producer: producer
+            format: .json
         )
         #expect(replayed == reference)
 
         do {
             _ = try await store.store(
                 Data("different evidence".utf8),
-                artifactID: try ArtifactID(rawValue: "test-report"),
+                artifactName: "test-report",
                 runID: "round-trip",
                 kind: .report,
-                format: .json,
-                producer: producer
+                format: .json
             )
             Issue.record("An immutable artifact identity must reject different content.")
         } catch let error as TimingError {

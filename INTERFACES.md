@@ -7,7 +7,7 @@ public protocol STAExecuting: Engine
 where Request == STARequest, Output == STAExecutionResult {}
 ```
 
-Signal-integrity execution follows the same direct-conformance pattern. Requests are `Sendable`, schema-versioned values containing immutable `ArtifactReference` inputs. Results expose domain payloads and conform independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`.
+Signal-integrity execution follows the same direct-conformance pattern. Requests are `Sendable`, schema-versioned values containing `TimingArtifactBinding` inputs: a location-independent `ArtifactReference` plus one execution-scoped `ArtifactAvailability`. Results retain the same exact input bindings, expose domain payloads, and conform independently to `ArtifactProducing`, `DiagnosticReporting` and `EvidenceProviding`.
 
 There is no compatibility envelope or runtime adapter layer. Native implementations conform to the public engine protocols directly.
 
@@ -29,9 +29,9 @@ use `schemaVersion`; decoding rejects records from an unsupported schema.
 
 ## Artifact access
 
-`TimingArtifactReading` is asynchronous because artifact access may involve I/O. Filesystem and in-memory implementations verify byte count and SHA-256 before returning bytes. Production evidence validation uses ToolQualification's verified-reader protocol directly; synchronous trust paths are not part of the contract.
+`TimingArtifactReading` is asynchronous because artifact access may involve I/O. The filesystem implementation opens the declared availability through `ArtifactRootCapability`, consumes bounded pages, verifies the terminal receipt, and propagates session/root close failures. The in-memory implementation verifies byte count and SHA-256 for the same content identity. Synchronous trust paths are not part of the contract.
 
-External correlation requires one explicit workspace root. Every retained artifact is workspace-relative and is resolved only against that root.
+External correlation requires one explicit workspace root. Every retained artifact uses a workspace-root `ArtifactAvailability` and is resolved only through that root capability. ToolQualification consumes retained raw evidence through the host integration boundary; TimingCore does not depend on ToolQualification.
 
 ## OpenSTA process boundary
 

@@ -1,4 +1,5 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import Foundation
 @testable import OpenSTAOracleAdapter
 import Testing
@@ -7,7 +8,7 @@ import TimingCore
 @Suite("OpenSTA execution workspace")
 struct OpenSTAExecutionWorkspaceTests {
     @Test("failed preparation leaves no committed workspace and the same run ID can retry")
-    func failedPreparationAllowsSameRunIDRetry() throws {
+    func failedPreparationAllowsSameRunIDRetry() async throws {
         let root = FileManager.default.temporaryDirectory.appending(
             path: "OpenSTAExecutionWorkspaceTests-\(UUID().uuidString)",
             directoryHint: .isDirectory
@@ -42,22 +43,22 @@ struct OpenSTAExecutionWorkspaceTests {
         try Data("{}\n".utf8).write(to: pdkURL, options: .atomic)
 
         let builder = TimingArtifactReferenceBuilder()
-        let design = try builder.makeReference(
+        let design = try builder.makeBinding(
             path: designURL.path,
             kind: .netlist,
             format: .json
         )
-        let library = try builder.makeReference(
+        let library = try builder.makeBinding(
             path: libraryURL.path,
             kind: .timingLibrary,
             format: .liberty
         )
-        let constraints = try builder.makeReference(
+        let constraints = try builder.makeBinding(
             path: constraintsURL.path,
             kind: .constraints,
             format: .sdc
         )
-        let pdk = try builder.makeReference(
+        let pdk = try builder.makeBinding(
             path: pdkURL.path,
             kind: .technology,
             format: .json
@@ -71,8 +72,8 @@ struct OpenSTAExecutionWorkspaceTests {
         )
         try FileManager.default.removeItem(at: libraryURL)
 
-        #expect(throws: (any Error).self) {
-            _ = try OpenSTAExecutionWorkspace.create(
+        await #expect(throws: (any Error).self) {
+            _ = try await OpenSTAExecutionWorkspace.create(
                 workspaceRoot: root,
                 runID: "retryable-run",
                 executable: executable,
@@ -97,7 +98,7 @@ struct OpenSTAExecutionWorkspaceTests {
         })
 
         try libraryData.write(to: libraryURL, options: .atomic)
-        let retriedWorkspace = try OpenSTAExecutionWorkspace.create(
+        let retriedWorkspace = try await OpenSTAExecutionWorkspace.create(
             workspaceRoot: root,
             runID: "retryable-run",
             executable: executable,
@@ -108,7 +109,7 @@ struct OpenSTAExecutionWorkspaceTests {
             parasitics: nil
         )
 
-        #expect(retriedWorkspace.verifySnapshots())
+        #expect(await retriedWorkspace.verifySnapshots())
         #expect(FileManager.default.fileExists(atPath: retriedWorkspace.root.path))
     }
 }

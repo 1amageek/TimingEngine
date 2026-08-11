@@ -1,89 +1,204 @@
-import CryptoKit
 import CircuiteFoundation
+import CircuiteFoundationCrypto
+import CircuiteFoundationFileSystem
+import CircuiteFoundationFoundation
 import Foundation
-import ToolQualification
 
-/// Reads immutable artifacts addressed by the canonical Foundation contract.
+/// Reads an exact content identity from one explicitly bound materialization.
 public protocol TimingArtifactReading: Sendable {
-    func read(_ reference: ArtifactReference) async throws -> Data
+    func read(_ artifact: TimingArtifactBinding) async throws -> Data
 }
 
-/// Stores immutable artifacts and returns their canonical Foundation identity.
+/// Stores immutable artifacts and returns content identity plus its materialization binding.
 public protocol TimingArtifactStoring: Sendable {
     func store(
         _ data: Data,
-        artifactID: ArtifactID?,
+        artifactName: String?,
         runID: String,
         kind: ArtifactKind,
-        format: ArtifactFormat,
-        producer: ProducerIdentity?
-    ) async throws -> ArtifactReference
+        format: ArtifactFormat
+    ) async throws -> TimingArtifactBinding
 }
 
-public struct FileSystemTimingArtifactReader: TimingArtifactReading, ToolQualificationArtifactReading {
+public struct FileSystemTimingArtifactReader: TimingArtifactReading {
     public let workspaceRoot: URL?
+    public let readBudget: ArtifactAccessBudget
 
-    public init(workspaceRoot: URL? = nil) {
+    public init(
+        workspaceRoot: URL? = nil,
+        readBudget: ArtifactAccessBudget = FileSystemTimingArtifactReader.defaultReadBudget
+    ) {
         self.workspaceRoot = workspaceRoot?.standardizedFileURL
+        self.readBudget = readBudget
     }
 
-    public func read(_ reference: ArtifactReference) async throws -> Data {
-        let integrity = LocalArtifactVerifier().verify(reference, relativeTo: workspaceRoot)
-        guard integrity.isVerified else {
-            let message = integrity.issues
-                .map { $0.detail ?? $0.code.rawValue }
-                .joined(separator: "; ")
-            throw TimingError.artifactReadFailed(
-                path: reference.locator.location.value,
-                message: message
-            )
-        }
-        let url: URL
+    public func read(_ artifact: TimingArtifactBinding) async throws -> Data {
+        let local: (rootID: ArtifactRootID, relativePath: ArtifactRelativePath)
         do {
-            url = try reference.locator.location.resolvedFileURL(relativeTo: workspaceRoot)
+            local = try artifact.requireLocalAvailability()
         } catch {
             throw TimingError.artifactReadFailed(
-                path: reference.locator.location.value,
+                path: artifact.materializationDescription,
                 message: error.localizedDescription
             )
         }
-        let data = try readData(at: url, expectedByteCount: reference.byteCount, expectedDigest: reference.digest.hexadecimalValue)
-        return data
-    }
+        let rootURL: URL
+        switch local.rootID.rawValue {
+        case TimingArtifactBinding.workspaceRootIdentifier:
+            guard let workspaceRoot else {
+                throw TimingError.artifactReadFailed(
+                    path: artifact.materializationDescription,
+                    message: "A workspace-root availability requires an exact workspace root."
+                )
+            }
+            rootURL = workspaceRoot
+        case TimingArtifactBinding.localFileSystemRootIdentifier:
+            rootURL = URL(filePath: "/", directoryHint: .isDirectory)
+        default:
+            throw TimingError.artifactReadFailed(
+                path: artifact.materializationDescription,
+                message: "The local artifact root is not registered for this reader."
+            )
+        }
 
-    public func verifiedData(for reference: ArtifactReference) async throws -> Data {
-        try await read(reference)
-    }
+        let access: ArtifactRootCapability
+        do {
+            access = try ArtifactRootCapability(
+                rootID: local.rootID,
+                directoryURL: rootURL,
+                digester: SHA256ContentDigester()
+            )
+        } catch {
+            throw TimingError.artifactReadFailed(
+                path: artifact.materializationDescription,
+                message: String(describing: error)
+            )
+        }
 
-    private func readData(
-        at url: URL,
-        expectedByteCount: UInt64?,
-        expectedDigest: String?
-    ) throws -> Data {
         let data: Data
         do {
-            data = try Data(contentsOf: url)
-        } catch {
-            throw TimingError.artifactReadFailed(path: url.path(percentEncoded: false), message: error.localizedDescription)
-        }
-        if let byteCount = expectedByteCount, byteCount != UInt64(data.count) {
-            throw TimingError.artifactSizeMismatch(path: url.path(percentEncoded: false), expected: Int64(byteCount), actual: Int64(data.count))
-        }
-        if let digest = expectedDigest {
-            let actual = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-            guard actual.caseInsensitiveCompare(digest) == .orderedSame else {
-                throw TimingError.artifactDigestMismatch(path: url.path(percentEncoded: false))
+            data = try await read(artifact, using: access)
+        } catch let primaryError {
+            do {
+                _ = try await access.close().wait()
+            } catch let closeError {
+                throw TimingError.artifactReadFailed(
+                    path: artifact.materializationDescription,
+                    message: "read failed: \(primaryError); root close failed: \(closeError)"
+                )
             }
+            throw primaryError
+        }
+        do {
+            _ = try await access.close().wait()
+        } catch {
+            throw TimingError.artifactReadFailed(
+                path: artifact.materializationDescription,
+                message: "Artifact root close failed: \(error)"
+            )
         }
         return data
     }
+
+    private func read(
+        _ artifact: TimingArtifactBinding,
+        using access: ArtifactRootCapability
+    ) async throws -> Data {
+        let intent: ArtifactAccessIntent
+        do {
+            intent = try ArtifactAccessIntent(
+                expectedReference: artifact.reference,
+                availability: artifact.availability,
+                operation: .read,
+                budget: readBudget
+            )
+        } catch {
+            throw TimingError.artifactReadFailed(
+                path: artifact.materializationDescription,
+                message: String(describing: error)
+            )
+        }
+
+        let session: any ArtifactReadSession
+        do {
+            session = try await access.open(intent)
+        } catch {
+            throw TimingError.artifactReadFailed(
+                path: artifact.materializationDescription,
+                message: String(describing: error)
+            )
+        }
+
+        do {
+            var data = Data()
+            var offset: UInt64 = 0
+            while true {
+                let page = try await session.readPage(
+                    ArtifactReadPageRequest(
+                        offset: offset,
+                        maximumByteCount: readBudget.maximumPageByteCount
+                    )
+                )
+                page.bytes.withUnsafeBytes { bytes in
+                    data.append(contentsOf: bytes)
+                }
+                offset = page.cumulativeByteCount
+                if page.completion == .complete {
+                    guard page.finalReceipt?.observedArtifactID == artifact.id,
+                          page.finalReceipt?.totalByteCount == artifact.byteCount else {
+                        throw TimingError.invariantViolation(
+                            "The terminal artifact receipt does not match the requested identity."
+                        )
+                    }
+                    break
+                }
+            }
+            _ = try await session.close().wait()
+            return data
+        } catch let primaryError {
+            do {
+                _ = try await session.close().wait()
+            } catch let closeError {
+                throw TimingError.artifactReadFailed(
+                    path: artifact.materializationDescription,
+                    message: "read failed: \(primaryError); session close failed: \(closeError)"
+                )
+            }
+            if let timingError = primaryError as? TimingError {
+                throw timingError
+            }
+            throw TimingError.artifactReadFailed(
+                path: artifact.materializationDescription,
+                message: String(describing: primaryError)
+            )
+        }
+    }
+
+    public static let defaultReadBudget: ArtifactAccessBudget = {
+        do {
+            return try ArtifactAccessBudget(
+                maximumPageByteCount: 1_048_576,
+                maximumTotalByteCount: 1_073_741_824,
+                maximumPageCount: 1_024,
+                maximumWorkUnitCount: 4_096,
+                maximumDurationNanoseconds: 60_000_000_000
+            )
+        } catch {
+            preconditionFailure("The static timing artifact read budget is invalid: \(error)")
+        }
+    }()
 }
 
 public struct FileSystemTimingArtifactStore: TimingArtifactStoring {
     public let workspaceRoot: URL
     public let outputDirectory: URL
+    public let rootID: ArtifactRootID
 
-    public init(workspaceRoot: URL, outputDirectory: URL) throws {
+    public init(
+        workspaceRoot: URL,
+        outputDirectory: URL,
+        rootID: ArtifactRootID = FileSystemTimingArtifactStore.defaultRootID
+    ) throws {
         let canonicalRoot = workspaceRoot.standardizedFileURL.resolvingSymlinksInPath()
         let canonicalOutput = outputDirectory.standardizedFileURL.resolvingSymlinksInPath()
         let rootPrefix = canonicalRoot.path.hasSuffix("/")
@@ -95,21 +210,20 @@ public struct FileSystemTimingArtifactStore: TimingArtifactStoring {
         }
         self.workspaceRoot = canonicalRoot
         self.outputDirectory = canonicalOutput
+        self.rootID = rootID
     }
 
     public func store(
         _ data: Data,
-        artifactID: ArtifactID? = nil,
+        artifactName: String? = nil,
         runID: String,
         kind: ArtifactKind = .report,
-        format: ArtifactFormat,
-        producer: ProducerIdentity? = nil
-    ) async throws -> ArtifactReference {
+        format: ArtifactFormat
+    ) async throws -> TimingArtifactBinding {
         try validatePathComponent(runID, label: "run ID")
-        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        let resolvedArtifactID = artifactID ?? ArtifactID(stableKey: "timing-artifact:\(runID):\(digest)")
-        let artifactToken = resolvedArtifactID.rawValue
-        try validatePathComponent(artifactToken, label: "artifact ID")
+        let digest = try SHA256ContentDigester().digest(data: data, using: .sha256)
+        let artifactToken = artifactName ?? digest.hexadecimalValue
+        try validatePathComponent(artifactToken, label: "artifact name")
         let directory = outputDirectory.appending(path: runID, directoryHint: .isDirectory)
         let url = directory.appending(path: "\(artifactToken).\(format.rawValue)")
         do {
@@ -118,9 +232,9 @@ public struct FileSystemTimingArtifactStore: TimingArtifactStoring {
             if FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) {
                 try requireContainedWithoutSymlink(url)
                 let existingData = try Data(contentsOf: url)
-                let existingDigest = SHA256.hash(data: existingData).map { String(format: "%02x", $0) }.joined()
+                let existingDigest = try SHA256ContentDigester().digest(data: existingData, using: .sha256)
                 guard existingData.count == data.count,
-                      existingDigest.caseInsensitiveCompare(digest) == .orderedSame else {
+                      existingDigest == digest else {
                     throw TimingError.artifactWriteFailed(
                         path: url.path(percentEncoded: false),
                         message: "An immutable artifact with the same identity already exists with different content."
@@ -148,17 +262,25 @@ public struct FileSystemTimingArtifactStore: TimingArtifactStoring {
                 )
             }
             let relativePath = String(canonicalURL.path.dropFirst(rootPrefix.count))
-            return ArtifactReference(
-                id: resolvedArtifactID,
-                locator: ArtifactLocator(
-                    location: try ArtifactLocation(workspaceRelativePath: relativePath),
-                    role: .output,
-                    kind: kind,
-                    format: format
-                ),
-                digest: try ContentDigest(algorithm: .sha256, hexadecimalValue: digest),
+            let descriptor = ArtifactDescriptor(
+                role: .output,
+                kind: kind,
+                format: format
+            )
+            let reference = try ArtifactReference(
+                digest: digest,
                 byteCount: UInt64(data.count),
-                producer: producer
+                descriptor: descriptor
+            )
+            return try TimingArtifactBinding(
+                reference: reference,
+                availability: .local(
+                    artifactID: reference.id,
+                    rootID: rootID,
+                    relativePath: ArtifactRelativePath(
+                        segments: relativePath.split(separator: "/").map(String.init)
+                    )
+                )
             )
         } catch {
             throw TimingError.artifactWriteFailed(path: url.path(percentEncoded: false), message: error.localizedDescription)
@@ -189,36 +311,40 @@ public struct FileSystemTimingArtifactStore: TimingArtifactStoring {
             )
         }
     }
+
+    public static let defaultRootID: ArtifactRootID = {
+        do {
+            return try ArtifactRootID(
+                rawValue: TimingArtifactBinding.workspaceRootIdentifier
+            )
+        } catch {
+            preconditionFailure("The static timing artifact root ID is invalid: \(error)")
+        }
+    }()
 }
 
-public struct InMemoryTimingArtifactReader: TimingArtifactReading, ToolQualificationArtifactReading {
-    public var artifacts: [String: Data]
+public struct InMemoryTimingArtifactReader: TimingArtifactReading {
+    public var artifacts: [ArtifactID: Data]
 
-    public init(artifacts: [String: Data]) {
+    public init(artifacts: [ArtifactID: Data]) {
         self.artifacts = artifacts
     }
 
-    public func read(_ reference: ArtifactReference) async throws -> Data {
-        let keys = [
-            reference.locator.location.value,
-            reference.locator.location.value.replacingOccurrences(of: "file://", with: ""),
-            URL(string: reference.locator.location.value)?.lastPathComponent ?? ""
-        ]
-        guard let data = keys.lazy.compactMap({ artifacts[$0] }).first else {
-            throw TimingError.artifactReadFailed(path: reference.locator.location.value, message: "No in-memory artifact was registered.")
+    public func read(_ artifact: TimingArtifactBinding) async throws -> Data {
+        let reference = artifact.reference
+        guard let data = artifacts[reference.id] else {
+            throw TimingError.artifactReadFailed(
+                path: artifact.materializationDescription,
+                message: "No in-memory artifact was registered for the exact content identity."
+            )
         }
         if UInt64(data.count) != reference.byteCount {
-            throw TimingError.artifactSizeMismatch(path: reference.locator.location.value, expected: Int64(reference.byteCount), actual: Int64(data.count))
+            throw TimingError.artifactSizeMismatch(path: artifact.materializationDescription, expected: Int64(reference.byteCount), actual: Int64(data.count))
         }
-        let actual = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        guard actual.caseInsensitiveCompare(reference.digest.hexadecimalValue) == .orderedSame else {
-            throw TimingError.artifactDigestMismatch(path: reference.locator.location.value)
+        let actual = try SHA256ContentDigester().digest(data: data, using: reference.digest.algorithm)
+        guard actual == reference.digest else {
+            throw TimingError.artifactDigestMismatch(path: artifact.materializationDescription)
         }
         return data
     }
-
-    public func verifiedData(for reference: ArtifactReference) async throws -> Data {
-        try await read(reference)
-    }
-
 }

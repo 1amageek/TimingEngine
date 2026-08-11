@@ -11,21 +11,21 @@ public struct LocalTimingPDKEvidenceBuilder: TimingPDKEvidenceBuilding {
         self.workspaceRoot = workspaceRoot?.standardizedFileURL
     }
 
-    public func build(for pdk: TimingPDKReference) throws -> TimingPDKEvidence {
+    public func build(for pdk: TimingPDKReference) async throws -> TimingPDKEvidence {
         let manifestURL: URL
         do {
-            manifestURL = try pdk.manifest.locator.location.resolvedFileURL(
-                relativeTo: workspaceRoot
-            )
+            manifestURL = try pdk.manifest.localFileURL(relativeTo: workspaceRoot)
         } catch {
             throw TimingError.artifactReadFailed(
-                path: pdk.manifest.locator.location.value,
+                path: pdk.manifest.materializationDescription,
                 message: error.localizedDescription
             )
         }
         let manifestData: Data
         do {
-            manifestData = try Data(contentsOf: manifestURL)
+            manifestData = try await FileSystemTimingArtifactReader(
+                workspaceRoot: workspaceRoot
+            ).read(pdk.manifest)
         } catch {
             throw TimingError.artifactReadFailed(path: manifestURL.path(percentEncoded: false), message: error.localizedDescription)
         }
@@ -52,15 +52,19 @@ public struct LocalTimingPDKEvidenceBuilder: TimingPDKEvidenceBuilding {
         let rootURL = manifestURL
             .deletingLastPathComponent()
             .standardizedFileURL
-            .resolvingSymlinksInPath()
+        let assetReader = FileSystemTimingArtifactReader(workspaceRoot: rootURL)
+        let referenceBuilder = TimingArtifactReferenceBuilder()
         var assets: [TimingPDKAssetEvidence] = []
         for asset in manifest.assets.sorted(by: { $0.assetID < $1.assetID }) {
-            let assetURL = rootURL
-                .appending(path: asset.path)
-                .standardizedFileURL
-                .resolvingSymlinksInPath()
-            let rootPath = rootURL.path.hasSuffix("/") ? rootURL.path : rootURL.path + "/"
-            guard assetURL.path == rootURL.path || assetURL.path.hasPrefix(rootPath) else {
+            let relativePath: ArtifactRelativePath
+            do {
+                guard !asset.path.hasPrefix("/") else {
+                    throw TimingError.invalidInput("PDK asset paths must be relative.")
+                }
+                relativePath = try ArtifactRelativePath(
+                    segments: asset.path.split(separator: "/").map(String.init)
+                )
+            } catch {
                 findings.append("pdk_asset_unsafe_path:\(asset.assetID)")
                 assets.append(TimingPDKAssetEvidence(
                     assetID: asset.assetID,
@@ -71,6 +75,9 @@ public struct LocalTimingPDKEvidenceBuilder: TimingPDKEvidenceBuilding {
                     declaredDigest: asset.sha256
                 ))
                 continue
+            }
+            let assetURL = relativePath.segments.reduce(rootURL) { partial, segment in
+                partial.appending(path: segment)
             }
             guard FileManager.default.fileExists(atPath: assetURL.path(percentEncoded: false)) else {
                 if asset.required { findings.append("pdk_required_asset_missing:\(asset.assetID)") }
@@ -86,9 +93,20 @@ public struct LocalTimingPDKEvidenceBuilder: TimingPDKEvidenceBuilding {
             }
             let data: Data
             do {
-                data = try Data(contentsOf: assetURL)
+                let binding = try referenceBuilder.makeBinding(
+                    at: assetURL,
+                    relativeTo: rootURL,
+                    kind: asset.kind,
+                    format: asset.format
+                )
+                data = try await assetReader.read(binding)
             } catch {
-                if asset.required { findings.append("pdk_required_asset_unreadable:\(asset.assetID)") }
+                if let timingError = error as? TimingError,
+                   case .invalidInput = timingError {
+                    findings.append("pdk_asset_unsafe_path:\(asset.assetID)")
+                } else if asset.required {
+                    findings.append("pdk_required_asset_unreadable:\(asset.assetID)")
+                }
                 assets.append(TimingPDKAssetEvidence(
                     assetID: asset.assetID,
                     relativePath: asset.path,
@@ -103,6 +121,10 @@ public struct LocalTimingPDKEvidenceBuilder: TimingPDKEvidenceBuilding {
             if let declaredDigest = asset.sha256,
                declaredDigest.caseInsensitiveCompare(observedDigest) != .orderedSame {
                 findings.append("pdk_asset_digest_mismatch:\(asset.assetID)")
+            }
+            if let declaredByteCount = asset.byteCount,
+               declaredByteCount != Int64(data.count) {
+                findings.append("pdk_asset_byte_count_mismatch:\(asset.assetID)")
             }
             assets.append(TimingPDKAssetEvidence(
                 assetID: asset.assetID,

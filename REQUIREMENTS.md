@@ -21,7 +21,7 @@ Provide standard-constrained multi-corner timing and signal-integrity analysis w
 
 - Every timing result names its mode, corner, constraints, PDK and parasitic identity.
 - External correlation reopens raw native/oracle outputs and recomputes metrics.
-- Correlation artifacts use workspace-relative locations under one explicit root.
+- Correlation artifacts bind location-independent identity to workspace-root availability under one explicit root capability.
 - Persisted assessment outcome is derived from findings.
 - Timing evidence remains distinct from ToolQualification acceptance and DesignFlowKernel approval.
 - Ideal-interconnect results do not satisfy post-layout signoff.
