@@ -40,17 +40,44 @@ public struct SPEFParser: TimingParasiticParsing {
             guard !line.isEmpty else { continue }
             let fields = line.split(whereSeparator: \.isWhitespace).map(String.init)
             guard let first = fields.first else { continue }
-            if first == "*C_UNIT" || first == "*CAP_UNIT", fields.count >= 3 {
-                capacitanceScale = unitScale(value: fields[1], unit: fields[2])
+            if first == "*C_UNIT" || first == "*CAP_UNIT" {
+                guard fields.count == 3 else {
+                    throw TimingError.parseFailure(
+                        format: "SPEF",
+                        line: lineNumber,
+                        message: "Invalid capacitance unit declaration."
+                    )
+                }
+                capacitanceScale = try unitScale(
+                    value: fields[1],
+                    unit: fields[2],
+                    dimension: .capacitance,
+                    line: lineNumber
+                )
                 continue
             }
-            if first == "*R_UNIT" || first == "*RES_UNIT", fields.count >= 3 {
-                resistanceScale = unitScale(value: fields[1], unit: fields[2])
+            if first == "*R_UNIT" || first == "*RES_UNIT" {
+                guard fields.count == 3 else {
+                    throw TimingError.parseFailure(
+                        format: "SPEF",
+                        line: lineNumber,
+                        message: "Invalid resistance unit declaration."
+                    )
+                }
+                resistanceScale = try unitScale(
+                    value: fields[1],
+                    unit: fields[2],
+                    dimension: .resistance,
+                    line: lineNumber
+                )
                 continue
             }
             if first == "*D_NET" {
                 finishNetwork()
-                guard fields.count >= 3, let total = Double(fields[2]) else {
+                guard fields.count >= 3,
+                      let total = Double(fields[2]),
+                      total.isFinite,
+                      total >= 0 else {
                     throw TimingError.parseFailure(format: "SPEF", line: lineNumber, message: "Invalid *D_NET header.")
                 }
                 currentNetwork = fields[1]
@@ -69,8 +96,17 @@ public struct SPEFParser: TimingParasiticParsing {
             if first == "*CAP" { section = "cap"; continue }
             if first == "*RES" { section = "res"; continue }
             if first == "*CONN" { section = "conn"; continue }
-            guard let value = Double(fields.last ?? "") else { continue }
             if section == "cap" {
+                guard fields.count == 3 || fields.count >= 4,
+                      let value = Double(fields.last ?? ""),
+                      value.isFinite,
+                      value >= 0 else {
+                    throw TimingError.parseFailure(
+                        format: "SPEF",
+                        line: lineNumber,
+                        message: "Invalid capacitance entry."
+                    )
+                }
                 if fields.count == 3 {
                     groundCapacitance += value
                 } else if fields.count >= 4 {
@@ -80,7 +116,17 @@ public struct SPEFParser: TimingParasiticParsing {
                         capacitance: value * capacitanceScale
                     ))
                 }
-            } else if section == "res", fields.count >= 4 {
+            } else if section == "res" {
+                guard fields.count >= 4,
+                      let value = Double(fields.last ?? ""),
+                      value.isFinite,
+                      value >= 0 else {
+                    throw TimingError.parseFailure(
+                        format: "SPEF",
+                        line: lineNumber,
+                        message: "Invalid resistance entry."
+                    )
+                }
                 resistance += value
             }
         }
@@ -91,19 +137,40 @@ public struct SPEFParser: TimingParasiticParsing {
         return TimingParasitics(networks: networks.values.sorted { $0.name < $1.name }, couplings: couplings)
     }
 
-    private func unitScale(value: String, unit: String) -> Double {
-        let number = Double(value) ?? 1
-        switch unit.uppercased() {
-        case "F": return number
-        case "MF": return number * 1e-3
-        case "UF": return number * 1e-6
-        case "NF": return number * 1e-9
-        case "PF": return number * 1e-12
-        case "FF": return number * 1e-15
-        case "OHM": return number
-        case "KOHM": return number * 1e3
-        case "MOHM": return number * 1e6
-        default: return number
+    private enum UnitDimension {
+        case capacitance
+        case resistance
+    }
+
+    private func unitScale(
+        value: String,
+        unit: String,
+        dimension: UnitDimension,
+        line: Int
+    ) throws -> Double {
+        guard let number = Double(value), number.isFinite, number > 0 else {
+            throw TimingError.parseFailure(
+                format: "SPEF",
+                line: line,
+                message: "Unit scale must contain a finite positive number."
+            )
+        }
+        switch (dimension, unit.uppercased()) {
+        case (.capacitance, "F"): return number
+        case (.capacitance, "MF"): return number * 1e-3
+        case (.capacitance, "UF"): return number * 1e-6
+        case (.capacitance, "NF"): return number * 1e-9
+        case (.capacitance, "PF"): return number * 1e-12
+        case (.capacitance, "FF"): return number * 1e-15
+        case (.resistance, "OHM"): return number
+        case (.resistance, "KOHM"): return number * 1e3
+        case (.resistance, "MOHM"): return number * 1e6
+        default:
+            throw TimingError.parseFailure(
+                format: "SPEF",
+                line: line,
+                message: "Unsupported unit '\(unit)'."
+            )
         }
     }
 }

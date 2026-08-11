@@ -114,6 +114,57 @@ struct TimingCoreTests {
         #expect(library.cells["INV"]?.arcs.isEmpty == true)
     }
 
+    @Test("Liberty rejects malformed present units and table values")
+    func libertyMalformedValuesFailClosed() {
+        let unknownUnit = """
+        library (broken) {
+          time_unit : "1fortnight";
+          cell (INV) { pin (A) { direction : input; } }
+        }
+        """
+        let malformedValue = """
+        library (broken) {
+          time_unit : "1ns";
+          cell (INV) {
+            pin (A) { direction : input; }
+            pin (Y) {
+              direction : output;
+              timing () {
+                related_pin : "A";
+                cell_rise (t) { values ("not-a-number"); }
+                cell_fall (t) { values ("1.0"); }
+              }
+            }
+          }
+        }
+        """
+        let missingValues = """
+        library (broken) {
+          cell (INV) {
+            pin (A) { direction : input; }
+            pin (Y) {
+              direction : output;
+              timing () {
+                related_pin : "A";
+                cell_rise (t) { index_1 ("0.1"); }
+                cell_fall (t) { values ("1.0"); }
+              }
+            }
+          }
+        }
+        """
+
+        #expect(throws: TimingError.self) {
+            _ = try LibertyParser().parse(Data(unknownUnit.utf8))
+        }
+        #expect(throws: TimingError.self) {
+            _ = try LibertyParser().parse(Data(malformedValue.utf8))
+        }
+        #expect(throws: TimingError.self) {
+            _ = try LibertyParser().parse(Data(missingValues.utf8))
+        }
+    }
+
     @Test("SDC parses clocks, IO delays and path exceptions")
     func sdcParser() throws {
         let sdc = """
@@ -185,6 +236,39 @@ struct TimingCoreTests {
         #expect(parasitics.couplings.first?.firstNet == "n1")
         #expect(parasitics.couplings.first?.secondNet == "n2")
         #expect(parasitics.network(named: "n1")?.resistance == 10)
+    }
+
+    @Test("SPEF rejects malformed units and numeric entries")
+    func spefMalformedValuesFailClosed() {
+        let unknownUnit = """
+        *C_UNIT 1 BANANA
+        *D_NET n1 0.03
+        *END
+        """
+        let malformedCapacitance = """
+        *C_UNIT 1 PF
+        *D_NET n1 0.03
+        *CAP
+        1 n1 invalid
+        *END
+        """
+        let malformedResistance = """
+        *R_UNIT 1 OHM
+        *D_NET n1 0.03
+        *RES
+        1 n1 n2 invalid
+        *END
+        """
+
+        #expect(throws: TimingError.self) {
+            _ = try SPEFParser().parse(Data(unknownUnit.utf8))
+        }
+        #expect(throws: TimingError.self) {
+            _ = try SPEFParser().parse(Data(malformedCapacitance.utf8))
+        }
+        #expect(throws: TimingError.self) {
+            _ = try SPEFParser().parse(Data(malformedResistance.utf8))
+        }
     }
 
     @Test("SDF round trips annotated delays")

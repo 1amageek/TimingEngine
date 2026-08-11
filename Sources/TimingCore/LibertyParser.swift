@@ -20,25 +20,41 @@ public struct LibertyParser: TimingLibraryParsing {
             throw TimingError.parseFailure(format: "Liberty", line: 1, message: "No library group was found.")
         }
 
-        let timeUnitScale = Self.unitScale(
+        let timeUnitScale = try Self.unitScale(
             from: libraryNode.attribute(named: "time_unit") ?? "1s",
-            dimension: .time
+            dimension: .time,
+            line: libraryNode.child(named: "time_unit")?.line ?? libraryNode.line
         )
-        let capacitanceUnitScale = Self.capacitanceScale(
-            from: libraryNode.children.first(where: { $0.name == "capacitive_load_unit" })?.arguments ?? []
+        let capacitanceUnitScale = try Self.capacitanceScale(
+            from: libraryNode.children.first(where: {
+                $0.name == "capacitive_load_unit"
+            })
         )
-        let powerUnitScale = Self.unitScale(
+        let powerUnitScale = try Self.unitScale(
             from: libraryNode.attribute(named: "power_unit") ?? "1W",
-            dimension: .power
+            dimension: .power,
+            line: libraryNode.child(named: "power_unit")?.line ?? libraryNode.line
         )
         var operatingConditions: [String: TimingOperatingCondition] = [:]
         for node in libraryNode.children where node.name == "operating_conditions" {
             let name = node.arguments.first ?? "default"
             operatingConditions[name] = TimingOperatingCondition(
                 name: name,
-                process: node.attribute(named: "process").flatMap(Self.number),
-                voltage: node.attribute(named: "voltage").flatMap(Self.number),
-                temperature: node.attribute(named: "temperature").flatMap(Self.number)
+                process: try Self.optionalNumber(
+                    node.attribute(named: "process"),
+                    field: "process",
+                    line: node.child(named: "process")?.line ?? node.line
+                ),
+                voltage: try Self.optionalNumber(
+                    node.attribute(named: "voltage"),
+                    field: "voltage",
+                    line: node.child(named: "voltage")?.line ?? node.line
+                ),
+                temperature: try Self.optionalNumber(
+                    node.attribute(named: "temperature"),
+                    field: "temperature",
+                    line: node.child(named: "temperature")?.line ?? node.line
+                )
             )
         }
 
@@ -80,9 +96,32 @@ public struct LibertyParser: TimingLibraryParsing {
             guard let name = pinNode.arguments.first else {
                 throw TimingError.parseFailure(format: "Liberty", line: pinNode.line, message: "Pin has no name.")
             }
-            let direction = TimingPin.Direction(rawValue: (pinNode.attribute(named: "direction") ?? "unknown").lowercased()) ?? .unknown
-            let capacitance = Self.number(pinNode.attribute(named: "capacitance") ?? "0", default: 0) * capacitanceUnitScale
-            let maxCapacitance = pinNode.attribute(named: "max_capacitance").flatMap(Self.number).map { $0 * capacitanceUnitScale }
+            let directionValue = pinNode.attribute(named: "direction")
+            let direction: TimingPin.Direction
+            if let directionValue {
+                guard let parsed = TimingPin.Direction(
+                    rawValue: directionValue.lowercased()
+                ) else {
+                    throw TimingError.parseFailure(
+                        format: "Liberty",
+                        line: pinNode.child(named: "direction")?.line ?? pinNode.line,
+                        message: "Pin direction is invalid."
+                    )
+                }
+                direction = parsed
+            } else {
+                direction = .unknown
+            }
+            let capacitance = try Self.optionalNumber(
+                pinNode.attribute(named: "capacitance"),
+                field: "capacitance",
+                line: pinNode.child(named: "capacitance")?.line ?? pinNode.line
+            ).map { $0 * capacitanceUnitScale } ?? 0
+            let maxCapacitance = try Self.optionalNumber(
+                pinNode.attribute(named: "max_capacitance"),
+                field: "max_capacitance",
+                line: pinNode.child(named: "max_capacitance")?.line ?? pinNode.line
+            ).map { $0 * capacitanceUnitScale }
             pins.append(TimingPin(
                 name: name,
                 direction: direction,
@@ -95,16 +134,39 @@ public struct LibertyParser: TimingLibraryParsing {
         }
 
         let ffNode = node.children.first(where: { $0.name == "ff" })
-        let leakagePower = node.attribute(named: "cell_leakage_power").flatMap(Self.number).map { $0 * powerUnitScale }
-        let internalPower = node.children
-            .filter { $0.name == "internal_power" }
-            .flatMap { powerNode in
-                powerNode.children
-                    .filter { $0.name == "rise_power" || $0.name == "fall_power" }
-                    .compactMap { powerNode in Self.values(from: powerNode.child(named: "values")?.arguments ?? []).first }
+        let leakagePower = try Self.optionalNumber(
+            node.attribute(named: "cell_leakage_power"),
+            field: "cell_leakage_power",
+            line: node.child(named: "cell_leakage_power")?.line ?? node.line
+        ).map { $0 * powerUnitScale }
+        var internalPower: Double?
+        for powerNode in node.children where powerNode.name == "internal_power" {
+            for tableNode in powerNode.children
+                where tableNode.name == "rise_power" || tableNode.name == "fall_power" {
+                guard let valuesNode = tableNode.child(named: "values") else {
+                    throw TimingError.parseFailure(
+                        format: "Liberty",
+                        line: tableNode.line,
+                        message: "Power table has no values."
+                    )
+                }
+                let values = try Self.values(
+                    from: valuesNode.arguments,
+                    field: "values",
+                    line: valuesNode.line
+                )
+                guard let first = values.first else {
+                    throw TimingError.parseFailure(
+                        format: "Liberty",
+                        line: valuesNode.line,
+                        message: "Power table has no numeric values."
+                    )
+                }
+                internalPower = first * powerUnitScale
+                break
             }
-            .first
-            .map { $0 * powerUnitScale }
+            if internalPower != nil { break }
+        }
         let dataPin = ffNode.flatMap { Self.pinName(from: $0.attribute(named: "next_state")) }
         let clockPin = ffNode.flatMap { Self.pinName(from: $0.attribute(named: "clocked_on")) }
         let outputPin = pins.first(where: { $0.direction == .output })?.name
@@ -193,7 +255,11 @@ public struct LibertyParser: TimingLibraryParsing {
         }
         return TimingCell(
             name: node.arguments.first ?? "cell",
-            area: node.attribute(named: "area").flatMap(Self.number),
+            area: try Self.optionalNumber(
+                node.attribute(named: "area"),
+                field: "area",
+                line: node.child(named: "area")?.line ?? node.line
+            ),
             pins: normalizedPins,
             arcs: arcs,
             sequentialModel: sequential,
@@ -247,15 +313,39 @@ public struct LibertyParser: TimingLibraryParsing {
 
     private func optionalTable(node: LibertyNode, name: String, scale: Double, capacitanceScale: Double) throws -> TimingLUT? {
         guard let tableNode = node.children.first(where: { $0.name == name }) else { return nil }
-        let index1 = Self.values(from: tableNode.child(named: "index_1")?.arguments ?? []).map { $0 }
-        let index2 = Self.values(from: tableNode.child(named: "index_2")?.arguments ?? []).map { $0 }
-        let rows = Self.values(from: tableNode.child(named: "values")?.arguments ?? [])
+        let index1Node = tableNode.child(named: "index_1")
+        let index2Node = tableNode.child(named: "index_2")
+        let valuesNode = tableNode.child(named: "values")
+        let index1 = try index1Node.map {
+            try Self.values(
+                from: $0.arguments,
+                field: "index_1",
+                line: $0.line
+            )
+        } ?? []
+        let index2 = try index2Node.map {
+            try Self.values(
+                from: $0.arguments,
+                field: "index_2",
+                line: $0.line
+            )
+        } ?? []
+        guard let valuesNode else {
+            throw TimingError.parseFailure(
+                format: "Liberty",
+                line: tableNode.line,
+                message: "Timing table has no values."
+            )
+        }
+        let rows = try Self.values(
+            from: valuesNode.arguments,
+            field: "values",
+            line: valuesNode.line
+        )
         let actualIndex1 = index1.isEmpty ? [0] : index1.map { $0 * scale }
         let actualIndex2 = index2.isEmpty ? [0] : index2.map { $0 * capacitanceScale }
         let matrix: [[Double]]
-        if rows.isEmpty {
-            matrix = [[0]]
-        } else if rows.count == actualIndex1.count * actualIndex2.count {
+        if rows.count == actualIndex1.count * actualIndex2.count {
             matrix = stride(from: 0, to: rows.count, by: actualIndex2.count).map {
                 Array(rows[$0 ..< ($0 + actualIndex2.count)])
             }
@@ -276,10 +366,28 @@ public struct LibertyParser: TimingLibraryParsing {
         case power
     }
 
-    private static func unitScale(from value: String, dimension: UnitDimension) -> Double {
+    private static func unitScale(
+        from value: String,
+        dimension: UnitDimension,
+        line: Int
+    ) throws -> Double {
         let cleaned = value.replacingOccurrences(of: "\"", with: "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let number = Self.number(cleaned) ?? 1
-        let suffix = cleaned.drop { $0.isNumber || $0 == "." || $0 == "-" || $0 == "+" || $0 == "e" || $0 == "E" }
+        let suffixStart = cleaned.firstIndex { character in
+            !(character.isNumber
+                || character == "."
+                || character == "-"
+                || character == "+"
+                || character == "e")
+        }
+        let numericText = suffixStart.map { String(cleaned[..<$0]) } ?? cleaned
+        let suffix = suffixStart.map { cleaned[$0...] } ?? ""
+        guard let number = Double(numericText), number.isFinite, number > 0 else {
+            throw TimingError.parseFailure(
+                format: "Liberty",
+                line: line,
+                message: "Unit scale must contain a finite positive number."
+            )
+        }
         switch (dimension, suffix) {
         case (.time, "s"): return number
         case (.time, "ms"): return number * 1e-3
@@ -292,13 +400,30 @@ public struct LibertyParser: TimingLibraryParsing {
         case (.power, "uw"): return number * 1e-6
         case (.power, "nw"): return number * 1e-9
         case (.power, "pw"): return number * 1e-12
-        default: return number
+        default:
+            throw TimingError.parseFailure(
+                format: "Liberty",
+                line: line,
+                message: "Unsupported unit suffix '\(suffix)'."
+            )
         }
     }
 
-    private static func capacitanceScale(from arguments: [String]) -> Double {
-        guard arguments.count >= 2, let value = number(arguments[0]) else { return 1 }
-        let unit = arguments[1].lowercased()
+    private static func capacitanceScale(from node: LibertyNode?) throws -> Double {
+        guard let node else { return 1 }
+        guard node.arguments.count == 2,
+              let value = number(node.arguments[0]),
+              value.isFinite,
+              value > 0 else {
+            throw TimingError.parseFailure(
+                format: "Liberty",
+                line: node.line,
+                message: "capacitive_load_unit requires a finite positive scale and a unit."
+            )
+        }
+        let unit = node.arguments[1]
+            .replacingOccurrences(of: "\"", with: "")
+            .lowercased()
         let multiplier: Double
         switch unit {
         case "f": multiplier = 1
@@ -307,7 +432,12 @@ public struct LibertyParser: TimingLibraryParsing {
         case "nf": multiplier = 1e-9
         case "pf": multiplier = 1e-12
         case "ff": multiplier = 1e-15
-        default: multiplier = 1
+        default:
+            throw TimingError.parseFailure(
+                format: "Liberty",
+                line: node.line,
+                message: "Unsupported capacitance unit '\(unit)'."
+            )
         }
         return value * multiplier
     }
@@ -322,16 +452,44 @@ public struct LibertyParser: TimingLibraryParsing {
         return nil
     }
 
-    private static func number(_ value: String, default fallback: Double) -> Double {
-        number(value) ?? fallback
+    private static func optionalNumber(
+        _ value: String?,
+        field: String,
+        line: Int
+    ) throws -> Double? {
+        guard let value else { return nil }
+        guard let parsed = number(value), parsed.isFinite else {
+            throw TimingError.parseFailure(
+                format: "Liberty",
+                line: line,
+                message: "\(field) contains an invalid numeric value."
+            )
+        }
+        return parsed
     }
 
-    private static func values(from arguments: [String]) -> [Double] {
-        arguments
+    private static func values(
+        from arguments: [String],
+        field: String,
+        line: Int
+    ) throws -> [Double] {
+        let tokens = arguments
             .joined(separator: ",")
             .replacingOccurrences(of: "\"", with: "")
             .split { $0 == "," || $0.isWhitespace }
-            .compactMap { Double($0) }
+        var values: [Double] = []
+        values.reserveCapacity(tokens.count)
+        for token in tokens {
+            guard let value = Double(token), value.isFinite else {
+                throw TimingError.parseFailure(
+                    format: "Liberty",
+                    line: line,
+                    message: "\(field) contains an invalid numeric value '\(token)'."
+                )
+            }
+            values.append(value)
+        }
+        return values
     }
 
     private static func pinName(from expression: String?) -> String? {
