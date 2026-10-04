@@ -52,7 +52,8 @@ let package = Package(
                 .product(name: "CircuiteFoundationFoundation", package: "CircuiteFoundation"),
                 .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"),
                 .product(name: "CircuiteFoundationFileSystem", package: "CircuiteFoundation")
-            ]
+            ],
+            exclude: ["DESIGN.md"]
         ),
         .target(
             name: "STAEngine",

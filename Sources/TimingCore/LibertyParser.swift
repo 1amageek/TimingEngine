@@ -1,15 +1,45 @@
 import Foundation
 
-public struct LibertyParser: TimingLibraryParsing {
+public struct LibertyParser: TimingLibraryParsing, TimingCharacterizationParsing {
     public init() {}
 
     public func parse(_ data: Data) throws -> TimingLibrary {
+        try parse(data, strictCells: nil, propagationCells: []).library
+    }
+
+    public func parseCharacterized(
+        _ data: Data, cellNames: [String], propagationCellNames: [String]
+    ) throws -> CharacterizedTimingLibrary {
+        guard !cellNames.isEmpty, Set(cellNames).count == cellNames.count,
+              cellNames.allSatisfy({ !$0.isEmpty }) else {
+            throw TimingCharacterizationError.invalidValue("selected cell names")
+        }
+        guard Set(propagationCellNames).count == propagationCellNames.count,
+              Set(propagationCellNames).isSubset(of: Set(cellNames)) else {
+            throw TimingCharacterizationError.invalidValue("propagation cell subset")
+        }
+        let parsed = try parse(data, strictCells: Set(cellNames), propagationCells: Set(propagationCellNames))
+        guard let thresholds = parsed.thresholds else {
+            throw TimingCharacterizationError.missingSourceFact("thresholds")
+        }
+        return CharacterizedTimingLibrary(
+            admitted: parsed.library, thresholds: thresholds, standardDefaultAttributes: parsed.defaults,
+            propagationCells: Set(propagationCellNames), capacitanceSources: parsed.capacitanceSources
+        )
+    }
+
+    private func parse(_ data: Data, strictCells: Set<String>?, propagationCells: Set<String>) throws -> (
+        library: TimingLibrary, thresholds: TimingCharacterizationThresholds?, defaults: Set<String>, capacitanceSources: [String: [String: TimingCapacitanceSource]]
+    ) {
         guard let source = String(data: data, encoding: .utf8) else {
             throw TimingError.parseFailure(format: "Liberty", line: 1, message: "Input is not UTF-8.")
         }
         if source.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") {
+            guard strictCells == nil else {
+                throw TimingCharacterizationError.unsupportedSemantic("canonical JSON without Liberty source facts")
+            }
             do {
-                return try JSONDecoder().decode(TimingLibrary.self, from: data)
+                return (try JSONDecoder().decode(TimingLibrary.self, from: data), nil, [], [:])
             } catch {
                 throw TimingError.parseFailure(format: "Liberty JSON", line: 1, message: error.localizedDescription)
             }
@@ -20,8 +50,33 @@ public struct LibertyParser: TimingLibraryParsing {
             throw TimingError.parseFailure(format: "Liberty", line: 1, message: "No library group was found.")
         }
 
+        if strictCells != nil {
+            guard root.filter({ $0.name == "library" }).count == 1 else {
+                throw TimingCharacterizationError.ambiguousSource("library")
+            }
+            for fact in ["time_unit", "capacitive_load_unit"] {
+                _ = try Self.uniqueChild(libraryNode, named: fact, required: fact == "capacitive_load_unit")
+            }
+        }
+        let thresholds = strictCells == nil ? nil : try Self.thresholds(libraryNode)
+        let defaultableAttributes = [
+            "time_unit", "input_threshold_pct_rise", "input_threshold_pct_fall",
+            "output_threshold_pct_rise", "output_threshold_pct_fall",
+            "slew_lower_threshold_pct_rise", "slew_lower_threshold_pct_fall",
+            "slew_upper_threshold_pct_rise", "slew_upper_threshold_pct_fall", "slew_derate_from_library"
+        ]
+        let defaults = Set(defaultableAttributes.filter { libraryNode.child(named: $0) == nil })
+        let inputCapacitanceDefault = try Self.uniqueChild(libraryNode, named: "default_input_pin_cap", required: false)
+        var templates: [String: LibertyNode] = [:]
+        for template in libraryNode.children where template.name == "lu_table_template" {
+            guard let name = template.arguments.first, templates[name] == nil else {
+                throw TimingCharacterizationError.ambiguousSource("lu_table_template")
+            }
+            templates[name] = template
+        }
+
         let timeUnitScale = try Self.unitScale(
-            from: libraryNode.attribute(named: "time_unit") ?? "1s",
+            from: libraryNode.attribute(named: "time_unit") ?? "1ns",
             dimension: .time,
             line: libraryNode.child(named: "time_unit")?.line ?? libraryNode.line
         )
@@ -35,6 +90,12 @@ public struct LibertyParser: TimingLibraryParsing {
             dimension: .power,
             line: libraryNode.child(named: "power_unit")?.line ?? libraryNode.line
         )
+        if strictCells != nil {
+            guard timeUnitScale.isFinite, timeUnitScale > 0,
+                  capacitanceUnitScale.isFinite, capacitanceUnitScale > 0 else {
+                throw TimingCharacterizationError.invalidValue("scaled time or capacitance unit")
+            }
+        }
         var operatingConditions: [String: TimingOperatingCondition] = [:]
         for node in libraryNode.children where node.name == "operating_conditions" {
             let name = node.arguments.first ?? "default"
@@ -59,42 +120,85 @@ public struct LibertyParser: TimingLibraryParsing {
         }
 
         var cells: [String: TimingCell] = [:]
+        var capacitanceSources: [String: [String: TimingCapacitanceSource]] = [:]
         for cellNode in libraryNode.children where cellNode.name == "cell" {
             guard let cellName = cellNode.arguments.first, !cellName.isEmpty else {
                 throw TimingError.parseFailure(format: "Liberty", line: cellNode.line, message: "Cell has no name.")
+            }
+            if let strictCells, !strictCells.contains(cellName) { continue }
+            guard cells[cellName] == nil else {
+                throw TimingCharacterizationError.ambiguousSource("cell \(cellName)")
             }
             let cell = try parseCell(
                 node: cellNode,
                 timeUnitScale: timeUnitScale,
                 capacitanceUnitScale: capacitanceUnitScale,
-                powerUnitScale: powerUnitScale
+                powerUnitScale: powerUnitScale,
+                templates: templates,
+                strict: strictCells != nil,
+                inputCapacitanceDefault: inputCapacitanceDefault,
+                strictPropagation: propagationCells.contains(cellName)
             )
             cells[cellName] = cell
+            var pinSources: [String: TimingCapacitanceSource] = [:]
+            for pin in cellNode.children where pin.name == "pin" && pin.attribute(named: "direction") == "input" {
+                if let name = pin.arguments.first {
+                    pinSources[name] = pin.child(named: "capacitance") == nil ? .libraryDefaultInputPinCap : .pinAttribute
+                }
+            }
+            capacitanceSources[cellName] = pinSources
         }
 
+        if let strictCells, Set(cells.keys) != strictCells {
+            throw TimingCharacterizationError.missingSourceFact("selected cells \(strictCells.subtracting(cells.keys).sorted())")
+        }
         guard !cells.isEmpty else {
             throw TimingError.parseFailure(format: "Liberty", line: libraryNode.line, message: "Library contains no cells.")
         }
-        return TimingLibrary(
+        return (TimingLibrary(
             name: libraryNode.arguments.first ?? "library",
             timeUnitScale: timeUnitScale,
             capacitanceUnitScale: capacitanceUnitScale,
             powerUnitScale: powerUnitScale,
             cells: cells,
             operatingConditions: operatingConditions
-        )
+        ), thresholds, defaults, capacitanceSources)
     }
 
     private func parseCell(
         node: LibertyNode,
         timeUnitScale: Double,
         capacitanceUnitScale: Double,
-        powerUnitScale: Double
+        powerUnitScale: Double,
+        templates: [String: LibertyNode],
+        strict: Bool,
+        inputCapacitanceDefault: LibertyNode?,
+        strictPropagation: Bool
     ) throws -> TimingCell {
         var pins: [TimingPin] = []
         for pinNode in node.children where pinNode.name == "pin" {
             guard let name = pinNode.arguments.first else {
                 throw TimingError.parseFailure(format: "Liberty", line: pinNode.line, message: "Pin has no name.")
+            }
+            if strict {
+                guard !pins.contains(where: { $0.name == name }) else {
+                    throw TimingCharacterizationError.ambiguousSource("pin \(name)")
+                }
+                _ = try Self.uniqueChild(pinNode, named: "direction", required: true)
+            }
+            if strict {
+                for fact in ["slew_lower_threshold_pct_rise", "slew_lower_threshold_pct_fall",
+                             "slew_upper_threshold_pct_rise", "slew_upper_threshold_pct_fall",
+                             "input_threshold_pct_rise", "input_threshold_pct_fall",
+                             "output_threshold_pct_rise", "output_threshold_pct_fall"] {
+                    guard pinNode.child(named: fact) == nil else {
+                        throw TimingCharacterizationError.unsupportedSemantic("pin-level threshold \(name).\(fact)")
+                    }
+                }
+                if let clock = try Self.uniqueChild(pinNode, named: "clock", required: false),
+                   clock.value != "true" && clock.value != "false" {
+                    throw TimingCharacterizationError.invalidValue("clock pin \(name)")
+                }
             }
             let directionValue = pinNode.attribute(named: "direction")
             let direction: TimingPin.Direction
@@ -112,11 +216,28 @@ public struct LibertyParser: TimingLibraryParsing {
             } else {
                 direction = .unknown
             }
+            if strict {
+                guard direction == .input || direction == .output || direction == .internalPin else {
+                    throw TimingCharacterizationError.unsupportedSemantic("pin direction \(name)")
+                }
+                if direction == .input {
+                    _ = try Self.uniqueChild(pinNode, named: "capacitance", required: inputCapacitanceDefault == nil)
+                }
+            }
+            let pinCapacitance = pinNode.attribute(named: "capacitance")
+                ?? (direction == .input ? inputCapacitanceDefault?.value : nil)
             let capacitance = try Self.optionalNumber(
-                pinNode.attribute(named: "capacitance"),
+                pinCapacitance,
                 field: "capacitance",
                 line: pinNode.child(named: "capacitance")?.line ?? pinNode.line
             ).map { $0 * capacitanceUnitScale } ?? 0
+            if strict, direction == .input,
+               pinCapacitance.flatMap(Double.init) == nil {
+                throw TimingCharacterizationError.invalidValue("pin capacitance dimension \(name)")
+            }
+            if strict, !capacitance.isFinite || capacitance < 0 {
+                throw TimingCharacterizationError.invalidValue("pin capacitance \(name)")
+            }
             let maxCapacitance = try Self.optionalNumber(
                 pinNode.attribute(named: "max_capacitance"),
                 field: "max_capacitance",
@@ -128,11 +249,14 @@ public struct LibertyParser: TimingLibraryParsing {
                 capacitance: capacitance,
                 maxCapacitance: maxCapacitance,
                 function: pinNode.attribute(named: "function"),
-                isClock: false,
+                isClock: pinNode.attribute(named: "clock") == "true",
                 isData: false
             ))
         }
 
+        if strictPropagation, node.child(named: "ff") != nil || node.child(named: "latch") != nil {
+            throw TimingCharacterizationError.unsupportedSemantic("sequential propagation cell")
+        }
         let ffNode = node.children.first(where: { $0.name == "ff" })
         let leakagePower = try Self.optionalNumber(
             node.attribute(named: "cell_leakage_power"),
@@ -169,6 +293,10 @@ public struct LibertyParser: TimingLibraryParsing {
         }
         let dataPin = ffNode.flatMap { Self.pinName(from: $0.attribute(named: "next_state")) }
         let clockPin = ffNode.flatMap { Self.pinName(from: $0.attribute(named: "clocked_on")) }
+        if strict, let expression = ffNode?.attribute(named: "clocked_on"), let clockPin,
+           expression != clockPin && expression != "!" + clockPin {
+            throw TimingCharacterizationError.unsupportedSemantic("compound sequential clock expression")
+        }
         let outputPin = pins.first(where: { $0.direction == .output })?.name
         var arcs: [TimingArc] = []
         var setup: Double?
@@ -181,6 +309,10 @@ public struct LibertyParser: TimingLibraryParsing {
         for pinNode in node.children where pinNode.name == "pin" {
             guard let destination = pinNode.arguments.first else { continue }
             for timingNode in pinNode.children where timingNode.name == "timing" {
+                if strict, !strictPropagation { continue }
+                if strict {
+                    _ = try Self.uniqueChild(timingNode, named: "related_pin", required: true)
+                }
                 guard let related = timingNode.attribute(named: "related_pin").flatMap(Self.pinName) else { continue }
                 let timingType = (timingNode.attribute(named: "timing_type") ?? "").lowercased()
                 if timingType.contains("setup") {
@@ -213,9 +345,20 @@ public struct LibertyParser: TimingLibraryParsing {
                     from: related,
                     to: destination,
                     timeUnitScale: timeUnitScale,
-                    capacitanceUnitScale: capacitanceUnitScale
+                    capacitanceUnitScale: capacitanceUnitScale,
+                    templates: templates,
+                    strict: strict
                 ) else {
                     continue
+                }
+                if strict {
+                    guard pins.contains(where: { $0.name == related && $0.direction == .input }),
+                          pins.contains(where: { $0.name == destination && $0.direction == .output }) else {
+                        throw TimingCharacterizationError.unsupportedSemantic("propagation arc pin directions")
+                    }
+                    guard !arcs.contains(where: { $0.fromPin == related && $0.toPin == destination }) else {
+                        throw TimingCharacterizationError.ambiguousSource("propagation arc \(related)->\(destination)")
+                    }
                 }
                 arcs.append(arc)
                 if let clockPin, let outputPin, related == clockPin, destination == outputPin,
@@ -225,6 +368,9 @@ public struct LibertyParser: TimingLibraryParsing {
             }
         }
 
+        if strictPropagation, arcs.isEmpty {
+            throw TimingCharacterizationError.missingSourceFact("propagation arc")
+        }
         let sequential: TimingSequentialModel?
         if let dataPin, let clockPin, let outputPin {
             sequential = TimingSequentialModel(
@@ -249,7 +395,7 @@ public struct LibertyParser: TimingLibraryParsing {
                 capacitance: pin.capacitance,
                 maxCapacitance: pin.maxCapacitance,
                 function: pin.function,
-                isClock: pin.name == clockPin,
+                isClock: pin.isClock || pin.name == clockPin,
                 isData: pin.name == dataPin
             )
         }
@@ -272,8 +418,28 @@ public struct LibertyParser: TimingLibraryParsing {
         from: String,
         to: String,
         timeUnitScale: Double,
-        capacitanceUnitScale: Double
+        capacitanceUnitScale: Double,
+        templates: [String: LibertyNode],
+        strict: Bool
     ) throws -> TimingArc? {
+        if strict {
+            let timingType = node.attribute(named: "timing_type")
+            guard timingType == nil || timingType == "combinational",
+                  node.child(named: "when") == nil,
+                  node.child(named: "sdf_cond") == nil,
+                  node.child(named: "mode") == nil,
+                  node.child(named: "when_start") == nil, node.child(named: "when_end") == nil,
+                  node.attribute(named: "related_pin") == from else {
+                throw TimingCharacterizationError.unsupportedSemantic("conditional or non-combinational propagation arc")
+            }
+            _ = try Self.uniqueChild(node, named: "timing_sense", required: true)
+            guard ["positive_unate", "negative_unate", "non_unate"].contains(node.attribute(named: "timing_sense") ?? "") else {
+                throw TimingCharacterizationError.unsupportedSemantic("timing_sense")
+            }
+            for fact in ["cell_rise", "cell_fall", "rise_transition", "fall_transition"] {
+                _ = try Self.uniqueChild(node, named: fact, required: true)
+            }
+        }
         let senseValue = (node.attribute(named: "timing_sense") ?? "positive_unate").lowercased()
         let sense: TimingSense
         switch senseValue {
@@ -284,12 +450,12 @@ public struct LibertyParser: TimingLibraryParsing {
         default:
             sense = .positiveUnate
         }
-        guard let rise = try optionalTable(node: node, name: "cell_rise", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale),
-              let fall = try optionalTable(node: node, name: "cell_fall", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale) else {
+        guard let rise = try optionalTable(node: node, name: "cell_rise", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale, templates: templates, strict: strict),
+              let fall = try optionalTable(node: node, name: "cell_fall", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale, templates: templates, strict: strict) else {
             return nil
         }
-        let riseTransition = try optionalTable(node: node, name: "rise_transition", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale) ?? rise
-        let fallTransition = try optionalTable(node: node, name: "fall_transition", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale) ?? fall
+        let riseTransition = try optionalTable(node: node, name: "rise_transition", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale, templates: templates, strict: strict) ?? rise
+        let fallTransition = try optionalTable(node: node, name: "fall_transition", scale: timeUnitScale, capacitanceScale: capacitanceUnitScale, templates: templates, strict: strict) ?? fall
         return TimingArc(
             fromPin: from,
             toPin: to,
@@ -311,10 +477,48 @@ public struct LibertyParser: TimingLibraryParsing {
         throw TimingError.parseFailure(format: "Liberty", line: node.line, message: "Timing constraint has no supported table.")
     }
 
-    private func optionalTable(node: LibertyNode, name: String, scale: Double, capacitanceScale: Double) throws -> TimingLUT? {
+    private func optionalTable(
+        node: LibertyNode, name: String, scale: Double, capacitanceScale: Double,
+        templates: [String: LibertyNode] = [:], strict: Bool = false
+    ) throws -> TimingLUT? {
         guard let tableNode = node.children.first(where: { $0.name == name }) else { return nil }
-        let index1Node = tableNode.child(named: "index_1")
-        let index2Node = tableNode.child(named: "index_2")
+        let template = tableNode.arguments.first.flatMap { templates[$0] }
+        var transposed = false
+        if strict {
+            guard let template else {
+                throw TimingCharacterizationError.missingSourceFact("template for \(name)")
+            }
+            for fact in ["variable_1", "variable_2"] {
+                _ = try Self.uniqueChild(template, named: fact, required: true)
+            }
+            guard template.child(named: "variable_3") == nil,
+                  template.child(named: "index_3") == nil, tableNode.child(named: "index_3") == nil else {
+                throw TimingCharacterizationError.unsupportedSemantic("three-dimensional \(name)")
+            }
+            for fact in ["index_1", "index_2", "values"] {
+                _ = try Self.uniqueChild(tableNode, named: fact, required: fact == "values")
+            }
+        }
+        if let template {
+            let variables = [template.attribute(named: "variable_1"), template.attribute(named: "variable_2")]
+            if variables == ["total_output_net_capacitance", "input_net_transition"] {
+                transposed = true
+            } else if strict, variables != ["input_net_transition", "total_output_net_capacitance"] {
+                throw TimingCharacterizationError.unsupportedSemantic("template variables for \(name)")
+            }
+        }
+        let index1Node = tableNode.child(named: "index_1") ?? template?.child(named: "index_1")
+        let index2Node = tableNode.child(named: "index_2") ?? template?.child(named: "index_2")
+        if strict {
+            guard index1Node != nil, index2Node != nil else {
+                throw TimingCharacterizationError.missingSourceFact("indexes for \(name)")
+            }
+            for fact in ["index_1", "index_2"] {
+                if tableNode.child(named: fact) == nil, let template {
+                    _ = try Self.uniqueChild(template, named: fact, required: true)
+                }
+            }
+        }
         let valuesNode = tableNode.child(named: "values")
         let index1 = try index1Node.map {
             try Self.values(
@@ -342,8 +546,14 @@ public struct LibertyParser: TimingLibraryParsing {
             field: "values",
             line: valuesNode.line
         )
-        let actualIndex1 = index1.isEmpty ? [0] : index1.map { $0 * scale }
-        let actualIndex2 = index2.isEmpty ? [0] : index2.map { $0 * capacitanceScale }
+        if strict {
+            guard !index1.isEmpty, !index2.isEmpty,
+                  (index1 + index2 + rows).allSatisfy({ $0 >= 0 }) else {
+                throw TimingCharacterizationError.invalidValue("indexes or values for \(name)")
+            }
+        }
+        let actualIndex1 = index1.isEmpty ? [0] : index1.map { $0 * (transposed ? capacitanceScale : scale) }
+        let actualIndex2 = index2.isEmpty ? [0] : index2.map { $0 * (transposed ? scale : capacitanceScale) }
         let matrix: [[Double]]
         if rows.count == actualIndex1.count * actualIndex2.count {
             matrix = stride(from: 0, to: rows.count, by: actualIndex2.count).map {
@@ -354,11 +564,66 @@ public struct LibertyParser: TimingLibraryParsing {
         } else {
             throw TimingError.parseFailure(format: "Liberty", line: tableNode.line, message: "Table dimensions do not match values.")
         }
+        if strict {
+            guard valuesNode.arguments.count == actualIndex1.count else {
+                throw TimingCharacterizationError.invalidValue("row count for \(name)")
+            }
+            for row in valuesNode.arguments {
+                guard try Self.values(from: [row], field: "values", line: valuesNode.line).count == actualIndex2.count else {
+                    throw TimingCharacterizationError.invalidValue("row width for \(name)")
+                }
+            }
+        }
+        let normalized = matrix.map { row in row.map { $0 * scale } }
         return try TimingLUT(
-            inputSlews: actualIndex1,
-            outputLoads: actualIndex2,
-            values: matrix.map { row in row.map { $0 * scale } }
+            inputSlews: transposed ? actualIndex2 : actualIndex1,
+            outputLoads: transposed ? actualIndex1 : actualIndex2,
+            values: transposed
+                ? actualIndex2.indices.map { column in actualIndex1.indices.map { normalized[$0][column] } }
+                : normalized
         )
+    }
+
+    private static func thresholds(_ library: LibertyNode) throws -> TimingCharacterizationThresholds {
+        func percentage(_ name: String) throws -> Double {
+            let node = try uniqueChild(library, named: name, required: false)
+            let defaultValue = name.hasPrefix("slew_lower") ? 20.0 : name.hasPrefix("slew_upper") ? 80.0 : 50.0
+            guard let value = node == nil ? defaultValue : node?.value.flatMap(Double.init), value.isFinite,
+                  value > 0, value < 100 else {
+                throw TimingCharacterizationError.invalidValue(name)
+            }
+            return value
+        }
+        let result = try TimingCharacterizationThresholds(
+            inputRise: percentage("input_threshold_pct_rise"),
+            inputFall: percentage("input_threshold_pct_fall"),
+            outputRise: percentage("output_threshold_pct_rise"),
+            outputFall: percentage("output_threshold_pct_fall"),
+            slewLowerRise: percentage("slew_lower_threshold_pct_rise"),
+            slewUpperRise: percentage("slew_upper_threshold_pct_rise"),
+            slewLowerFall: percentage("slew_lower_threshold_pct_fall"),
+            slewUpperFall: percentage("slew_upper_threshold_pct_fall")
+        )
+        guard result.slewLowerRise < result.slewUpperRise,
+              result.slewLowerFall < result.slewUpperFall else {
+            throw TimingCharacterizationError.invalidValue("slew threshold ordering")
+        }
+        if let derate = try uniqueChild(library, named: "slew_derate_from_library", required: false),
+           derate.value.flatMap(Double.init) != 1 {
+            throw TimingCharacterizationError.unsupportedSemantic("slew_derate_from_library")
+        }
+        return result
+    }
+
+    private static func uniqueChild(_ node: LibertyNode, named name: String, required: Bool) throws -> LibertyNode? {
+        let matches = node.children.filter { $0.name == name }
+        guard matches.count <= 1 else {
+            throw TimingCharacterizationError.ambiguousSource(name)
+        }
+        if required, matches.isEmpty {
+            throw TimingCharacterizationError.missingSourceFact(name)
+        }
+        return matches.first
     }
 
     private enum UnitDimension {

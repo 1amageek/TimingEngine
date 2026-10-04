@@ -49,6 +49,10 @@ Correlation artifacts keep location-independent `ArtifactReference` identity sep
 
 ## Dependency direction
 
+[TimingCore](Sources/TimingCore/DESIGN.md) owns source-preserving strict Liberty
+characterization and checked load/slew evaluation consumed by CTS. Ordinary STA
+parsing cannot establish that strict source-admission contract.
+
 Native STA process/corner intake is owned by
 [STAEngine](Sources/STAEngine/DESIGN.md) and its
 [ProcessCorners component](Sources/STAEngine/ProcessCorners/DESIGN.md).

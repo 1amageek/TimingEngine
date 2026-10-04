@@ -37,6 +37,27 @@ public struct TimingLUT: Sendable, Hashable, Codable {
         return low + (high - low) * row.fraction
     }
 
+    /// Interpolates only within the characterized domain, including exact boundaries.
+    func lookupChecked(inputSlew: Double, outputLoad: Double) throws -> Double {
+        for (axis, value, samples) in [
+            ("inputSlew", inputSlew, inputSlews), ("outputLoad", outputLoad, outputLoads)
+        ] {
+            guard value.isFinite, value >= 0 else {
+                throw TimingCharacterizationError.invalidValue(axis)
+            }
+            guard value >= samples[0], value <= samples[samples.count - 1] else {
+                throw TimingCharacterizationError.inputOutOfRange(
+                    axis: axis, value: value, minimum: samples[0], maximum: samples[samples.count - 1]
+                )
+            }
+        }
+        let value = lookup(inputSlew: inputSlew, outputLoad: outputLoad)
+        guard value.isFinite, value >= 0 else {
+            throw TimingCharacterizationError.invalidValue("interpolated timing value")
+        }
+        return value
+    }
+
     private struct Bracket {
         let low: Int
         let high: Int
