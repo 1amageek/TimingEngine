@@ -11,6 +11,7 @@ public struct STAPayload: Sendable, Hashable, Codable {
     public var violations: [STAViolation]
     public var repairCandidates: [STARepairCandidate]
     public var provenance: TimingArtifactProvenance
+    public var processSelection: STAProcessSelection?
 
     public init(
         worstSetupSlack: Double?,
@@ -21,7 +22,8 @@ public struct STAPayload: Sendable, Hashable, Codable {
         criticalPaths: [STAPath] = [],
         violations: [STAViolation] = [],
         repairCandidates: [STARepairCandidate] = [],
-        provenance: TimingArtifactProvenance = TimingArtifactProvenance()
+        provenance: TimingArtifactProvenance = TimingArtifactProvenance(),
+        processSelection: STAProcessSelection? = nil
     ) {
         self.worstSetupSlack = worstSetupSlack
         self.worstHoldSlack = worstHoldSlack
@@ -32,6 +34,7 @@ public struct STAPayload: Sendable, Hashable, Codable {
         self.violations = violations
         self.repairCandidates = repairCandidates
         self.provenance = provenance
+        self.processSelection = processSelection
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -44,6 +47,7 @@ public struct STAPayload: Sendable, Hashable, Codable {
         case violations
         case repairCandidates
         case provenance
+        case processSelection
     }
 
     public init(from decoder: Decoder) throws {
@@ -57,7 +61,8 @@ public struct STAPayload: Sendable, Hashable, Codable {
             criticalPaths: try container.decode([STAPath].self, forKey: .criticalPaths),
             violations: try container.decode([STAViolation].self, forKey: .violations),
             repairCandidates: try container.decode([STARepairCandidate].self, forKey: .repairCandidates),
-            provenance: try container.decode(TimingArtifactProvenance.self, forKey: .provenance)
+            provenance: try container.decode(TimingArtifactProvenance.self, forKey: .provenance),
+            processSelection: try container.decodeIfPresent(STAProcessSelection.self, forKey: .processSelection)
         )
     }
 
@@ -72,5 +77,6 @@ public struct STAPayload: Sendable, Hashable, Codable {
         try container.encode(violations, forKey: .violations)
         try container.encode(repairCandidates, forKey: .repairCandidates)
         try container.encode(provenance, forKey: .provenance)
+        try container.encodeIfPresent(processSelection, forKey: .processSelection)
     }
 }

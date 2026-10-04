@@ -1,0 +1,69 @@
+# Process Corners
+
+## Purpose and Scope
+
+Admit exact native STA process/corner inputs. Parent: [STAEngine](../DESIGN.md).
+No children.
+
+## Responsibilities and Boundaries
+
+Decode and validate the verified manifest, match request identity, resolve explicit
+corners to exact Liberty assets, and retain each parsed library separately.
+PDKCore owns manifest semantics and TimingCore owns standard parsing. This component
+does not characterize timing models or qualify a process.
+
+## Related Designs
+
+| Design | Relationship | Contract Used | Summary | Cautions |
+|---|---|---|---|---|
+| [STAEngine](../DESIGN.md) | parent / used by | Request and asynchronous artifact reader | Native scenario intake | Failure precedes analysis/report publication |
+| [PDKKit](../../../../PDKKit/DESIGN.md) | depends on | PDKManifest, corner PVT and Liberty view mapping | Process authority | Cross-view mapping and exact content are required |
+
+## Architecture
+
+```text
+Verified manifest -> identity/semantic validation -> requested corner
+    -> explicit Liberty view asset -> exact source digest/size -> parsed library
+    -> per-corner library dictionary + retained STAProcessSelection
+```
+
+## Contracts and Invariants
+
+- Requested corner IDs are explicit, nonempty and unique; no default is selected.
+- Manifest process/version match the request. Manifest binding is input-role JSON
+  with SHA-256 identity. Manifest semantic validation must pass.
+- Each selected corner has finite positive voltage, finite temperature and a
+  nonempty process name. Its Liberty view names an asset in `assetIDs`, and the
+  asset and a Liberty cross-view mapping explicitly declare that corner.
+- Each supplied library explicitly declares unique supported corners. Each
+  requested corner has exactly one supplied library, whose verified SHA-256 and
+  byte count match its selected manifest asset. Missing integrity is rejected.
+- Sources remain separate by corner, including when cells share names. Analysis
+  does not interpolate PVT or use another corner's models.
+- Completed payloads retain process/version, exact manifest identity, selected
+  PDK corner definitions and the corner-to-Liberty artifact identities. Retained
+  PVT is a declaration bound to exact source bytes, not independent foundry proof.
+
+## Runtime Flows
+
+Verified read -> decode/validate -> match identity -> admit each source/mapping
+-> parse once per source -> selected immutable libraries -> scenario analysis.
+
+## State, Ownership, and Lifecycle
+
+One invocation owns all values. Reader owns verified materialization. No mutable
+shared state or target-specific storage is added.
+
+## Failure, Concurrency, and Constraints
+
+Typed TimingError values become blocked envelopes. Unknown corners, missing or
+ambiguous mapping, malformed manifest, source mismatch and absent selection fail
+before publication. Reads follow asynchronous reader contracts and cancellation
+checks between sources. Limits are explicit source count and request scenarios.
+
+## Verification and Change Impact
+
+[STAProcessCornerTests](../../../Tests/TimingEngineTests/STAProcessCornerTests.swift)
+uses the actual native API to distinguish corner delays and reject invalid inputs.
+Parent owns CLI and retained report reconstruction. A mapping/selection change
+requires parent scenario and caller regression verification.

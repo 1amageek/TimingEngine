@@ -18,6 +18,24 @@ use `schemaVersion`; decoding rejects records from an unsupported schema.
 
 ## Evidence interfaces
 
+Native STA requires explicit `requestedCornerIDs` and explicit supported corner
+IDs on every `TimingLibraryReference`. The retained PDK manifest must validate
+and match `processID` / `pdkVersion`. Each selected corner's Liberty view and
+cross-view mapping must bind the supplied library's exact SHA-256 and byte count.
+Each corner receives its own parsed library. `STAPayload.processSelection` retains
+the admitted process/version, manifest identity, PVT corner definitions and exact
+library identities; blocked results omit this selection and publish no report.
+The detailed authority is [ProcessCorners](Sources/STAEngine/ProcessCorners/DESIGN.md).
+
+`timingengine run-sta` requires `--corner`, `--process` and `--pdk-version` together
+with design, library, constraints and PDK manifest paths. A missing option or
+unknown/mismatched selection exits nonzero. Developers can verify the native
+process/corner path using:
+
+```bash
+python3 -c 'import subprocess; subprocess.run(["swift", "test", "--build-path", ".build", "--filter", "STAProcessCornerTests|TimingCLIProcessTests"], timeout=300, check=True)'
+```
+
 | Interface | Role |
 |---|---|
 | `TimingCorpusRunning` | Replay retained timing observations |

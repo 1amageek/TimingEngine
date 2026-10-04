@@ -4,18 +4,46 @@
   "version": "1",
   "displayName": "TimingEngine retained process fixture",
   "assets": [
-    {"assetID": "liberty-view", "role": "model", "path": "library.lib", "kind": "model", "format": "LIBERTY", "required": true, "cornerIDs": ["typical"], "metadata": {}}
+    {
+      "assetID": "liberty-view",
+      "role": "model",
+      "path": "library.lib",
+      "kind": "model",
+      "format": "LIBERTY",
+      "required": true,
+      "cornerIDs": [
+        "typical"
+      ],
+      "metadata": {},
+      "sha256": "f5e76419120d31ae3b2d0d35ba4a059d38206fcf6b3648c4a2393d0b8356dbf2",
+      "byteCount": 692
+    }
   ],
   "layers": [
-    {"layerID": "metal1", "name": "M1", "number": 1, "purpose": "metal", "isRoutingLayer": true, "aliases": []}
+    {
+      "layerID": "metal1",
+      "name": "M1",
+      "number": 1,
+      "purpose": "metal",
+      "isRoutingLayer": true,
+      "aliases": []
+    }
   ],
   "devices": [
     {
       "deviceID": "inv",
       "modelName": "INV",
       "terminals": [
-        {"name": "A", "role": "input", "order": 0},
-        {"name": "Y", "role": "output", "order": 1}
+        {
+          "name": "A",
+          "role": "input",
+          "order": 0
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "order": 1
+        }
       ],
       "parameterNames": [],
       "aliases": []
@@ -24,13 +52,40 @@
   "corners": [
     {
       "cornerID": "typical",
-      "pvt": {"process": {"name": "tt", "nominal": true}, "voltage": 1.0, "temperatureCelsius": 25.0},
-      "assetIDs": ["liberty-view"],
-      "viewMappings": {"liberty": "liberty-view"}
+      "pvt": {
+        "process": {
+          "name": "tt",
+          "nominal": true
+        },
+        "voltage": 1.0,
+        "temperatureCelsius": 25.0
+      },
+      "assetIDs": [
+        "liberty-view"
+      ],
+      "viewMappings": {
+        "liberty": "liberty-view"
+      }
     }
   ],
   "crossViewMappings": [
-    {"mappingID": "liberty-device-view", "view": "liberty", "assetID": "liberty-view", "logicalNames": [], "physicalNames": [], "layerIDs": [], "deviceIDs": ["inv"], "cornerIDs": ["typical"]}
+    {
+      "mappingID": "liberty-device-view",
+      "view": "liberty",
+      "assetID": "liberty-view",
+      "logicalNames": [],
+      "physicalNames": [],
+      "layerIDs": [],
+      "deviceIDs": [
+        "inv"
+      ],
+      "cornerIDs": [
+        "typical"
+      ]
+    }
   ],
-  "metadata": {"source": "retained-fixture", "units": "micron"}
+  "metadata": {
+    "source": "retained-fixture",
+    "units": "micron"
+  }
 }

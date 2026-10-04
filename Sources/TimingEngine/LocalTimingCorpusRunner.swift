@@ -179,7 +179,7 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
                     kind: try ArtifactKind(rawValue: "timing.library"),
                     format: .liberty
                 ),
-                cornerIDs: corpusCase.cornerIDs.isEmpty ? ["default"] : corpusCase.cornerIDs
+                cornerIDs: corpusCase.cornerIDs
             )
         }
         let parasitics = try corpusCase.parasiticsPath.map {

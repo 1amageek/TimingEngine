@@ -70,7 +70,7 @@ struct TimingCLI {
         let runID = option("--run-id", in: values) ?? "timing-cli-run"
         let top = option("--top", in: values) ?? URL(filePath: designPath).deletingPathExtension().lastPathComponent
         let modeIDs = option("--mode", in: values).map { [$0] } ?? ["default"]
-        let cornerIDs = option("--corner", in: values).map { [$0] } ?? ["default"]
+        let cornerIDs = [try requiredPath(values, option: "--corner")]
         let outputDirectory = option("--out", in: values).map { URL(filePath: $0) }
         let referenceBuilder = TimingArtifactReferenceBuilder()
         let designReference = try makeBinding(
@@ -101,8 +101,8 @@ struct TimingCLI {
             kind: CircuiteFoundation.ArtifactKind.technology,
             format: .json
         )
-        let processID = option("--process", in: values) ?? "unknown"
-        let pdkVersion = option("--pdk-version", in: values) ?? "unknown"
+        let processID = try requiredPath(values, option: "--process")
+        let pdkVersion = try requiredPath(values, option: "--pdk-version")
         let pdkDigest = try ContentDigest(
             algorithm: .sha256,
             hexadecimalValue: option("--pdk-digest", in: values) ?? pdkManifestReference.digest.hexadecimalValue

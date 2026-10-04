@@ -9,6 +9,57 @@ import TimingCore
 
 @Suite("Timing CLI processes")
 struct TimingCLIProcessTests {
+    @Test("STA CLI retains exact process/corner selection in its real persisted report")
+    func staCLIRetainsProcessSelection() async throws {
+        let fixture = try STAProcessCLIFixture()
+        defer { fixture.remove() }
+        let result = try runExecutable(named: "timingengine", arguments: fixture.arguments)
+        #expect(result.exitCode == 0)
+        let execution = try JSONDecoder().decode(STAExecutionResult.self, from: Data(result.standardOutput.utf8))
+        #expect(execution.status == .completed)
+        #expect(execution.payload.analyzedCorners == ["typical"])
+        #expect(abs(try #require(execution.payload.worstSetupSlack) - 6e-9) < 1e-20)
+        let selection = try #require(execution.payload.processSelection)
+        #expect(selection.processID == "test")
+        #expect(selection.pdkVersion == "1")
+        #expect(selection.corners.map(\.cornerID) == ["typical"])
+        let report = try #require(execution.artifactBindings.first)
+        let bytes = try await FileSystemTimingArtifactReader(workspaceRoot: fixture.root).read(report)
+        #expect(try JSONDecoder().decode(STAPayload.self, from: bytes) == execution.payload)
+        #expect(execution.inputBindings.contains { $0.reference == selection.manifest })
+        #expect(execution.inputBindings.contains { $0.reference == selection.librariesByCorner["typical"] })
+    }
+
+    @Test("STA CLI rejects missing identities and unknown or mismatched corners", arguments: [
+        "missing-corner", "missing-process", "missing-version", "unknown-corner", "wrong-process", "wrong-version"
+    ])
+    func staCLIRejectsProcessSelection(_ failure: String) throws {
+        let fixture = try STAProcessCLIFixture()
+        defer { fixture.remove() }
+        var arguments = fixture.arguments
+        let option: String
+        switch failure {
+        case "missing-corner", "unknown-corner": option = "--corner"
+        case "missing-process", "wrong-process": option = "--process"
+        default: option = "--pdk-version"
+        }
+        let index = try #require(arguments.firstIndex(of: option))
+        if failure.hasPrefix("missing-") { arguments.removeSubrange(index...index + 1) }
+        else { arguments[index + 1] = "absent" }
+        let result = try runExecutable(named: "timingengine", arguments: arguments)
+        #expect(result.exitCode != 0)
+        #expect(!FileManager.default.fileExists(atPath: fixture.root.appending(path: "out").path))
+        if !failure.hasPrefix("missing-") {
+            let execution = try JSONDecoder().decode(STAExecutionResult.self, from: Data(result.standardOutput.utf8))
+            #expect(execution.status == .blocked)
+            #expect(execution.artifactBindings.isEmpty)
+            #expect(execution.payload.processSelection == nil)
+            #expect(execution.diagnostics.first?.code.rawValue == "timing.sta.invalid_input")
+        } else {
+            #expect(result.standardOutput.contains(option))
+        }
+    }
+
     @Test("timing CLI invalid invocation exits nonzero")
     func timingCLIInvalidInvocationExitsNonzero() throws {
         let result = try runExecutable(named: "timingengine", arguments: [])
@@ -205,6 +256,13 @@ struct TimingCLIProcessTests {
         var candidates: [URL] = []
         if let productsDirectory = environment["BUILT_PRODUCTS_DIR"] {
             candidates.append(URL(fileURLWithPath: productsDirectory).appending(path: name))
+        }
+        // The test resource bundle anchors the products directory without relying
+        // on another test having loaded it before process lookup.
+        var resourceAncestor = Bundle.module.bundleURL
+        for _ in 0..<6 {
+            resourceAncestor.deleteLastPathComponent()
+            candidates.append(resourceAncestor.appending(path: name))
         }
         var processAncestor = URL(fileURLWithPath: CommandLine.arguments[0])
         for _ in 0..<8 {

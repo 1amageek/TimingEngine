@@ -41,6 +41,15 @@ Correlation artifacts keep location-independent `ArtifactReference` identity sep
 
 ## Dependency direction
 
+Native STA process/corner intake is owned by
+[STAEngine](Sources/STAEngine/DESIGN.md) and its
+[ProcessCorners component](Sources/STAEngine/ProcessCorners/DESIGN.md).
+Every completed native STA report retains the validated process identity and
+exact PVT/corner-to-Liberty selection. Input bindings preserve materialization;
+the selection preserves location-independent identity. Missing or contradictory
+process/corner inputs block before report publication. No default corner is
+invented and libraries from different corners are never merged for analysis.
+
 TimingEngine depends on the portable `CircuiteFoundation` contracts and opts into Foundation, Crypto, and FileSystem products only in targets that perform serialization, digesting, or local access. It does not import Xcircuite or circuit-studio. ToolQualification remains a downstream trust consumer and is not a dependency of TimingCore.
 
 ## Non-responsibilities

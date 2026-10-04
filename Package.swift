@@ -62,7 +62,8 @@ let package = Package(
                 "TimingCore",
                 .product(name: "LogicIR", package: "LogicDesign"),
                 .product(name: "PDKCore", package: "PDKKit")
-            ]
+            ],
+            exclude: ["DESIGN.md", "ProcessCorners/DESIGN.md"]
         ),
         .target(
             name: "SignalIntegrityEngine",

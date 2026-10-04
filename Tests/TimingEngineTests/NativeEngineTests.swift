@@ -32,7 +32,7 @@ struct NativeEngineTests {
         set_input_delay 1ns -clock clk [get_ports in]
         set_output_delay 2ns -clock clk [get_ports q]
         """.utf8)
-        let pdkData = Data("{}".utf8)
+        let pdkData = try STATestProcessFactory.data(library: libraryData)
         let references = [
             try artifact(path: "design.json", data: designData, kind: .netlist, format: .json),
             try artifact(path: "library.lib", data: libraryData, kind: .timingLibrary, format: .liberty),

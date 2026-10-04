@@ -61,11 +61,12 @@ public struct NativeSTAEngine: STAExecuting {
             let result = try analyze(
                 request: request,
                 design: inputs.design,
-                library: inputs.library,
+                librariesByCorner: inputs.processInputs.librariesByCorner,
                 constraints: inputs.constraints,
                 parasitics: inputs.parasitics,
                 cornerIDs: inputs.cornerIDs,
-                modeIDs: inputs.modeIDs
+                modeIDs: inputs.modeIDs,
+                processSelection: inputs.processInputs.selection
             )
             var artifactBindings: [TimingArtifactBinding] = []
             if let artifactStore {
@@ -119,7 +120,7 @@ public struct NativeSTAEngine: STAExecuting {
 
     private struct LoadedInputs: Sendable {
         let design: TimingDesign
-        let library: TimingLibrary
+        let processInputs: STATimingProcessInputs
         let constraints: [String: TimingConstraintSet]
         let parasitics: TimingParasitics?
         let cornerIDs: [String]
@@ -131,21 +132,11 @@ public struct NativeSTAEngine: STAExecuting {
         let designData = try await reader.read(request.design)
         let design = try designParser.parse(designData, topDesignName: request.topDesignName)
 
-        var library: TimingLibrary?
-        var cornerIDs: [String] = []
-        for reference in request.libraries {
-            let data = try await reader.read(reference.artifact)
-            let parsed = try libraryParser.parse(data)
-            library = library.map { $0.merged(with: parsed) } ?? parsed
-            cornerIDs.append(contentsOf: reference.cornerIDs)
-        }
-        guard let library else { throw TimingError.missingArtifact(role: "timing-library") }
-        cornerIDs = unique(cornerIDs.isEmpty ? ["default"] : cornerIDs)
-        if !request.requestedCornerIDs.isEmpty {
-            cornerIDs = request.requestedCornerIDs
-        }
+        let processInputs = try await STATimingProcessInputs.load(
+            request, reader: reader, parser: libraryParser
+        )
+        let cornerIDs = request.requestedCornerIDs
 
-        _ = try await reader.read(request.pdkManifest)
         let constraintData = try await reader.read(request.constraints)
         let modeIDs = unique(
             request.requestedModeIDs.isEmpty
@@ -168,7 +159,7 @@ public struct NativeSTAEngine: STAExecuting {
         }
         return LoadedInputs(
             design: design,
-            library: library,
+            processInputs: processInputs,
             constraints: constraints,
             parasitics: parasitics,
             cornerIDs: cornerIDs,
@@ -190,17 +181,22 @@ public struct NativeSTAEngine: STAExecuting {
                     "The parsed STA mode is missing its canonical constraint set."
                 )
             }
-            let report = validator.validate(
-                design: inputs.design,
-                constraints: constraints,
-                libraries: [inputs.library],
-                parasitics: inputs.parasitics
-            )
-            guard report.isValid else {
-                throw TimingError.invalidInput(
-                    "Canonical STA validation failed: "
-                        + report.findings.map(\.code).sorted().joined(separator: ", ")
+            for cornerID in inputs.cornerIDs {
+                guard let library = inputs.processInputs.librariesByCorner[cornerID] else {
+                    throw TimingError.invariantViolation("The admitted STA corner has no library.")
+                }
+                let report = validator.validate(
+                    design: inputs.design,
+                    constraints: constraints,
+                    libraries: [library],
+                    parasitics: inputs.parasitics
                 )
+                guard report.isValid else {
+                    throw TimingError.invalidInput(
+                        "Canonical STA validation failed for corner '\(cornerID)': "
+                            + report.findings.map(\.code).sorted().joined(separator: ", ")
+                    )
+                }
             }
         }
     }
@@ -208,11 +204,12 @@ public struct NativeSTAEngine: STAExecuting {
     private func analyze(
         request: STARequest,
         design: TimingDesign,
-        library: TimingLibrary,
+        librariesByCorner: [String: TimingLibrary],
         constraints: [String: TimingConstraintSet],
         parasitics: TimingParasitics?,
         cornerIDs: [String],
-        modeIDs: [String]
+        modeIDs: [String],
+        processSelection: STAProcessSelection
     ) throws -> AnalysisResult {
         var endpoints: [STAEndpoint] = []
         var paths: [STAPath] = []
@@ -230,6 +227,9 @@ public struct NativeSTAEngine: STAExecuting {
                 )
             }
             for cornerID in cornerIDs {
+                guard let library = librariesByCorner[cornerID] else {
+                    throw TimingError.invariantViolation("The selected STA scenario has no admitted library.")
+                }
                 let scenario = try analyzeScenario(
                     request: request,
                     design: design,
@@ -292,7 +292,8 @@ public struct NativeSTAEngine: STAExecuting {
                     expectedImpact: violation.kind == .hold ? "Increase minimum data-path delay." : "Reduce late data-path delay."
                 )
             },
-            provenance: provenance
+            provenance: provenance,
+            processSelection: processSelection
         )
         return AnalysisResult(status: .completed, diagnostics: diagnostics, payload: payload)
     }
@@ -800,7 +801,7 @@ public struct NativeSTAEngine: STAExecuting {
         STAPayload(
             worstSetupSlack: nil,
             worstHoldSlack: nil,
-            analyzedCorners: request.requestedCornerIDs,
+            analyzedCorners: [],
             analyzedModes: request.requestedModeIDs,
             provenance: provenance(for: request)
         )

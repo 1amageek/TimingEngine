@@ -50,7 +50,7 @@ struct ExecutionContractTests {
                 """.utf8),
                 to: root.appending(path: "constraints.sdc")
             )
-            try write(Data("{}".utf8), to: root.appending(path: "pdk.json"))
+            try write(try STATestProcessFactory.data(library: Data(TimingCoreTests.liberty.utf8)), to: root.appending(path: "pdk.json"))
 
             let request = try STARequest(
                 runID: "foundation-sta",
@@ -134,7 +134,7 @@ struct ExecutionContractTests {
             )
             try write(Data(TimingCoreTests.liberty.utf8), to: root.appending(path: "library.lib"))
             try write(Data("create_clock -name clk -period 10ns [get_ports clk]".utf8), to: root.appending(path: "constraints.sdc"))
-            try write(Data("{}".utf8), to: root.appending(path: "pdk.json"))
+            try write(try STATestProcessFactory.data(library: Data(TimingCoreTests.liberty.utf8)), to: root.appending(path: "pdk.json"))
 
             let request = try STARequest(
                 runID: "foundation-sta-artifact",
@@ -146,7 +146,8 @@ struct ExecutionContractTests {
                         path: "library.lib",
                         kind: try ArtifactKind(rawValue: "timing.library"),
                         format: .liberty
-                    )
+                    ),
+                    cornerIDs: ["typical"]
                 )],
                 constraints: try reference(
                     root: root,
@@ -154,6 +155,7 @@ struct ExecutionContractTests {
                     kind: .constraints,
                     format: try ArtifactFormat(rawValue: "sdc")
                 ),
+                requestedCornerIDs: ["typical"],
                 pdkManifest: try reference(root: root, path: "pdk.json", kind: .technology, format: .json),
                 processID: "test",
                 pdkVersion: "1"
