@@ -31,6 +31,14 @@ The following states are independent:
 
 Persisted decision fields are not trusted. `TimingEvidenceAssessment.outcome` is derived from findings. External correlation is accepted only after workspace containment, digest, byte-count, producer, invocation, input and metric reconstruction checks.
 
+The external oracle consumer uses the public `STAExecutionResult` decoder as its
+schema authority. It accepts the current STA schema and rejects obsolete or
+unsupported schemas as `external_oracle_output_invalid`; it does not maintain a
+separate version literal. Run identity is checked after canonical decoding.
+The real process tests in [CorpusTests](Tests/TimingEngineTests/CorpusTests.swift)
+verify current-schema consumption, run mismatch, and v1/v3 rejection through
+retained JSON bytes emitted by `/bin/cat`.
+
 The OpenSTA execution boundary does not trust a caller-declared tool identity. The adapter resolves the executable, validates that it is a regular executable file, measures its SHA-256, and verifies its reported version. It then creates one immutable, create-only run workspace under the caller's declared workspace root, copies the executable and all input artifacts into that workspace, and invokes only those snapshots. Executable and input bytes are verified again after analysis. The observed digest is stored as the supporting tool producer build so ToolQualification can bind the result to its independently verified `binaryDigest`.
 
 The checked-in Sky130A directory is an input manifest, not a foundry corpus. Its required Liberty file is deliberately external; absence or digest drift is reported as incomplete PDK evidence. No checked-in decision artifact may convert that missing input into qualification.

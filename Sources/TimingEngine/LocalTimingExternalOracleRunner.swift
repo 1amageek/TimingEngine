@@ -61,9 +61,6 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
         }
         do {
             let result = try decodeFoundationResult(stdout)
-            guard result.schemaVersion == .v1 else {
-                throw TimingError.invalidInput("Unsupported external STA result schema version.")
-            }
             guard result.runID == request.runID else {
                 return invalidResult(
                     request: request,

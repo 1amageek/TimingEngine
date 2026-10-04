@@ -609,6 +609,39 @@ struct CorpusTests {
         #expect(observed.payload?.worstSetupSlack == 1e-9)
     }
 
+    @Test("external oracle runner rejects obsolete and unsupported canonical schemas", arguments: [SchemaVersion.v1, SchemaVersion.v3])
+    func externalOracleRunnerRejectsUnsupportedSchema(_ schemaVersion: SchemaVersion) async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "timing-oracle-schema-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            do { try FileManager.default.removeItem(at: directory) }
+            catch { Issue.record("Oracle schema fixture cleanup failed: \(error.localizedDescription)") }
+        }
+        let now = Date()
+        let result = try STAExecutionResult(
+            runID: "oracle-schema",
+            status: .completed,
+            payload: STAPayload(worstSetupSlack: 1e-9, worstHoldSlack: 2e-9, analyzedCorners: ["typical"]),
+            provenance: ExecutionProvenance(
+                producer: ProducerIdentity(kind: .tool, identifier: "timing.external", version: "1"),
+                startedAt: now, completedAt: now
+            )
+        )
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(result)) as? [String: Any])
+        object["schemaVersion"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(schemaVersion))
+        let reportURL = directory.appending(path: "oracle.json")
+        try JSONSerialization.data(withJSONObject: object).write(to: reportURL)
+        let observed = try await LocalTimingExternalOracleRunner().execute(
+            TimingExternalOracleRequest(
+                runID: "oracle-schema", oracleID: "fixture-oracle", executablePath: "/bin/cat",
+                arguments: [reportURL.path(percentEncoded: false)], workingDirectory: directory.path(percentEncoded: false)
+            )
+        )
+        #expect(observed.status == .failed)
+        #expect(observed.payload == nil)
+        #expect(observed.diagnostics == ["external_oracle_output_invalid"])
+    }
+
     @Test("external oracle runner rejects a result from another run")
     func externalOracleRunnerRejectsMismatchedRun() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "timing-oracle-mismatch-\(UUID().uuidString)")
