@@ -4,6 +4,45 @@ import Testing
 
 @Suite("Strict Liberty characterization")
 struct LibertyCharacterizationTests {
+    @Test("Sky130 numeric rows accept quoted and unquoted line continuation", arguments: ["\n", "\r\n"])
+    func numericLineContinuation(_ newline: String) throws {
+        let continuation = "\\" + newline
+        let source = Self.source
+            .replacingOccurrences(of: "time_unit : \"1ns\";", with: "time_unit : " + continuation + "\"1ns\";")
+            .replacingOccurrences(of: "values (\"2, 4\", \"6, 8\");", with:
+                "values (\"0.1836933000," + continuation + " 0.2005383000\", " + continuation
+                + "\"0.1901908000, 0.2070675000\");")
+        let ordinary = try LibertyParser().parse(Data(source.utf8))
+        let table = try #require(ordinary.cells["BUF"]?.arcs.first?.delayRise)
+        #expect(abs(table.values[0][0] - 0.1836933000e-9) < 1e-22)
+        #expect(abs(table.values[1][1] - 0.2070675000e-9) < 1e-22)
+        let strict = try characterized(source)
+        let value = try strict.evaluate(cell: "BUF", fromPin: "A", toPin: "Y", edge: .rise,
+            inputSlew: 2e-9, outputLoad: 2e-12)
+        #expect(abs(value.delay - 0.195372475e-9) < 1e-22)
+    }
+
+    @Test("a lone backslash remains an invalid numeric source token")
+    func rejectsNonContinuationBackslash() {
+        let source = Self.source.replacingOccurrences(of: "values (\"2, 4\", \"6, 8\");",
+            with: "values (\"2, 4\", \\ \"6, 8\");")
+        #expect(throws: TimingError.self) { _ = try LibertyParser().parse(Data(source.utf8)) }
+    }
+
+    @Test("continued quoted strings retain physical diagnostic lines")
+    func continuedStringDiagnosticLine() {
+        let source = "library (x) {\n time_unit : \"1\\\nns\";\n cell (BUF) { pin (A) { capacitance : bad; } }\n}"
+        do {
+            _ = try LibertyParser().parse(Data(source.utf8))
+            Issue.record("Invalid capacitance must fail admission.")
+        } catch TimingError.parseFailure(_, let line, let message) {
+            #expect(line == 4)
+            #expect(message.contains("capacitance"))
+        } catch {
+            Issue.record("Unexpected parse error: \(error)")
+        }
+    }
+
     @Test("Liberty template axes preserve their actual dimensions")
     func templateDimensions() throws {
         let source = Self.source.replacingOccurrences(

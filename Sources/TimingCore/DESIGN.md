@@ -33,6 +33,13 @@ Liberty bytes -> LibertyGrammar -> LibertyParser
 
 ## Contracts and Invariants
 
+The shared Liberty lexer consumes backslash-LF and backslash-CRLF line
+continuations before numeric admission. Outside quoted strings a continuation
+separates tokens; inside a quoted string it contributes no character. Physical
+line numbers still advance, and a backslash not followed by a newline is not
+silently discarded from an unquoted numeric value. This preserves actual
+multi-row Sky130 Liberty tables without weakening finite numeric validation.
+
 Strict admission requires positive finite time and explicit capacitance units,
 nonnegative finite selected input-pin capacitance from the pin or an explicit
 library default_input_pin_cap, unique cell/pin names, and all eight input/output/slew
@@ -92,6 +99,8 @@ claims macOS behavior only; no WASM/Embedded capability is implied.
 [LibertyCharacterizationTests](../../Tests/TimingEngineTests/LibertyCharacterizationTests.swift)
 checks literal independent rise/fall values, unit scaling, inherited/overridden and
 transposed indexes, missing source facts, unsupported/ambiguous semantics, malformed
-axes/matrices, singleton axes and exact/outside range behavior. TimingCore parser,
-Native STA and process/corner tests own composing regression behavior. CTS tests
+axes/matrices, singleton axes and exact/outside range behavior.
+Literal Sky130 rows also cover LF/CRLF continuations, diagnostic physical lines,
+and rejection of a non-continuation backslash through both parser profiles.
+TimingCore parser, Native STA and process/corner tests own composing regression behavior. CTS tests
 must separately prove actual source binding, RC loads and per-edge propagation.

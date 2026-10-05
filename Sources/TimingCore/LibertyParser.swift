@@ -898,12 +898,21 @@ private struct LibertyGrammar {
         .parseFailure(format: "Liberty", line: currentLine(), message: message)
     }
 
+    private func continuationLength(in bytes: borrowing [UInt8], at cursor: Int) -> Int {
+        guard bytes[cursor] == 92, cursor + 1 < bytes.count else { return 0 }
+        if bytes[cursor + 1] == 10 { return 2 }
+        if bytes[cursor + 1] == 13, cursor + 2 < bytes.count, bytes[cursor + 2] == 10 { return 3 }
+        return 0
+    }
+
     private mutating func tokenize() throws {
         let bytes = Array(source.utf8)
         var cursor = 0
         var line = 1
         while cursor < bytes.count {
             let byte = bytes[cursor]
+            let continuation = continuationLength(in: bytes, at: cursor)
+            if continuation > 0 { line += 1; cursor += continuation; continue }
             if byte == 10 { line += 1; cursor += 1; continue }
             if byte == 13 || byte == 32 || byte == 9 { cursor += 1; continue }
             if byte == 47, cursor + 1 < bytes.count, bytes[cursor + 1] == 47 {
@@ -927,6 +936,8 @@ private struct LibertyGrammar {
                 cursor += 1
                 var value = ""
                 while cursor < bytes.count && bytes[cursor] != 34 {
+                    let continuation = continuationLength(in: bytes, at: cursor)
+                    if continuation > 0 { line += 1; cursor += continuation; continue }
                     if bytes[cursor] == 92, cursor + 1 < bytes.count {
                         cursor += 1
                     }
@@ -950,6 +961,7 @@ private struct LibertyGrammar {
             var value = ""
             while cursor < bytes.count {
                 let current = bytes[cursor]
+                if continuationLength(in: bytes, at: cursor) > 0 { break }
                 if current == 10 || current == 13 || current == 32 || current == 9 || "(){}:;,\"".utf8.contains(current) { break }
                 value.append(Character(UnicodeScalar(current)))
                 cursor += 1
