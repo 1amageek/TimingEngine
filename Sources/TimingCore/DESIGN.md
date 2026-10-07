@@ -80,6 +80,23 @@ than 1 is unsupported; characterization never grants signoff qualification.
 Existing ordinary STA lookup keeps its separate
 extrapolating semantics; it cannot produce a characterized value.
 
+SDCParser admits only the global input-transition profile
+`set_input_transition <finite-positive-time> [all_inputs]` without flags. The
+collection contains exactly the `all_inputs` command and no arguments; whitespace
+inside it is permitted. Time uses the parser's finite positive defaultTimeUnit
+(default ns), or existing explicit fs/ps/ns/us/ms/s suffixes, and must remain finite
+and strictly positive after Double parsing and SI conversion. Zero, negative,
+nonfinite and underflowed values are typed parse failures. Flags, named subsets,
+collection options, extra arguments and other object forms are typed unsupported.
+Each accepted command sets the existing defaultInputSlew; repeated commands use the
+last accepted global value, retaining mode identity. No IR/schema fields are added.
+Native STA seeds both edges of every input and bidirectional port from this value;
+internal nets use propagated library output transitions. The scalar reference
+analyzer's existing reuse of the default at each stage is a separate model and only
+single-stage agreement is claimed. SDC value admission does not change the Native
+STA evaluator, so producer 2.0.0/schema v3 remain; the exact executable and constraint
+artifact digests bind the changed admission implementation and inputs.
+
 SPEF admission expands complete NAME_MAP references and mapped prefixes using
 one explicit DELIMITER (default `:`). D_NET names retain exact canonical net
 identities. CONN P/I/N entries associate complete expanded endpoint identities
@@ -139,3 +156,5 @@ Literal Sky130 rows also cover LF/CRLF continuations, diagnostic physical lines,
 and rejection of a non-continuation backslash through both parser profiles.
 TimingCore parser, Native STA and process/corner tests own composing regression behavior. CTS tests
 must separately prove actual source binding, RC loads and per-edge propagation.
+
+[SDCInputTransitionTests](../../Tests/TimingEngineTests/SDCInputTransitionTests.swift) owns global transition units, positive SI admission, options/subset refusal and mode/last-value behavior. NativeEngineTests.inputTransitionSeedsAndPropagatesSlew proves actual per-edge input/bidirectional initialization and two-stage internal propagation with independent LUT numbers.

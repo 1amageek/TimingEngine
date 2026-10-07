@@ -44,6 +44,14 @@ Producer algorithm identity is 2.0.0 and request/result schema is v3; old eviden
 cannot claim the new algorithm scope. Completion is a cap-load observation, not
 distributed post-layout signoff or process qualification.
 
+The global standard input-transition profile is owned by
+[TimingCore](../TimingCore/DESIGN.md). NativeSTAEngine uses its existing
+TimingConstraintSet.defaultInputSlew to initialize rise/fall at every input and
+bidirectional port. Later stages consume propagated output slew, preserving the
+ordinary STA lookup contract. No per-port/edge/min/max transition constraints or
+waveform propagation are implied. The scalar reference model only corroborates
+single-stage delay because it does not propagate internal transition values.
+
 ## Runtime Flows
 
 Verified manifest/source reads precede canonical validation and analysis. Only

@@ -33,6 +33,8 @@ public struct SDCParser: TimingConstraintParsing {
                 result.outputDelays.append(
                     contentsOf: try parsePortDelays(tokens, line: lineNumber)
                 )
+            case "set_input_transition":
+                result.defaultInputSlew = try parseGlobalInputTransition(tokens, line: lineNumber)
             case "set_clock_uncertainty":
                 let uncertainty = try parseTime(requiredValue(after: "set_clock_uncertainty", in: tokens, line: lineNumber), line: lineNumber)
                 let clocks = targets(after: "set_clock_uncertainty", in: tokens)
@@ -74,6 +76,25 @@ public struct SDCParser: TimingConstraintParsing {
             }
         }
         return result
+    }
+
+    private func parseGlobalInputTransition(_ tokens: [String], line: Int) throws -> Double {
+        guard tokens.count == 3, tokens[2].hasPrefix("["), tokens[2].hasSuffix("]"),
+              tokens[2].dropFirst().dropLast().split(whereSeparator: \.isWhitespace).map(String.init) == ["all_inputs"],
+              !tokens[1].hasPrefix("-") || parseTimeUnchecked(tokens[1]) != nil else {
+            throw TimingError.unsupportedSemantic(format: "SDC",
+                semantic: "set_input_transition supports only a global value and [all_inputs] without options")
+        }
+        guard defaultTimeUnit.isFinite, defaultTimeUnit > 0 else {
+            throw TimingError.parseFailure(format: "SDC", line: line,
+                message: "Input transition requires a finite positive default time unit.")
+        }
+        let value = try parseTime(tokens[1], line: line)
+        guard value.isFinite, value > 0 else {
+            throw TimingError.parseFailure(format: "SDC", line: line,
+                message: "Input transition must remain finite and positive in SI units.")
+        }
+        return value
     }
 
     private func parseCaseAnalyses(

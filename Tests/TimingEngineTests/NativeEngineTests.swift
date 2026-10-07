@@ -8,6 +8,7 @@ import STAEngine
 import SignalIntegrityEngine
 import Testing
 import TimingCore
+import TimingEngine
 
 @Suite("Native STA")
 struct NativeEngineTests {
@@ -132,6 +133,99 @@ struct NativeEngineTests {
         #expect(si.payload.parasiticReduction == sta.payload.parasiticReduction)
         #expect(si.diagnostics.contains { $0.code.rawValue == "timing.signal_integrity.intra_net_dynamic_capacitance_not_evaluated" })
         #expect(try JSONDecoder().decode(SignalIntegrityExecutionResult.self, from: JSONEncoder().encode(si)).payload.parasiticReduction == si.payload.parasiticReduction)
+    }
+
+    @Test("Default Native STA seeds both global port edges and propagates internal slew")
+    func inputTransitionSeedsAndPropagatesSlew() async throws {
+        let libraryText = """
+        library (slew_test) {
+          time_unit : "1ns";
+          capacitive_load_unit (1, pf);
+          cell (INV) {
+            pin (A) { direction : input; capacitance : 0; }
+            pin (Y) { direction : output; function : "!A";
+              timing () { related_pin : "A"; timing_sense : negative_unate;
+                cell_rise (t) { index_1 ("0.1, 0.9"); index_2 ("0"); values ("1", "5"); }
+                cell_fall (t) { index_1 ("0.1, 0.9"); index_2 ("0"); values ("0.5", "4.5"); }
+                rise_transition (t) { index_1 ("0.1, 0.9"); index_2 ("0"); values ("0.2", "0.6"); }
+                fall_transition (t) { index_1 ("0.1, 0.9"); index_2 ("0"); values ("0.1", "0.5"); }
+              }
+            }
+          }
+          cell (BUF) {
+            pin (A) { direction : input; capacitance : 0; }
+            pin (Y) { direction : output; function : "A";
+              timing () { related_pin : "A"; timing_sense : positive_unate;
+                cell_rise (t) { index_1 ("0.1, 0.9"); index_2 ("0"); values ("1", "5"); }
+                cell_fall (t) { index_1 ("0.1, 0.9"); index_2 ("0"); values ("0.5", "4.5"); }
+                rise_transition (t) { index_1 ("0.1, 0.9"); index_2 ("0"); values ("0.2", "0.6"); }
+                fall_transition (t) { index_1 ("0.1, 0.9"); index_2 ("0"); values ("0.1", "0.5"); }
+              }
+            }
+          }
+        }
+        """
+        let design = TimingDesign(topDesignName: "top", ports: [
+            .init(name: "clk", direction: .input), .init(name: "in", direction: .input),
+            .init(name: "io", direction: .bidirectional), .init(name: "out", direction: .output),
+            .init(name: "io_inv", direction: .output), .init(name: "io_buf", direction: .output)
+        ], instances: [
+            .init(name: "U1", cell: "INV", connections: ["A": "in", "Y": "mid"]),
+            .init(name: "U2", cell: "INV", connections: ["A": "mid", "Y": "out"]),
+            .init(name: "U3", cell: "INV", connections: ["A": "io", "Y": "io_inv"]),
+            .init(name: "U4", cell: "BUF", connections: ["A": "io", "Y": "io_buf"])
+        ], nets: [.init(name: "mid")])
+        let baseSDC = "create_clock -name clk -period 10ns [get_ports clk]\n"
+            + "set_output_delay 0ns -clock clk [get_ports out]\n"
+            + "set_output_delay 0ns -clock clk [get_ports io_inv]\n"
+            + "set_output_delay 0ns -clock clk [get_ports io_buf]\n"
+        let designData = try JSONEncoder().encode(design)
+        let libraryData = Data(libraryText.utf8)
+        let pdkData = try STATestProcessFactory.data(library: libraryData)
+        func execute(_ sdc: String, runID: String) async throws -> STAExecutionResult {
+            let constraintsData = Data(sdc.utf8)
+            let refs = [
+                try artifact(path: "design.json", data: designData, kind: .netlist, format: .json),
+                try artifact(path: "library.lib", data: libraryData, kind: .timingLibrary, format: .liberty),
+                try artifact(path: "constraints.sdc", data: constraintsData, kind: .constraints, format: .sdc),
+                try artifact(path: "pdk.json", data: pdkData, kind: .technology, format: .json)
+            ]
+            let request = try STARequest(runID: runID, design: refs[0], topDesignName: "top",
+                libraries: [.init(artifact: refs[1], cornerIDs: ["typical"])], constraints: refs[2],
+                requestedCornerIDs: ["typical"], pdkManifest: refs[3], processID: "test", pdkVersion: "1")
+            let reader = InMemoryTimingArtifactReader(artifacts: Dictionary(uniqueKeysWithValues:
+                zip(refs, [designData, libraryData, constraintsData, pdkData]).map { ($0.0.id, $0.1) }))
+            return try await NativeSTAEngine(reader: reader).execute(request)
+        }
+        let baseline = try await execute(baseSDC, runID: "default-slew")
+        let configured = try await execute(baseSDC + "set_input_transition 0.45 [all_inputs]\n", runID: "global-slew")
+        #expect(baseline.status == .completed)
+        #expect(configured.status == .completed)
+        let defaultPath = try #require(baseline.payload.criticalPaths.first { $0.endpoint == "out" })
+        let path = try #require(configured.payload.criticalPaths.first { $0.endpoint == "out" })
+        #expect(abs(defaultPath.arrival - 2e-9) < 1e-20)
+        #expect(abs(path.arrival - 4.625e-9) < 1e-20)
+        #expect(path.stages.map(\.instance) == ["U1", "U2"])
+        #expect(abs(path.stages[0].outputSlew - 0.375e-9) < 1e-20)
+        #expect(abs(path.stages[1].outputSlew - 0.2375e-9) < 1e-20)
+        #expect(abs(path.stages[1].delay - 1.875e-9) < 1e-20)
+        let inverse = try #require(configured.payload.criticalPaths.first { $0.endpoint == "io_inv" })
+        let buffer = try #require(configured.payload.criticalPaths.first { $0.endpoint == "io_buf" })
+        #expect(inverse.stages.first?.inputEdge == .fall)
+        #expect(buffer.stages.first?.inputEdge == .rise)
+        #expect(abs(inverse.arrival - 2.75e-9) < 1e-20)
+        #expect(abs(buffer.arrival - 2.75e-9) < 1e-20)
+        #expect(abs((inverse.stages.first?.outputSlew ?? 0) - 0.375e-9) < 1e-20)
+        #expect(abs((buffer.stages.first?.outputSlew ?? 0) - 0.375e-9) < 1e-20)
+        let single = TimingDesign(topDesignName: "single", ports: [
+            .init(name: "clk", direction: .input), .init(name: "io", direction: .bidirectional),
+            .init(name: "io_inv", direction: .output)
+        ], instances: [.init(name: "U3", cell: "INV", connections: ["A": "io", "Y": "io_inv"])])
+        let constraints = try SDCParser().parse(Data(("create_clock -name clk -period 10ns [get_ports clk]\n"
+            + "set_output_delay 0ns -clock clk [get_ports io_inv]\nset_input_transition 0.45 [all_inputs]\n").utf8))
+        let oracle = try TimingReferenceAnalyzer().analyze(design: single,
+            library: LibertyParser().parse(libraryData), constraints: constraints)
+        #expect(abs((oracle.worstSetupSlack ?? 0) - inverse.slack) < 1e-20)
     }
 
     private func artifact(
