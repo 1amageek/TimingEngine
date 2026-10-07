@@ -12,7 +12,10 @@ characterization profile accepts selected cells from Liberty text only, separati
 capacitance-only sink cells from propagation cells. Evaluation is permitted only
 for the explicit propagation-cell subset. CTS owns
 source integrity, corner selection, sink connectivity, RC and arrival propagation.
-Canonical JSON and the ordinary STA parser contract do not prove source presence.
+SPEFParser owns standard SPEF name expansion and node-to-net ownership before
+publishing TimingParasitics. It does not interpret exporter-private identity
+annotations or depend on extraction implementations. Canonical JSON and the
+ordinary STA parser contract do not prove source presence.
 
 ## Related Designs
 
@@ -77,6 +80,36 @@ than 1 is unsupported; characterization never grants signoff qualification.
 Existing ordinary STA lookup keeps its separate
 extrapolating semantics; it cannot produce a characterized value.
 
+SPEF admission expands complete NAME_MAP references and mapped prefixes using
+one explicit DELIMITER (default `:`). D_NET names retain exact canonical net
+identities. CONN P/I/N entries associate complete expanded endpoint identities
+with their enclosing D_NET; an internal endpoint with a numeric suffix is owned
+by its exact declared net prefix. Exact net identities remain valid endpoints.
+Resolution considers all declared networks and connections after the entire
+source is read, allowing forward coupling references. Multiple contradictory
+connection owners, competing exact-net/internal-node/connection interpretations,
+unknown map references, duplicate networks, and unresolved scoped endpoints fail with
+TimingError.spefOwnership(TimingSPEFError), preserving the native engines' blocked
+input classification. No prefix guessing or exporter-specific pin decoding is used.
+Escaped delimiter characters are part of an identity and cannot split a node.
+
+An unscoped root/net identity can name an external network without a D_NET in
+partial parasitic coverage. The canonical validator owns checking such identities
+against the logical design; the parser does not synthesize absent networks.
+Coupled CAP entries publish two distinct net identities and retain capacitance in
+farads. Ground/total capacitance remain farads and resistance remains ohms. The
+existing lumped CAP/RES scalar aggregation does not establish a resistor graph.
+The net-level timing model does not represent intra-net two-terminal capacitors;
+such entries fail explicitly. Aggregates and unit conversions must remain finite.
+Parser state is invocation-local and has no platform-dependent synchronization.
+
+```text
+SPEF bytes -> NAME_MAP / D_NET / CONN admission
+           -> complete endpoint ownership resolution
+           -> SI-unit network totals + net-level coupling
+           -> Native STA / SI canonical validation
+```
+
 ## Runtime Flows
 
 Parse once, resolve selected cells and source facts, normalize existing LUT values,
@@ -95,6 +128,12 @@ bounded by source size and selected cell/table sizes. This host Foundation modul
 claims macOS behavior only; no WASM/Embedded capability is implied.
 
 ## Verification and Change Impact
+
+[SPEFParserOwnershipTests](../../Tests/TimingEngineTests/SPEFParserOwnershipTests.swift)
+checks literal scoped exporter tokens, name maps, forward pin ownership, custom
+and escaped delimiters, exact root identities, conflicting/ambiguous/unknown
+ownership, partial root/net coverage, and independent SI numeric values. Native STA
+composition and genuine extraction export are verified by their integrating owner.
 
 [LibertyCharacterizationTests](../../Tests/TimingEngineTests/LibertyCharacterizationTests.swift)
 checks literal independent rise/fall values, unit scaling, inherited/overridden and

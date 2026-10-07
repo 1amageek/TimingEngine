@@ -4,6 +4,7 @@ public enum TimingError: Error, LocalizedError, Sendable, Hashable, Codable {
     case invalidInput(String)
     case unsupportedSemantic(format: String, semantic: String)
     case parseFailure(format: String, line: Int, message: String)
+    case spefOwnership(TimingSPEFError)
     case artifactReadFailed(path: String, message: String)
     case artifactWriteFailed(path: String, message: String)
     case artifactDigestMismatch(path: String)
@@ -19,6 +20,8 @@ public enum TimingError: Error, LocalizedError, Sendable, Hashable, Codable {
             return "Unsupported \(format) semantic: \(semantic)."
         case .parseFailure(let format, let line, let message):
             return "Failed to parse \(format) at line \(line): \(message)"
+        case .spefOwnership(let error):
+            return error.errorDescription
         case .artifactReadFailed(let path, let message):
             return "Failed to read timing artifact at \(path): \(message)"
         case .artifactWriteFailed(let path, let message):

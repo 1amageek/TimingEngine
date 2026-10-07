@@ -303,7 +303,7 @@ public struct LocalTimingCorpusRunner: TimingCorpusRunning {
         case .artifactDigestMismatch: return "TIMING_ARTIFACT_DIGEST_MISMATCH"
         case .artifactSizeMismatch: return "TIMING_ARTIFACT_SIZE_MISMATCH"
         case .artifactReadFailed: return "TIMING_ARTIFACT_READ_FAILED"
-        case .parseFailure: return "TIMING_PARSE_FAILED"
+        case .parseFailure, .spefOwnership: return "TIMING_PARSE_FAILED"
         case .invalidInput: return "TIMING_INVALID_INPUT"
         case .artifactWriteFailed: return "TIMING_ARTIFACT_WRITE_FAILED"
         case .invariantViolation: return "TIMING_INVARIANT_VIOLATION"

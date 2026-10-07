@@ -863,7 +863,7 @@ public struct NativeSTAEngine: STAExecuting {
         case .artifactDigestMismatch: return "timing.sta.artifact_digest_mismatch"
         case .artifactSizeMismatch: return "timing.sta.artifact_size_mismatch"
         case .artifactReadFailed: return "timing.sta.artifact_read_failed"
-        case .parseFailure: return "timing.sta.parse_failed"
+        case .parseFailure, .spefOwnership: return "timing.sta.parse_failed"
         case .invalidInput: return "timing.sta.invalid_input"
         case .artifactWriteFailed: return "timing.sta.artifact_write_failed"
         case .invariantViolation: return "timing.sta.invariant_violation"

@@ -246,7 +246,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
 
     private func code(for error: TimingError) -> String {
         switch error {
-        case .parseFailure: return "timing.signal_integrity.parse_failed"
+        case .parseFailure, .spefOwnership: return "timing.signal_integrity.parse_failed"
         case .missingArtifact: return "timing.signal_integrity.missing_artifact"
         case .artifactReadFailed: return "timing.signal_integrity.artifact_read_failed"
         case .artifactDigestMismatch: return "timing.signal_integrity.artifact_digest_mismatch"
