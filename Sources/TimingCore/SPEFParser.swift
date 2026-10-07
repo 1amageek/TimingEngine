@@ -29,8 +29,10 @@ public struct SPEFParser: TimingParasiticParsing {
         var inNameMap = false
         var networks: [String: TimingParasitics.Network] = [:]
         var connections: [String: String] = [:]
-        var pendingCouplings: [(first: String, second: String, capacitance: Double, line: Int)] = []
+        var pendingCapacitances: [(source: TimingParasitics.SourceID, first: String, second: String?, capacitance: Double)] = []
+        var localIdentifiers: Set<UInt64> = []
         var currentNetwork: String?
+        var declarationLine = 1
         var totalCapacitance = 0.0
         var groundCapacitance = 0.0
         var resistance = 0.0
@@ -50,15 +52,14 @@ public struct SPEFParser: TimingParasiticParsing {
 
         func finishNetwork(line: Int) throws {
             guard let currentNetwork else { return }
-            let total = totalCapacitance * capacitanceScale
-            let ground = groundCapacitance * capacitanceScale
-            let ohms = resistance * resistanceScale
-            guard total.isFinite, ground.isFinite, ohms.isFinite else {
-                throw TimingError.parseFailure(format: "SPEF", line: line, message: "Network aggregate overflow.")
-            }
+            let total = try convertToSI(totalCapacitance, scale: capacitanceScale,
+                                        quantity: "declared capacitance", line: declarationLine)
+            _ = try convertToSI(groundCapacitance, scale: capacitanceScale,
+                                quantity: "ground capacitance", line: line)
+            let ohms = try convertToSI(resistance, scale: resistanceScale,
+                                       quantity: "resistance inventory", line: line)
             networks[currentNetwork] = TimingParasitics.Network(
-                name: currentNetwork, totalCapacitance: total,
-                groundCapacitance: ground, resistance: ohms
+                name: currentNetwork, declaredCapacitance: total, resistanceInventory: ohms
             )
         }
 
@@ -105,18 +106,21 @@ public struct SPEFParser: TimingParasiticParsing {
             }
             if first == "*D_NET" {
                 try finishNetwork(line: lineNumber)
-                guard fields.count >= 3, let total = Double(fields[2]), total.isFinite, total >= 0 else {
+                guard fields.count >= 3 else {
                     throw TimingError.parseFailure(format: "SPEF", line: lineNumber, message: "Invalid *D_NET header.")
                 }
+                let total = try sourceValue(fields[2], quantity: "declared capacitance", line: lineNumber)
                 let name = unescape(try expand(fields[1], line: lineNumber))
                 guard networks[name] == nil else {
                     throw TimingSPEFError.duplicateNetwork(line: lineNumber, net: name)
                 }
                 currentNetwork = name
+                declarationLine = lineNumber
                 totalCapacitance = total
                 groundCapacitance = 0
                 resistance = 0
                 section = nil
+                localIdentifiers = []
                 continue
             }
             if first == "*END" {
@@ -141,27 +145,30 @@ public struct SPEFParser: TimingParasiticParsing {
                 }
                 connections[endpoint] = currentNetwork
             } else if section == "cap" {
-                guard fields.count == 3 || fields.count == 4,
-                      let value = Double(fields.last ?? ""), value.isFinite, value >= 0 else {
+                guard fields.count == 3 || fields.count == 4 else {
                     throw TimingError.parseFailure(format: "SPEF", line: lineNumber, message: "Invalid capacitance entry.")
                 }
-                if fields.count == 3 {
-                    groundCapacitance += value
-                } else {
-                    let capacitance = value * capacitanceScale
-                    guard capacitance.isFinite else {
-                        throw TimingError.parseFailure(format: "SPEF", line: lineNumber, message: "Coupling capacitance overflow.")
-                    }
-                    pendingCouplings.append((
-                        first: try expand(fields[1], line: lineNumber),
-                        second: try expand(fields[2], line: lineNumber),
-                        capacitance: capacitance, line: lineNumber
-                    ))
+                let value = try sourceValue(fields.last ?? "", quantity: "capacitance", line: lineNumber)
+                guard let identifier = UInt64(fields[0]), identifier > 0,
+                      localIdentifiers.insert(identifier).inserted else {
+                    throw TimingError.parseFailure(format: "SPEF", line: lineNumber,
+                        message: "Capacitance identifiers must be positive and unique within a network.")
                 }
+                let capacitance = try convertToSI(value, scale: capacitanceScale,
+                                                  quantity: "capacitance", line: lineNumber)
+                if fields.count == 3 { groundCapacitance += value }
+                pendingCapacitances.append((
+                    source: .init(declaringNet: currentNetwork, identifier: identifier, line: lineNumber),
+                    first: try expand(fields[1], line: lineNumber),
+                    second: fields.count == 4 ? try expand(fields[2], line: lineNumber) : nil,
+                    capacitance: capacitance
+                ))
             } else if section == "res" {
-                guard fields.count >= 4, let value = Double(fields.last ?? ""), value.isFinite, value >= 0 else {
+                guard fields.count >= 4 else {
                     throw TimingError.parseFailure(format: "SPEF", line: lineNumber, message: "Invalid resistance entry.")
                 }
+                let value = try sourceValue(fields.last ?? "", quantity: "resistance", line: lineNumber)
+                _ = try convertToSI(value, scale: resistanceScale, quantity: "resistance", line: lineNumber)
                 resistance += value
             }
         }
@@ -193,15 +200,27 @@ public struct SPEFParser: TimingParasiticParsing {
             throw TimingSPEFError.unknownEndpoint(line: line, endpoint: endpoint)
         }
 
-        let couplings = try pendingCouplings.map { entry in
-            let first = try owner(of: entry.first, line: entry.line)
-            let second = try owner(of: entry.second, line: entry.line)
-            guard first != second else {
-                throw TimingSPEFError.intraNetCoupling(line: entry.line, net: first)
+        var records: [String: [TimingParasitics.CapacitanceRecord]] = [:]
+        for entry in pendingCapacitances {
+            let first = TimingParasitics.Endpoint(name: unescape(entry.first),
+                ownerNet: try owner(of: entry.first, line: entry.source.line))
+            let second = try entry.second.map { token in
+                TimingParasitics.Endpoint(name: unescape(token),
+                    ownerNet: try owner(of: token, line: entry.source.line))
             }
-            return TimingParasitics.Coupling(firstNet: first, secondNet: second, capacitance: entry.capacitance)
+            guard first.ownerNet == entry.source.declaringNet
+                    || second?.ownerNet == entry.source.declaringNet else {
+                throw TimingSPEFError.invalidCapacitanceOwner(line: entry.source.line,
+                    endpoint: first.name, declaringNet: entry.source.declaringNet)
+            }
+            records[entry.source.declaringNet, default: []].append(.init(
+                source: entry.source, first: first, second: second, capacitance: entry.capacitance))
         }
-        return TimingParasitics(networks: networks.values.sorted { $0.name < $1.name }, couplings: couplings)
+        return TimingParasitics(networks: networks.values.sorted { $0.name < $1.name }.map { network in
+            .init(name: network.name, declaredCapacitance: network.declaredCapacitance,
+                  resistanceInventory: network.resistanceInventory,
+                  capacitances: records[network.name] ?? [])
+        })
     }
 
     private func unescapedDelimiter(in token: String, delimiter: Character) -> String.Index? {
@@ -246,16 +265,17 @@ public struct SPEFParser: TimingParasiticParsing {
                 message: "Unit scale must contain a finite positive number."
             )
         }
+        let factor: Double
         switch (dimension, unit.uppercased()) {
-        case (.capacitance, "F"): return number
-        case (.capacitance, "MF"): return number * 1e-3
-        case (.capacitance, "UF"): return number * 1e-6
-        case (.capacitance, "NF"): return number * 1e-9
-        case (.capacitance, "PF"): return number * 1e-12
-        case (.capacitance, "FF"): return number * 1e-15
-        case (.resistance, "OHM"): return number
-        case (.resistance, "KOHM"): return number * 1e3
-        case (.resistance, "MOHM"): return number * 1e6
+        case (.capacitance, "F"): factor = 1
+        case (.capacitance, "MF"): factor = 1e-3
+        case (.capacitance, "UF"): factor = 1e-6
+        case (.capacitance, "NF"): factor = 1e-9
+        case (.capacitance, "PF"): factor = 1e-12
+        case (.capacitance, "FF"): factor = 1e-15
+        case (.resistance, "OHM"): factor = 1
+        case (.resistance, "KOHM"): factor = 1e3
+        case (.resistance, "MOHM"): factor = 1e6
         default:
             throw TimingError.parseFailure(
                 format: "SPEF",
@@ -263,5 +283,30 @@ public struct SPEFParser: TimingParasiticParsing {
                 message: "Unsupported unit '\(unit)'."
             )
         }
+        return try convertToSI(number, scale: factor, quantity: "unit scale", line: line)
+    }
+
+    private func sourceValue(_ token: String, quantity: String, line: Int) throws -> Double {
+        guard let value = Double(token), value.isFinite, value >= 0 else {
+            throw TimingError.parseFailure(format: "SPEF", line: line, message: "Invalid \(quantity) entry.")
+        }
+        // Exponent digits do not make a zero significand nonzero.
+        let significand = token.prefix { $0 != "e" && $0 != "E" }
+        if value == 0, significand.contains(where: { $0 >= "1" && $0 <= "9" }) {
+            let message = token.hasPrefix("-")
+                ? "Invalid \(quantity) entry."
+                : "Positive \(quantity) is not representable as a Double."
+            throw TimingError.parseFailure(format: "SPEF", line: line, message: message)
+        }
+        return value
+    }
+
+    private func convertToSI(_ value: Double, scale: Double, quantity: String, line: Int) throws -> Double {
+        let converted = value * scale
+        guard converted.isFinite, value == 0 || converted > 0 else {
+            throw TimingError.parseFailure(format: "SPEF", line: line,
+                message: "Positive \(quantity) is not representable in SI units.")
+        }
+        return converted
     }
 }

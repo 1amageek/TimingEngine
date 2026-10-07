@@ -3,7 +3,7 @@
 ## Purpose and Scope
 
 Own canonical timing values, parsers and characterized load/slew evaluation.
-Parent: [TimingEngine](../../DESIGN.md). No child design units.
+Parent: [TimingEngine](../../DESIGN.md). Child: [ParasiticReduction](ParasiticReduction/DESIGN.md).
 
 ## Responsibilities and Boundaries
 
@@ -93,22 +93,18 @@ TimingError.spefOwnership(TimingSPEFError), preserving the native engines' block
 input classification. No prefix guessing or exporter-specific pin decoding is used.
 Escaped delimiter characters are part of an identity and cannot split a node.
 
-An unscoped root/net identity can name an external network without a D_NET in
-partial parasitic coverage. The canonical validator owns checking such identities
-against the logical design; the parser does not synthesize absent networks.
-Coupled CAP entries publish two distinct net identities and retain capacitance in
-farads. Ground/total capacitance remain farads and resistance remains ohms. The
-existing lumped CAP/RES scalar aggregation does not establish a resistor graph.
-The net-level timing model does not represent intra-net two-terminal capacitors;
-such entries fail explicitly. Aggregates and unit conversions must remain finite.
-Parser state is invocation-local and has no platform-dependent synchronization.
+TimingParasitics v2 retains source inventory: complete CAP endpoints/owners/values,
+physical source identifiers, finite D_NET declared capacitance and resistance
+inventory. Decimal parsing and SI conversion must retain every representable positive value. A nonzero decimal significand that Double parsing rounds to zero is refused; a zero significand remains zero regardless of exponent. SI conversion requires: a positive CAP, D_NET declaration, resistance entry or unit factor whose conversion overflows or becomes zero fails with its physical input line. Literal zero CAP/declarations/resistance remain valid. Ground CAP ownership is checked as strictly as two-terminal endpoints.
+Same-net two-terminal CAP records are retained; they are not inter-net coupling.
+Schema v1 JSON is rejected rather than reconstructed into invented endpoints.
+An unscoped external root may be absent from partial D_NET coverage; canonical
+logical validation owns checking that identity against the design.
 
-```text
-SPEF bytes -> NAME_MAP / D_NET / CONN admission
-           -> complete endpoint ownership resolution
-           -> SI-unit network totals + net-level coupling
-           -> Native STA / SI canonical validation
-```
+[ParasiticReduction](ParasiticReduction/DESIGN.md) owns the separate explicit
+cap-load approximation, derived load values and loss/mirror/declaration evidence.
+No parser declaration is an effective terminal load. Source storage and canonical
+JSON preserve every raw record, including same-net and mirrored listings.
 
 ## Runtime Flows
 

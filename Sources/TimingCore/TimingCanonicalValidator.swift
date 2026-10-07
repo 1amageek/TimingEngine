@@ -34,12 +34,11 @@ public struct TimingCanonicalValidator: Sendable {
             kind: "parasitic-network",
             findings: &findings
         )
-        let networkNames = Set(parasitics.networks.map(\.name))
         for network in parasitics.networks {
             if network.name.isEmpty
-                || !isNonnegativeFinite(network.totalCapacitance)
+                || !isNonnegativeFinite(network.declaredCapacitance)
                 || !isNonnegativeFinite(network.groundCapacitance)
-                || !isNonnegativeFinite(network.resistance) {
+                || !isNonnegativeFinite(network.resistanceInventory) {
                 findings.append(finding(
                     "timing.parasitic.network-invalid",
                     "A timing parasitic network has an invalid identity or numeric value.",
@@ -47,15 +46,24 @@ public struct TimingCanonicalValidator: Sendable {
                 ))
             }
         }
-        for coupling in parasitics.couplings {
-            if !networkNames.contains(coupling.firstNet)
-                || coupling.secondNet.isEmpty
-                || coupling.firstNet == coupling.secondNet
-                || !isNonnegativeFinite(coupling.capacitance) {
-                findings.append(finding(
-                    "timing.parasitic.coupling-invalid",
-                    "A coupling has invalid net identities or capacitance."
-                ))
+        var owners: [String: String] = [:]
+        for network in parasitics.networks {
+            var identifiers: Set<UInt64> = []
+            for record in network.capacitances {
+                let endpoints = [record.first] + (record.second.map { [$0] } ?? [])
+                if record.source.declaringNet != network.name || record.source.identifier == 0
+                    || record.source.line <= 0 || !identifiers.insert(record.source.identifier).inserted
+                    || !isNonnegativeFinite(record.capacitance)
+                    || !endpoints.contains(where: { $0.ownerNet == network.name }) {
+                    findings.append(finding("timing.parasitic.capacitance-invalid", "A source capacitance record has invalid identity, ownership or value."))
+                }
+                for endpoint in endpoints {
+                    if endpoint.name.isEmpty || endpoint.ownerNet.isEmpty
+                        || owners[endpoint.name].map({ $0 != endpoint.ownerNet }) == true {
+                        findings.append(finding("timing.parasitic.endpoint-invalid", "A source endpoint has empty or conflicting ownership."))
+                    }
+                    owners[endpoint.name] = endpoint.ownerNet
+                }
             }
         }
         return TimingCanonicalValidationReport(findings: findings)
@@ -272,39 +280,18 @@ public struct TimingCanonicalValidator: Sendable {
         design: TimingDesign,
         findings: inout [TimingCanonicalValidationFinding]
     ) {
-        if parasitics.schemaVersion != TimingParasitics.currentSchemaVersion {
-            findings.append(finding(
-                "timing.parasitic.schema-version",
-                "The timing parasitic schema version is unsupported."
-            ))
-        }
-        validateUnique(
-            parasitics.networks.map(\.name),
-            kind: "parasitic-network",
-            findings: &findings
-        )
+        findings.append(contentsOf: validateSignalIntegrityParasitics(parasitics).findings)
         let designNets = Set(design.nets.map(\.name)).union(design.ports.map(\.name))
         for network in parasitics.networks {
-            if !designNets.contains(network.name)
-                || !isNonnegativeFinite(network.totalCapacitance)
-                || !isNonnegativeFinite(network.groundCapacitance)
-                || !isNonnegativeFinite(network.resistance) {
-                findings.append(finding(
-                    "timing.parasitic.network-invalid",
-                    "A timing parasitic network has an unknown net or invalid numeric value.",
-                    network.name
-                ))
+            if !designNets.contains(network.name) {
+                findings.append(finding("timing.parasitic.network-invalid", "A parasitic network is absent from the logical design.", network.name))
             }
-        }
-        for coupling in parasitics.couplings {
-            if !designNets.contains(coupling.firstNet)
-                || !designNets.contains(coupling.secondNet)
-                || coupling.firstNet == coupling.secondNet
-                || !isNonnegativeFinite(coupling.capacitance) {
-                findings.append(finding(
-                    "timing.parasitic.coupling-invalid",
-                    "A coupling has invalid net identities or capacitance."
-                ))
+            for record in network.capacitances {
+                for endpoint in [record.first] + (record.second.map { [$0] } ?? []) {
+                    if !designNets.contains(endpoint.ownerNet) {
+                        findings.append(finding("timing.parasitic.endpoint-invalid", "A parasitic endpoint owner is absent from the logical design.", endpoint.ownerNet))
+                    }
+                }
             }
         }
     }

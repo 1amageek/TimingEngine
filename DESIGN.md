@@ -36,7 +36,7 @@ schema authority. It accepts the current STA schema and rejects obsolete or
 unsupported schemas as `external_oracle_output_invalid`; it does not maintain a
 separate version literal. Run identity is checked after canonical decoding.
 The real process tests in [CorpusTests](Tests/TimingEngineTests/CorpusTests.swift)
-verify current-schema consumption, run mismatch, and v1/v3 rejection through
+verify current-schema consumption, run mismatch, and v1/v2 rejection through
 retained JSON bytes emitted by `/bin/cat`.
 
 The OpenSTA execution boundary does not trust a caller-declared tool identity. The adapter resolves the executable, validates that it is a regular executable file, measures its SHA-256, and verifies its reported version. It then creates one immutable, create-only run workspace under the caller's declared workspace root, copies the executable and all input artifacts into that workspace, and invokes only those snapshots. Executable and input bytes are verified again after analysis. The observed digest is stored as the supporting tool producer build so ToolQualification can bind the result to its independently verified `binaryDigest`.
@@ -52,6 +52,13 @@ Correlation artifacts keep location-independent `ArtifactReference` identity sep
 [TimingCore](Sources/TimingCore/DESIGN.md) owns source-preserving strict Liberty
 characterization and checked load/slew evaluation consumed by CTS. Ordinary STA
 parsing cannot establish that strict source-admission contract.
+
+[TimingCore cap-load reduction](Sources/TimingCore/ParasiticReduction/DESIGN.md)
+owns explicit equipotential approximation over preserved source inventory. Native
+STA and [SignalIntegrityEngine](Sources/SignalIntegrityEngine/DESIGN.md) retain its
+loss evidence. D_NET inventory is not an effective load. Native algorithm identity
+2.0.0 and request/result v3 prevent old result-scope reuse; distributed post-layout
+signoff remains outside this approximate cap-load scope.
 
 Native STA process/corner intake is owned by
 [STAEngine](Sources/STAEngine/DESIGN.md) and its
@@ -71,3 +78,5 @@ TimingEngine depends on the portable `CircuiteFoundation` contracts and opts int
 - Tool self-qualification
 - Flow approval, waiver, release or resume policy
 - Concrete `.xcircuite` storage
+
+The scalar correlation analyzer consumes the same published cap-load reduction contract through TimingParasiticReducing and identifies the changed load semantics as `timing.reference.scalar-v2`. Its numerical correlation remains local model evidence, not distributed RC or process-qualified signoff.

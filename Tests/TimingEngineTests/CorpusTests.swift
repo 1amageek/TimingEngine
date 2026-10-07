@@ -609,7 +609,7 @@ struct CorpusTests {
         #expect(observed.payload?.worstSetupSlack == 1e-9)
     }
 
-    @Test("external oracle runner rejects obsolete and unsupported canonical schemas", arguments: [SchemaVersion.v1, SchemaVersion.v3])
+    @Test("external oracle runner rejects obsolete and unsupported canonical schemas", arguments: [SchemaVersion.v1, SchemaVersion.v2])
     func externalOracleRunnerRejectsUnsupportedSchema(_ schemaVersion: SchemaVersion) async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "timing-oracle-schema-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

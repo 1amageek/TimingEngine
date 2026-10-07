@@ -5,6 +5,7 @@ import Foundation
 import LogicIR
 import PDKCore
 import STAEngine
+import SignalIntegrityEngine
 import Testing
 import TimingCore
 
@@ -83,6 +84,54 @@ struct NativeEngineTests {
         let result = try await NativeSTAEngine(reader: InMemoryTimingArtifactReader(artifacts: [:])).execute(request)
         #expect(result.status == .blocked)
         #expect(result.diagnostics.first?.code.rawValue == "timing.sta.missing_artifact")
+    }
+
+    @Test("native STA and SI consume reduced operators and publish explicit dynamic loss")
+    func consumesParasiticReduction() async throws {
+        let design = TimingDesign(topDesignName: "top", ports: [
+            .init(name: "clk", direction: .input), .init(name: "in", direction: .input),
+            .init(name: "external", direction: .input), .init(name: "out", direction: .output)
+        ], instances: [.init(name: "U1", cell: "INV", connections: ["A": "in", "Y": "out"])])
+        let designData = try JSONEncoder().encode(design)
+        let library = TimingCoreTests.liberty.replacingOccurrences(of:
+            "index_2 (\"0.0\"); values (\"1.0\")", with: "index_2 (\"0.0, 4.0\"); values (\"1.0, 5.0\")")
+        let libraryData = Data(library.utf8)
+        let constraintsData = Data("create_clock -name clk -period 10ns [get_ports clk]\nset_output_delay 0ns -clock clk [get_ports out]\n".utf8)
+        let pdkData = try STATestProcessFactory.data(library: libraryData)
+        let parasiticData = Data("*C_UNIT 1 PF\n*D_NET external 999\n*CAP\n1 external:1 3\n2 external:1 external:2 7\n3 external:1 out 2\n*RES\n1 external:1 external:2 100\n*END\n".utf8)
+        let references = [
+            try artifact(path: "design.json", data: designData, kind: .netlist, format: .json),
+            try artifact(path: "library.lib", data: libraryData, kind: .timingLibrary, format: .liberty),
+            try artifact(path: "constraints.sdc", data: constraintsData, kind: .constraints, format: .sdc),
+            try artifact(path: "pdk.json", data: pdkData, kind: .technology, format: .json),
+            try artifact(path: "parasitics.spef", data: parasiticData, kind: .parasitics, format: .spef)
+        ]
+        let reader = InMemoryTimingArtifactReader(artifacts: Dictionary(uniqueKeysWithValues:
+            zip(references, [designData, libraryData, constraintsData, pdkData, parasiticData]).map { ($0.0.id, $0.1) }))
+        let staRequest = try STARequest(runID: "reduction-sta", design: references[0], topDesignName: "top",
+            libraries: [.init(artifact: references[1], cornerIDs: ["typical"])], constraints: references[2],
+            requestedModeIDs: ["functional"], requestedCornerIDs: ["typical"], pdkManifest: references[3],
+            processID: "test", pdkVersion: "1", parasitics: references[4])
+        let sta = try await NativeSTAEngine(reader: reader).execute(staRequest)
+        #expect(sta.status == .completed)
+        let slack = try #require(sta.payload.worstSetupSlack)
+        #expect(abs(slack - 7e-9) < 1e-20)
+        #expect(sta.payload.parasiticReduction?.effectiveLoads["out"] == 2e-12)
+        #expect(abs((sta.payload.parasiticReduction?.effectiveLoads["external"] ?? 0) - 5e-12) < 1e-25)
+        #expect(sta.payload.parasiticReduction?.collapsedIntraNetCapacitances.count == 1)
+        #expect(sta.diagnostics.contains { $0.code.rawValue == "timing.sta.intra_net_dynamic_capacitance_not_evaluated" })
+        #expect(try JSONDecoder().decode(STAExecutionResult.self, from: JSONEncoder().encode(sta)).payload.parasiticReduction == sta.payload.parasiticReduction)
+        let siRequest = try SignalIntegrityRequest(runID: "reduction-si", design: references[0], topDesignName: "top",
+            constraints: references[2], pdkManifest: references[3], processID: "test", pdkVersion: "1", parasitics: references[4])
+        let si = try await NativeSignalIntegrityEngine(reader: reader).execute(siRequest)
+        #expect(si.status == .completed)
+        #expect(si.payload.analyzedNets.count == 1)
+        let summary = try #require(si.payload.analyzedNets.first)
+        #expect(abs(summary.noiseRatio - 0.4) < 1e-15)
+        #expect(abs(summary.deltaDelay - 138e-12) < 1e-25)
+        #expect(si.payload.parasiticReduction == sta.payload.parasiticReduction)
+        #expect(si.diagnostics.contains { $0.code.rawValue == "timing.signal_integrity.intra_net_dynamic_capacitance_not_evaluated" })
+        #expect(try JSONDecoder().decode(SignalIntegrityExecutionResult.self, from: JSONEncoder().encode(si)).payload.parasiticReduction == si.payload.parasiticReduction)
     }
 
     private func artifact(

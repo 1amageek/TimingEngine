@@ -10,6 +10,7 @@ public struct STAPayload: Sendable, Hashable, Codable {
     public var criticalPaths: [STAPath]
     public var violations: [STAViolation]
     public var repairCandidates: [STARepairCandidate]
+    public var parasiticReduction: TimingParasiticReductionEvidence?
     public var provenance: TimingArtifactProvenance
     public var processSelection: STAProcessSelection?
 
@@ -22,6 +23,7 @@ public struct STAPayload: Sendable, Hashable, Codable {
         criticalPaths: [STAPath] = [],
         violations: [STAViolation] = [],
         repairCandidates: [STARepairCandidate] = [],
+        parasiticReduction: TimingParasiticReductionEvidence? = nil,
         provenance: TimingArtifactProvenance = TimingArtifactProvenance(),
         processSelection: STAProcessSelection? = nil
     ) {
@@ -33,6 +35,7 @@ public struct STAPayload: Sendable, Hashable, Codable {
         self.criticalPaths = criticalPaths
         self.violations = violations
         self.repairCandidates = repairCandidates
+        self.parasiticReduction = parasiticReduction
         self.provenance = provenance
         self.processSelection = processSelection
     }
@@ -46,6 +49,7 @@ public struct STAPayload: Sendable, Hashable, Codable {
         case criticalPaths
         case violations
         case repairCandidates
+        case parasiticReduction
         case provenance
         case processSelection
     }
@@ -61,6 +65,7 @@ public struct STAPayload: Sendable, Hashable, Codable {
             criticalPaths: try container.decode([STAPath].self, forKey: .criticalPaths),
             violations: try container.decode([STAViolation].self, forKey: .violations),
             repairCandidates: try container.decode([STARepairCandidate].self, forKey: .repairCandidates),
+            parasiticReduction: try container.decodeIfPresent(TimingParasiticReductionEvidence.self, forKey: .parasiticReduction),
             provenance: try container.decode(TimingArtifactProvenance.self, forKey: .provenance),
             processSelection: try container.decodeIfPresent(STAProcessSelection.self, forKey: .processSelection)
         )
@@ -76,6 +81,7 @@ public struct STAPayload: Sendable, Hashable, Codable {
         try container.encode(criticalPaths, forKey: .criticalPaths)
         try container.encode(violations, forKey: .violations)
         try container.encode(repairCandidates, forKey: .repairCandidates)
+        try container.encodeIfPresent(parasiticReduction, forKey: .parasiticReduction)
         try container.encode(provenance, forKey: .provenance)
         try container.encodeIfPresent(processSelection, forKey: .processSelection)
     }

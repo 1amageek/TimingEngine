@@ -10,7 +10,7 @@ public struct NativeSTAEngine: STAExecuting {
         supportedInputFormats: [.liberty, .json, .verilog, .sdc, .spef],
         supportedOutputFormats: [.json],
         features: ["foundation-request", "liberty-parsing", "sdc-parsing", "timing-graph", "mmmc-setup-hold", "recovery-removal", "pulse-width", "derate-ocv", "path-groups", "clock-groups", "provenance-digests", "artifact-persistence", "repair-candidates"],
-        limitations: ["advanced-statistical-ocv", "process-qualified-signoff"]
+        limitations: ["advanced-statistical-ocv", "process-qualified-signoff", "equipotential-cap-load", "distributed-rc-dynamics-not-evaluated"]
     )
 
     public typealias Request = STARequest
@@ -21,6 +21,7 @@ public struct NativeSTAEngine: STAExecuting {
     public let constraintParser: any TimingConstraintParsing
     public let designParser: any TimingDesignParsing
     public let parasiticParser: any TimingParasiticParsing
+    public let parasiticReducer: any TimingParasiticReducing
 
     public init(
         reader: (any TimingArtifactReading)? = nil,
@@ -29,7 +30,8 @@ public struct NativeSTAEngine: STAExecuting {
         libraryParser: any TimingLibraryParsing = LibertyParser(),
         constraintParser: any TimingConstraintParsing = SDCParser(),
         designParser: any TimingDesignParsing = TimingDesignParser(),
-        parasiticParser: any TimingParasiticParsing = SPEFParser()
+        parasiticParser: any TimingParasiticParsing = SPEFParser(),
+        parasiticReducer: any TimingParasiticReducing = EquipotentialTimingParasiticReducer()
     ) {
         self.reader = reader ?? FileSystemTimingArtifactReader(workspaceRoot: workspaceRoot)
         self.artifactStore = artifactStore
@@ -37,6 +39,7 @@ public struct NativeSTAEngine: STAExecuting {
         self.constraintParser = constraintParser
         self.designParser = designParser
         self.parasiticParser = parasiticParser
+        self.parasiticReducer = parasiticReducer
     }
 
     public func execute(_ request: STARequest) async throws -> STAExecutionResult {
@@ -58,12 +61,13 @@ public struct NativeSTAEngine: STAExecuting {
                     issues: provenanceIssues
                 )
             }
+            let reduced = try inputs.parasitics.map { try parasiticReducer.reduce($0) }
             let result = try analyze(
                 request: request,
                 design: inputs.design,
                 librariesByCorner: inputs.processInputs.librariesByCorner,
                 constraints: inputs.constraints,
-                parasitics: inputs.parasitics,
+                parasitics: reduced,
                 cornerIDs: inputs.cornerIDs,
                 modeIDs: inputs.modeIDs,
                 processSelection: inputs.processInputs.selection
@@ -206,7 +210,7 @@ public struct NativeSTAEngine: STAExecuting {
         design: TimingDesign,
         librariesByCorner: [String: TimingLibrary],
         constraints: [String: TimingConstraintSet],
-        parasitics: TimingParasitics?,
+        parasitics: TimingLumpedParasitics?,
         cornerIDs: [String],
         modeIDs: [String],
         processSelection: STAProcessSelection
@@ -253,6 +257,9 @@ public struct NativeSTAEngine: STAExecuting {
                 suggestedActions: ["provide_spef_artifact", "run_pex_before_signoff"]
             ))
         }
+        if let parasitics {
+            diagnostics.append(contentsOf: parasitics.evidence.diagnostics(prefix: "timing.sta"))
+        }
         let provenance = provenance(for: request)
         if !provenance.hasCoreDigests || provenance.libraryDigests.isEmpty {
             diagnostics.append(DesignDiagnostic(
@@ -292,6 +299,7 @@ public struct NativeSTAEngine: STAExecuting {
                     expectedImpact: violation.kind == .hold ? "Increase minimum data-path delay." : "Reduce late data-path delay."
                 )
             },
+            parasiticReduction: parasitics?.evidence,
             provenance: provenance,
             processSelection: processSelection
         )
@@ -338,7 +346,7 @@ public struct NativeSTAEngine: STAExecuting {
         design: TimingDesign,
         library: TimingLibrary,
         constraints: TimingConstraintSet,
-        parasitics: TimingParasitics?,
+        parasitics: TimingLumpedParasitics?,
         modeID: String,
         cornerID: String
     ) throws -> ScenarioResult {
@@ -367,8 +375,10 @@ public struct NativeSTAEngine: STAExecuting {
         }
         for net in design.nets { netLoad[net.name, default: 0] += net.capacitance }
         if let parasitics {
-            for network in parasitics.networks {
-                netLoad[network.name, default: 0] += network.totalCapacitance
+            for (net, load) in parasitics.effectiveLoads {
+                let aggregate = (netLoad[net] ?? 0) + load
+                guard aggregate.isFinite else { throw TimingError.invalidInput("STA net load overflow for '\(net)'.") }
+                netLoad[net] = aggregate
             }
         }
 
@@ -826,7 +836,7 @@ public struct NativeSTAEngine: STAExecuting {
                 sourceDesignDigest: request.canonicalDesignDigest?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
                 inputDesignDigest: request.design.digest.hexadecimalValue,
                 producerID: "timing.sta",
-                producerVersion: "1",
+                producerVersion: "2.0.0",
                 runID: request.runID
             )
         )
@@ -841,7 +851,7 @@ public struct NativeSTAEngine: STAExecuting {
             producer: ProducerIdentity(
                 kind: .engine,
                 identifier: "timing.sta",
-                version: "1.1.0",
+                version: "2.0.0",
                 build: TimingRuntimeIdentity.currentExecutableDigest()
             ),
             inputs: inputs,
@@ -849,7 +859,7 @@ public struct NativeSTAEngine: STAExecuting {
                 entryPoint: "STAEngine.NativeSTAEngine.execute"
             ),
             environment: try TimingRuntimeIdentity.environmentFingerprint(
-                toolchain: "timing.sta-1.1.0"
+                toolchain: "timing.sta-2.0.0"
             ),
             startedAt: startedAt,
             completedAt: completedAt
@@ -863,7 +873,7 @@ public struct NativeSTAEngine: STAExecuting {
         case .artifactDigestMismatch: return "timing.sta.artifact_digest_mismatch"
         case .artifactSizeMismatch: return "timing.sta.artifact_size_mismatch"
         case .artifactReadFailed: return "timing.sta.artifact_read_failed"
-        case .parseFailure, .spefOwnership: return "timing.sta.parse_failed"
+        case .parseFailure, .spefOwnership, .parasiticReduction: return "timing.sta.parse_failed"
         case .invalidInput: return "timing.sta.invalid_input"
         case .artifactWriteFailed: return "timing.sta.artifact_write_failed"
         case .invariantViolation: return "timing.sta.invariant_violation"

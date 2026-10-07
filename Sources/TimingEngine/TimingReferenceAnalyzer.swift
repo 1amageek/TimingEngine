@@ -13,7 +13,7 @@ public struct TimingReferenceAnalyzer: Sendable {
         let cells = try Dictionary(uniqueKeysWithValues: design.instances.map { instance in
             (instance.name, try library.cell(named: instance.cell))
         })
-        let netLoads = makeNetLoads(design: design, cells: cells, parasitics: parasitics)
+        let netLoads = try makeNetLoads(design: design, cells: cells, parasitics: parasitics)
         var cache: [String: EdgePair] = [:]
         var active = Set<String>()
 
@@ -113,7 +113,7 @@ public struct TimingReferenceAnalyzer: Sendable {
             throw TimingError.unsupportedSemantic(format: "Reference STA", semantic: "no constrained timing endpoints")
         }
         return TimingReferenceResult(
-            oracleID: "timing.reference.scalar-v1",
+            oracleID: "timing.reference.scalar-v2",
             worstSetupSlack: setupSlacks.min(),
             worstHoldSlack: holdSlacks.min()
         )
@@ -146,7 +146,7 @@ public struct TimingReferenceAnalyzer: Sendable {
         design: TimingDesign,
         cells: [String: TimingCell],
         parasitics: TimingParasitics?
-    ) -> [String: Double] {
+    ) throws -> [String: Double] {
         var loads: [String: Double] = [:]
         for instance in design.instances {
             guard let cell = cells[instance.name] else { continue }
@@ -156,8 +156,14 @@ public struct TimingReferenceAnalyzer: Sendable {
             }
         }
         for net in design.nets { loads[net.name, default: 0] += net.capacitance }
-        for network in parasitics?.networks ?? [] {
-            loads[network.name, default: 0] += network.totalCapacitance
+        if let parasitics {
+            let reduced = try EquipotentialTimingParasiticReducer().reduce(parasitics)
+            for (net, capacitance) in reduced.effectiveLoads {
+                loads[net, default: 0] += capacitance
+                guard loads[net]?.isFinite == true else {
+                    throw TimingError.parasiticReduction(.numericOverflow(net: net))
+                }
+            }
         }
         return loads
     }

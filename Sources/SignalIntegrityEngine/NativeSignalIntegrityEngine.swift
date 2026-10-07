@@ -10,7 +10,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
         supportedInputFormats: [.json, .verilog, .sdc, .spef],
         supportedOutputFormats: [.json],
         features: ["foundation-request", "coupling-capacitance", "delta-delay", "noise-ratio", "provenance-digests", "artifact-persistence"],
-        limitations: ["waveform-resolved-noise", "process-qualified-signoff"]
+        limitations: ["waveform-resolved-noise", "process-qualified-signoff", "equipotential-cap-load", "distributed-rc-dynamics-not-evaluated"]
     )
 
     public typealias Request = SignalIntegrityRequest
@@ -19,18 +19,21 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
     public let artifactStore: (any TimingArtifactStoring)?
     public let parasiticParser: any TimingParasiticParsing
     public let constraintParser: any TimingConstraintParsing
+    public let parasiticReducer: any TimingParasiticReducing
 
     public init(
         reader: (any TimingArtifactReading)? = nil,
         artifactStore: (any TimingArtifactStoring)? = nil,
         workspaceRoot: URL? = nil,
         parasiticParser: any TimingParasiticParsing = SPEFParser(),
-        constraintParser: any TimingConstraintParsing = SDCParser()
+        constraintParser: any TimingConstraintParsing = SDCParser(),
+        parasiticReducer: any TimingParasiticReducing = EquipotentialTimingParasiticReducer()
     ) {
         self.reader = reader ?? FileSystemTimingArtifactReader(workspaceRoot: workspaceRoot)
         self.artifactStore = artifactStore
         self.parasiticParser = parasiticParser
         self.constraintParser = constraintParser
+        self.parasiticReducer = parasiticReducer
     }
 
     public func execute(_ request: SignalIntegrityRequest) async throws -> SignalIntegrityExecutionResult {
@@ -64,25 +67,24 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
                     issues: provenanceIssues
                 )
             }
-            if parasitics.couplings.contains(where: { parasitics.network(named: $0.firstNet)?.resistance ?? 0 <= 0 }) {
-                throw TimingError.unsupportedSemantic(
-                    format: "SPEF",
-                    semantic: "coupling delta delay without victim resistance"
-                )
-            }
-            let summaries = parasitics.couplings.map { coupling in
-                let victim = parasitics.network(named: coupling.firstNet)
-                let ground = max(victim?.groundCapacitance ?? 0, Double.leastNonzeroMagnitude)
-                let resistance = max(victim?.resistance ?? 0, 0)
-                let noiseRatio = coupling.capacitance / (ground + coupling.capacitance)
-                let deltaDelay = 0.69 * resistance * coupling.capacitance
-                return SINetSummary(
-                    victimNet: coupling.firstNet,
-                    aggressorNet: coupling.secondNet,
-                    couplingCapacitance: coupling.capacitance,
-                    noiseRatio: noiseRatio,
-                    deltaDelay: deltaDelay
-                )
+            let reduced = try parasiticReducer.reduce(parasitics)
+            var summaries: [SINetSummary] = []
+            for coupling in reduced.couplings {
+                for victimNet in coupling.declaredVictims {
+                    guard let victim = parasitics.network(named: victimNet), victim.resistanceInventory > 0 else {
+                        throw TimingError.unsupportedSemantic(format: "SPEF", semantic: "coupling delta delay without victim resistance")
+                    }
+                    let ground = reduced.groundCapacitances[victimNet] ?? 0
+                    let denominator = ground + coupling.capacitance
+                    let noiseRatio = denominator == 0 ? 0 : coupling.capacitance / denominator
+                    let deltaDelay = 0.69 * victim.resistanceInventory * coupling.capacitance
+                    guard denominator.isFinite, noiseRatio.isFinite, deltaDelay.isFinite else {
+                        throw TimingError.invalidInput("Signal-integrity numerical aggregate overflow.")
+                    }
+                    summaries.append(SINetSummary(victimNet: victimNet,
+                        aggressorNet: coupling.firstNet == victimNet ? coupling.secondNet : coupling.firstNet,
+                        couplingCapacitance: coupling.capacitance, noiseRatio: noiseRatio, deltaDelay: deltaDelay))
+                }
             }
             let violations = summaries.filter {
                 $0.deltaDelay > request.maxDeltaDelay || $0.noiseRatio > request.maxNoiseRatio
@@ -117,6 +119,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
                 analyzedModes: modeIDs,
                 analyzedNets: summaries,
                 violations: violations,
+                parasiticReduction: reduced.evidence,
                 provenance: provenance
             )
             var artifactBindings: [TimingArtifactBinding] = []
@@ -145,7 +148,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
                     ),
                     suggestedActions: violation.suggestedActions.map { SuggestedAction(code: $0, summary: $0) }
                 )
-            } + provenanceDiagnostics
+            } + provenanceDiagnostics + reduced.evidence.diagnostics(prefix: "timing.signal_integrity")
             return try SignalIntegrityExecutionResult(
                 runID: request.runID,
                 status: .completed,
@@ -246,7 +249,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
 
     private func code(for error: TimingError) -> String {
         switch error {
-        case .parseFailure, .spefOwnership: return "timing.signal_integrity.parse_failed"
+        case .parseFailure, .spefOwnership, .parasiticReduction: return "timing.signal_integrity.parse_failed"
         case .missingArtifact: return "timing.signal_integrity.missing_artifact"
         case .artifactReadFailed: return "timing.signal_integrity.artifact_read_failed"
         case .artifactDigestMismatch: return "timing.signal_integrity.artifact_digest_mismatch"
@@ -267,7 +270,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
             producer: ProducerIdentity(
                 kind: .engine,
                 identifier: "timing.signal-integrity",
-                version: "1.1.0",
+                version: "2.0.0",
                 build: TimingRuntimeIdentity.currentExecutableDigest()
             ),
             inputs: inputs,
@@ -275,7 +278,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
                 entryPoint: "SignalIntegrityEngine.NativeSignalIntegrityEngine.execute"
             ),
             environment: try TimingRuntimeIdentity.environmentFingerprint(
-                toolchain: "timing.signal-integrity-1.1.0"
+                toolchain: "timing.signal-integrity-2.0.0"
             ),
             startedAt: startedAt,
             completedAt: completedAt
@@ -290,7 +293,7 @@ public struct NativeSignalIntegrityEngine: SignalIntegrityExecuting {
                 sourceDesignDigest: request.canonicalDesignDigest?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
                 inputDesignDigest: request.design.digest.hexadecimalValue,
                 producerID: "timing.signal-integrity",
-                producerVersion: "1",
+                producerVersion: "2.0.0",
                 runID: request.runID
             )
         )

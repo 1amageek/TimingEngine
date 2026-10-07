@@ -53,7 +53,7 @@ let package = Package(
                 .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"),
                 .product(name: "CircuiteFoundationFileSystem", package: "CircuiteFoundation")
             ],
-            exclude: ["DESIGN.md"]
+            exclude: ["DESIGN.md", "ParasiticReduction/DESIGN.md"]
         ),
         .target(
             name: "STAEngine",
@@ -74,7 +74,8 @@ let package = Package(
                 "TimingCore",
                 .product(name: "LogicIR", package: "LogicDesign"),
                 .product(name: "PDKCore", package: "PDKKit")
-            ]
+            ],
+            exclude: ["DESIGN.md"]
         ),
         .target(
             name: "TimingEngine",

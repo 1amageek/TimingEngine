@@ -233,9 +233,9 @@ struct TimingCoreTests {
         """
         let parasitics = try SPEFParser().parse(Data(spef.utf8))
         #expect(parasitics.network(named: "n1")?.groundCapacitance == 0.02e-12)
-        #expect(parasitics.couplings.first?.firstNet == "n1")
-        #expect(parasitics.couplings.first?.secondNet == "n2")
-        #expect(parasitics.network(named: "n1")?.resistance == 10)
+        #expect(parasitics.network(named: "n1")?.capacitances.last?.first.ownerNet == "n1")
+        #expect(parasitics.network(named: "n1")?.capacitances.last?.second?.ownerNet == "n2")
+        #expect(parasitics.network(named: "n1")?.resistanceInventory == 10)
     }
 
     @Test("SPEF rejects malformed units and numeric entries")

@@ -4,7 +4,7 @@ import TimingCore
 
 /// Inputs for a static timing analysis execution.
 public struct STARequest: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = SchemaVersion.v2
+    public static let currentSchemaVersion = SchemaVersion.v3
 
     public let schemaVersion: SchemaVersion
     public let runID: String

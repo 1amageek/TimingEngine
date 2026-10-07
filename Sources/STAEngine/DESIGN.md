@@ -35,6 +35,15 @@ and canonical validation uses that corner's library. The payload retains the
 validated selection, and the persisted report round-trips that same value.
 Rejected inputs publish no report. Detailed intake rules belong to ProcessCorners.
 
+Native cap-load analysis consumes TimingCore's explicit equipotential reduction.
+All derived load keys contribute to cell LUT load, including external roots absent
+from D_NET coverage. D_NET declared inventory is never a load. The payload retains
+reduction evidence with exact parasitic input identity; diagnostics and capability
+limitations expose distributed RC/intra-net dynamic loss and header disagreement.
+Producer algorithm identity is 2.0.0 and request/result schema is v3; old evidence
+cannot claim the new algorithm scope. Completion is a cap-load observation, not
+distributed post-layout signoff or process qualification.
+
 ## Runtime Flows
 
 Verified manifest/source reads precede canonical validation and analysis. Only

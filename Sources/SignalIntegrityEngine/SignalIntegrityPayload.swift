@@ -8,6 +8,7 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
     public var analyzedModes: [String]
     public var analyzedNets: [SINetSummary]
     public var violations: [SIViolation]
+    public var parasiticReduction: TimingParasiticReductionEvidence?
     public var provenance: TimingArtifactProvenance
 
     public init(
@@ -17,6 +18,7 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
         analyzedModes: [String] = [],
         analyzedNets: [SINetSummary] = [],
         violations: [SIViolation] = [],
+        parasiticReduction: TimingParasiticReductionEvidence? = nil,
         provenance: TimingArtifactProvenance = TimingArtifactProvenance()
     ) {
         self.violationCount = violationCount
@@ -25,6 +27,7 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
         self.analyzedModes = analyzedModes
         self.analyzedNets = analyzedNets
         self.violations = violations
+        self.parasiticReduction = parasiticReduction
         self.provenance = provenance
     }
 
@@ -35,6 +38,7 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
         case analyzedModes
         case analyzedNets
         case violations
+        case parasiticReduction
         case provenance
     }
 
@@ -47,6 +51,7 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
             analyzedModes: try container.decode([String].self, forKey: .analyzedModes),
             analyzedNets: try container.decode([SINetSummary].self, forKey: .analyzedNets),
             violations: try container.decode([SIViolation].self, forKey: .violations),
+            parasiticReduction: try container.decodeIfPresent(TimingParasiticReductionEvidence.self, forKey: .parasiticReduction),
             provenance: try container.decode(TimingArtifactProvenance.self, forKey: .provenance)
         )
     }
@@ -59,6 +64,7 @@ public struct SignalIntegrityPayload: Sendable, Hashable, Codable {
         try container.encode(analyzedModes, forKey: .analyzedModes)
         try container.encode(analyzedNets, forKey: .analyzedNets)
         try container.encode(violations, forKey: .violations)
+        try container.encodeIfPresent(parasiticReduction, forKey: .parasiticReduction)
         try container.encode(provenance, forKey: .provenance)
     }
 }
