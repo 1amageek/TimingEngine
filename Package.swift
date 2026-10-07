@@ -8,7 +8,7 @@ let logicDesignDependency: Package.Dependency = .package(
 
 let pdkKitDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/PDKKit.git",
-    revision: "c2b143f566b1e92308dfdebb2764067a141da75a"
+    revision: "04a0be1c6e977ee67346680081cf4967b84f8fb7"
 )
 
 let signoffToolSupportDependency: Package.Dependency = .package(
