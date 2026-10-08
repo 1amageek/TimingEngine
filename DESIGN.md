@@ -80,3 +80,16 @@ TimingEngine depends on the portable `CircuiteFoundation` contracts and opts int
 - Concrete `.xcircuite` storage
 
 The scalar correlation analyzer consumes the same published cap-load reduction contract through TimingParasiticReducing and identifies the changed load semantics as `timing.reference.scalar-v2`. Its numerical correlation remains local model evidence, not distributed RC or process-qualified signoff.
+
+## Exact PDK Identity Dependency Adoption
+
+[Package.swift](Package.swift) owns the exact revisions consumed by this package.
+This adoption consumes the updated PDKCore product directly or transitively.
+[Checked PDK identity values](../PDKKit/Sources/PDKCore/Identity/DESIGN.md)
+and their immutable schema-2 representation remain owned by the lower contract.
+Manifest discovery/exact loading remains owned by
+[PDKDiscovery](../PDKKit/Sources/PDKDiscovery/ManifestLoading/DESIGN.md).
+Transitive revisions must agree with the composing Xcircuite graph without overrides.
+This dependency change preserves this package's domain implementation; lower
+behavioral evidence and host identity/provenance tests establish the consumed
+contract, not process qualification or unexecuted domain test coverage.
