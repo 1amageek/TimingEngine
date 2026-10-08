@@ -67,3 +67,22 @@ checks between sources. Limits are explicit source count and request scenarios.
 uses the actual native API to distinguish corner delays and reject invalid inputs.
 Parent owns CLI and retained report reconstruction. A mapping/selection change
 requires parent scenario and caller regression verification.
+
+### Proposed common-profile consumption handoff
+
+The current native intake already proves the corner-to-Liberty/PVT guarantees
+above; preserve them. The proposed
+[PDK profile](../../../../PDKKit/Sources/PDKCore/Profile/DESIGN.md) supplies the
+explicit stage subset and parent selection identity. Native intake returns its
+actual STAProcessSelection plus exact source/section evidence for comparison by
+[profile admission](../../../../PDKKit/Sources/PDKProfileAdmission/DESIGN.md).
+Do not replace current source checks with a profile success flag. A requested
+corner/library must match the profile projection as well as the manifest.
+Manifest, selected libraries and operating-condition evidence remain in provenance;
+unrelated optional profile sources need not be analyzed. Retained PVT remains
+source-bound declaration evidence rather than independent foundry proof.
+
+STAProcessCornerTests adds wrong parent profile, wrong required subset, altered
+PVT/library identity and extra contributing source refusal. Domain result/request
+schemas advance only when new consumed-profile fields are implemented, and their
+callers/retained readers migrate together without legacy fallback.
