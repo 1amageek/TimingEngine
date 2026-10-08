@@ -1,10 +1,27 @@
 # TimingEngine Design
 
-## Purpose
+## Purpose and Scope
 
 TimingEngine owns canonical timing data, MMMC static timing analysis, signal-integrity analysis, retained observations and independent-oracle correlation.
 
-## Responsibility boundary
+Parent: [LSI](../DESIGN.md). Direct affected module children are indexed below;
+each child owns its implementation and verification contract.
+
+## Related Designs
+
+| Design | Relationship | Contract Used | Summary | Cautions |
+|---|---|---|---|---|
+| [LSI](../DESIGN.md) | parent | Domain versus host/trust authority | Platform composition | Timing evidence is not approval |
+| [TimingCore](Sources/TimingCore/DESIGN.md) | child | Canonical values and owned Liberty codec | Independent domain floor | No PDK reverse dependency |
+| [STAEngine](Sources/STAEngine/DESIGN.md) | child | Exact native STA and proposed preparation | Scenario execution | New interfaces/schema pending |
+| [SignalIntegrityEngine](Sources/SignalIntegrityEngine/DESIGN.md) | child | Coupling analysis | Separate domain result | STA prepared proof does not generalize |
+| [TimingPDKProfileInspection](Sources/TimingPDKProfileInspection/DESIGN.md) | proposed child | Owned Liberty/profile adapter | Optional product boundary | Not added to manifest yet |
+
+## Responsibilities and Boundaries
+
+Own domain meaning and execution; host owns persistence and flow/trust policy.
+
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -17,7 +34,9 @@ flowchart LR
 
 TimingEngine can report that a retained corpus or oracle comparison agrees for a declared scope. It does not decide that a tool is production-qualified and does not approve a release. `ToolQualification` validates raw process evidence. `DesignFlowKernel` applies flow policy and approval. `Xcircuite` owns concrete workspace and run persistence.
 
-## Trust model
+## Contracts and Invariants
+
+### Trust model
 
 The following states are independent:
 
@@ -70,6 +89,11 @@ the selection preserves location-independent identity. Missing or contradictory
 process/corner inputs block before report publication. No default corner is
 invented and libraries from different corners are never merged for analysis.
 
+Proposed optional [TimingPDKProfileInspection](Sources/TimingPDKProfileInspection/DESIGN.md)
+is a direct module child and owns the Liberty/profile adapter and retained grammar
+catalog. TimingCore stays independent of PDKKit. STAEngine indexes its proposed
+prepared handoff. Neither connection is implemented yet.
+
 TimingEngine depends on the portable `CircuiteFoundation` contracts and opts into Foundation, Crypto, and FileSystem products only in targets that perform serialization, digesting, or local access. It does not import Xcircuite or circuit-studio. ToolQualification remains a downstream trust consumer and is not a dependency of TimingCore.
 
 ## Non-responsibilities
@@ -94,3 +118,11 @@ Transitive revisions must agree with the composing Xcircuite graph without overr
 This dependency change preserves this package's domain implementation; lower
 behavioral evidence and host identity/provenance tests establish the consumed
 contract, not process qualification or unexecuted domain test coverage.
+
+## Verification and Change Impact
+
+TimingCore and STAEngine own their affected behavioral tests and new prepared-path
+completion conditions. The optional adapter owns independent real-admission tests;
+Xcircuite owns cumulative normal-graph/CLI/resume integration. Existing codec and
+strict corner proof is reused until its assumptions change. Proposed interfaces,
+products and schema v4 are design only, with no new runtime acceptance claim.

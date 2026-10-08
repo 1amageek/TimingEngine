@@ -11,6 +11,11 @@ Signal-integrity execution follows the same direct-conformance pattern. Requests
 
 There is no compatibility envelope or runtime adapter layer. Native implementations conform to the public engine protocols directly.
 
+Proposed native preparation and exact execution interfaces are owned by
+[PreparedExecution](Sources/STAEngine/PreparedExecution/DESIGN.md).
+Their source/configuration/characterization contracts and schema v4 migration are
+not implemented yet. Existing STAExecuting remains the direct engine interface.
+
 Callers initialize `NativeSTAEngine` or `NativeSignalIntegrityEngine` directly,
 or inject protocol-conforming implementations into `TimingEngineService`.
 Each native engine owns its `TimingCapability` declaration. Capability records

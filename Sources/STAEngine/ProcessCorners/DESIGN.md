@@ -18,6 +18,7 @@ does not characterize timing models or qualify a process.
 |---|---|---|---|---|
 | [STAEngine](../DESIGN.md) | parent / used by | Request and asynchronous artifact reader | Native scenario intake | Failure precedes analysis/report publication |
 | [PDKKit](../../../../PDKKit/DESIGN.md) | depends on | PDKManifest, corner PVT and Liberty view mapping | Process authority | Cross-view mapping and exact content are required |
+| [Prepared execution](../PreparedExecution/DESIGN.md) | used by | Exact selected source/library join | Proposed config/characterization selection | Preserve strict declared corner equality |
 
 ## Architecture
 
@@ -81,6 +82,11 @@ corner/library must match the profile projection as well as the manifest.
 Manifest, selected libraries and operating-condition evidence remain in provenance;
 unrelated optional profile sources need not be analyzed. Retained PVT remains
 source-bound declaration evidence rather than independent foundry proof.
+
+The prepared boundary owns declared-corner versus raw-characterization meaning.
+This component exports validated declaration evidence; it must not fill raw process
+or runtime conditions from the selected corner. Implementation consumes the retained
+actually parsed library catalog rather than independently reparsing it.
 
 STAProcessCornerTests adds wrong parent profile, wrong required subset, altered
 PVT/library identity and extra contributing source refusal. Domain result/request

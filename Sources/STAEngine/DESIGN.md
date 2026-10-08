@@ -4,6 +4,7 @@
 
 Own native static timing analysis. Parent: [TimingEngine](../../DESIGN.md).
 Child: [ProcessCorners](ProcessCorners/DESIGN.md).
+Child: [PreparedExecution](PreparedExecution/DESIGN.md), proposed.
 
 ## Responsibilities and Boundaries
 
@@ -18,6 +19,7 @@ flow approval, extraction and physical mutation remain outside this module.
 |---|---|---|---|---|
 | [Package](../../DESIGN.md) | parent | Raw observations and trust ownership | Native analysis | Completion is not process qualification |
 | [ProcessCorners](ProcessCorners/DESIGN.md) | child | Validated per-corner library and selection | Scenario input admission | Never merge libraries across corners |
+| [PreparedExecution](PreparedExecution/DESIGN.md) | child | Proposed prepared input/configuration and scenario execution | Native handoff | APIs/schema v4 remain unimplemented |
 | [PDKKit](../../../PDKKit/DESIGN.md) | depends on | Manifest validation and exact corner mappings | Process authority | PDK identity must match the request |
 
 ## Architecture
