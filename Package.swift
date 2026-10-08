@@ -53,7 +53,7 @@ let package = Package(
                 .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"),
                 .product(name: "CircuiteFoundationFileSystem", package: "CircuiteFoundation")
             ],
-            exclude: ["DESIGN.md", "ParasiticReduction/DESIGN.md"]
+            exclude: ["DESIGN.md", "ParasiticReduction/DESIGN.md", "LibertyCodec/DESIGN.md"]
         ),
         .target(
             name: "STAEngine",
@@ -109,6 +109,7 @@ let package = Package(
                 .product(name: "SignoffToolSupport", package: "SignoffToolSupport"),
             ]
         ),
+        .testTarget(name: "LibertyCodecTests", dependencies: ["TimingCore"]),
         .testTarget(
             name: "TimingEngineTests",
             dependencies: [

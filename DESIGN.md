@@ -49,7 +49,8 @@ Correlation artifacts keep location-independent `ArtifactReference` identity sep
 
 ## Dependency direction
 
-[TimingCore](Sources/TimingCore/DESIGN.md) owns source-preserving strict Liberty
+[TimingCore](Sources/TimingCore/DESIGN.md), through its native
+[LibertyCodec](Sources/TimingCore/LibertyCodec/DESIGN.md) component, owns source-preserving strict Liberty
 characterization and checked load/slew evaluation consumed by CTS. Ordinary STA
 parsing cannot establish that strict source-admission contract.
 

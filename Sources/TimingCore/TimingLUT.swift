@@ -6,19 +6,39 @@ public struct TimingLUT: Sendable, Hashable, Codable {
     public let values: [[Double]]
 
     public init(inputSlews: [Double], outputLoads: [Double], values: [[Double]]) throws {
+        try self.init(inputSlews: inputSlews, outputLoads: outputLoads, values: values, checking: {})
+    }
+
+    /// The owned codec supplies a cooperative callback before each validation step.
+    init(inputSlews: [Double], outputLoads: [Double], values: [[Double]],
+         checking: () throws -> Void) throws {
+        try checking()
         guard !inputSlews.isEmpty, !outputLoads.isEmpty else {
             throw TimingError.invalidInput("A timing LUT needs at least one sample on both axes.")
         }
-        guard values.count == inputSlews.count,
-              values.allSatisfy({ $0.count == outputLoads.count }) else {
+        guard values.count == inputSlews.count else {
             throw TimingError.invalidInput("Timing LUT values do not match the declared axes.")
         }
-        guard Self.isStrictlyAscending(inputSlews), Self.isStrictlyAscending(outputLoads) else {
-            throw TimingError.invalidInput("Timing LUT axes must be strictly ascending.")
+        for row in values {
+            try checking()
+            guard row.count == outputLoads.count else {
+                throw TimingError.invalidInput("Timing LUT values do not match the declared axes.")
+            }
         }
-        guard inputSlews.allSatisfy(\.isFinite), outputLoads.allSatisfy(\.isFinite),
-              values.flatMap({ $0 }).allSatisfy(\.isFinite) else {
-            throw TimingError.invalidInput("Timing LUT values and axes must be finite.")
+        func validateAxis(_ axis: [Double]) throws {
+            guard axis.count > 1 else { return }
+            for index in 1..<axis.count {
+                try checking()
+                guard axis[index - 1] < axis[index] else {
+                    throw TimingError.invalidInput("Timing LUT axes must be strictly ascending.")
+                }
+            }
+        }
+        try validateAxis(inputSlews); try validateAxis(outputLoads)
+        for value in inputSlews { try checking(); guard value.isFinite else { throw TimingError.invalidInput("Timing LUT values and axes must be finite.") } }
+        for value in outputLoads { try checking(); guard value.isFinite else { throw TimingError.invalidInput("Timing LUT values and axes must be finite.") } }
+        for row in values {
+            for value in row { try checking(); guard value.isFinite else { throw TimingError.invalidInput("Timing LUT values and axes must be finite.") } }
         }
         self.inputSlews = inputSlews
         self.outputLoads = outputLoads
