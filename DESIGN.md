@@ -13,9 +13,9 @@ each child owns its implementation and verification contract.
 |---|---|---|---|---|
 | [LSI](../DESIGN.md) | parent | Domain versus host/trust authority | Platform composition | Timing evidence is not approval |
 | [TimingCore](Sources/TimingCore/DESIGN.md) | child | Canonical values and owned Liberty codec | Independent domain floor | No PDK reverse dependency |
-| [STAEngine](Sources/STAEngine/DESIGN.md) | child | Exact native STA and proposed preparation | Scenario execution | New interfaces/schema pending |
+| [STAEngine](Sources/STAEngine/DESIGN.md) | child | Exact native STA and preparation | Scenario execution | Prepared interfaces and v4 schema |
 | [SignalIntegrityEngine](Sources/SignalIntegrityEngine/DESIGN.md) | child | Coupling analysis | Separate domain result | STA prepared proof does not generalize |
-| [TimingPDKProfileInspection](Sources/TimingPDKProfileInspection/DESIGN.md) | proposed child | Owned Liberty/profile adapter | Optional product boundary | Not added to manifest yet |
+| [TimingPDKProfileInspection](Sources/TimingPDKProfileInspection/DESIGN.md) | child | Owned Liberty/profile adapter | Optional product boundary | Optional product |
 
 ## Responsibilities and Boundaries
 
@@ -77,7 +77,7 @@ parsing cannot establish that strict source-admission contract.
 owns explicit equipotential approximation over preserved source inventory. Native
 STA and [SignalIntegrityEngine](Sources/SignalIntegrityEngine/DESIGN.md) retain its
 loss evidence. D_NET inventory is not an effective load. Native algorithm identity
-2.0.0 and request/result v3 prevent old result-scope reuse; distributed post-layout
+3.0.0 and request/result v4 prevent old result-scope reuse; distributed post-layout
 signoff remains outside this approximate cap-load scope.
 
 Native STA process/corner intake is owned by
@@ -89,10 +89,10 @@ the selection preserves location-independent identity. Missing or contradictory
 process/corner inputs block before report publication. No default corner is
 invented and libraries from different corners are never merged for analysis.
 
-Proposed optional [TimingPDKProfileInspection](Sources/TimingPDKProfileInspection/DESIGN.md)
+Optional [TimingPDKProfileInspection](Sources/TimingPDKProfileInspection/DESIGN.md)
 is a direct module child and owns the Liberty/profile adapter and retained grammar
-catalog. TimingCore stays independent of PDKKit. STAEngine indexes its proposed
-prepared handoff. Neither connection is implemented yet.
+catalog. TimingCore stays independent of PDKKit. STAEngine indexes its
+prepared handoff. Both connections are implemented.
 
 TimingEngine depends on the portable `CircuiteFoundation` contracts and opts into Foundation, Crypto, and FileSystem products only in targets that perform serialization, digesting, or local access. It does not import Xcircuite or circuit-studio. ToolQualification remains a downstream trust consumer and is not a dependency of TimingCore.
 
@@ -124,5 +124,5 @@ contract, not process qualification or unexecuted domain test coverage.
 TimingCore and STAEngine own their affected behavioral tests and new prepared-path
 completion conditions. The optional adapter owns independent real-admission tests;
 Xcircuite owns cumulative normal-graph/CLI/resume integration. Existing codec and
-strict corner proof is reused until its assumptions change. Proposed interfaces,
-products and schema v4 are design only, with no new runtime acceptance claim.
+strict corner proof is reused until its assumptions change. Prepared interfaces, optional product and v4 schema retain actual execution observations;
+native behavioral scope remains distinct from qualification.

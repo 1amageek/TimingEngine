@@ -11,10 +11,10 @@ Signal-integrity execution follows the same direct-conformance pattern. Requests
 
 There is no compatibility envelope or runtime adapter layer. Native implementations conform to the public engine protocols directly.
 
-Proposed native preparation and exact execution interfaces are owned by
+Native preparation and exact execution interfaces are owned by
 [PreparedExecution](Sources/STAEngine/PreparedExecution/DESIGN.md).
 Their source/configuration/characterization contracts and schema v4 migration are
-not implemented yet. Existing STAExecuting remains the direct engine interface.
+implemented. STAExecuting remains the direct engine interface.
 
 Callers initialize `NativeSTAEngine` or `NativeSignalIntegrityEngine` directly,
 or inject protocol-conforming implementations into `TimingEngineService`.
@@ -83,3 +83,24 @@ owns approval and resume transitions.
 
 `TimingEngineService.nativeCapabilities` aggregates native capability records
 for the CLI without acting as an engine factory.
+
+## Prepared native STA
+
+`NativeSTAEngine` conforms directly to `STAExecutionPreparing` and
+`STAPreparedExecuting`. Call `prepare(request, resources:)`, compare the actual
+prepared observations, then `execute(prepared)`. `STAExecutionResources` supplies
+one verified reader, optional `TimingInspectedLibertySources`, owned grammar limits
+and accounting, and independent native transform/scenario ceilings. Prepared owner
+construction is internal and non-Codable. Execution never reopens artifact paths.
+
+`STARequest`, `STAExecutionResult` and report payload use schema v4. The request
+configuration digest is only an expectation; effective provenance is produced from
+resolved settings. `STACharacterizationPolicy.declaredCornerSelection` retains raw
+source facts and exact declared selection. `requireObservedConditions` requires
+one explicit `STACharacterizationBinding` per corner and exact voltage/temperature
+match. Numeric process remains unmapped. Supplied randomSeed is unsupported.
+
+The CLI accepts `--condition`, `--max-paths` and
+`--expected-configuration-digest`; condition selects the observed policy. Native
+actual config/characterization records are present in emitted v4 results. Old
+schemas are rejected by the canonical reader, including external correlation.

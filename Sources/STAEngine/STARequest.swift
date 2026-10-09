@@ -4,7 +4,7 @@ import TimingCore
 
 /// Inputs for a static timing analysis execution.
 public struct STARequest: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = SchemaVersion.v3
+    public static let currentSchemaVersion = SchemaVersion(major: 4, minor: 0, patch: 0)
 
     public let schemaVersion: SchemaVersion
     public let runID: String
@@ -27,6 +27,8 @@ public struct STARequest: Sendable, Hashable, Codable {
     public let variation: STAVariation
     public let configurationDigest: ContentDigest?
     public let randomSeed: UInt64?
+    public let characterizationPolicy: STACharacterizationPolicy
+    public let characterizationBindings: [STACharacterizationBinding]
 
     public var artifactBindings: [TimingArtifactBinding] {
         [design]
@@ -54,7 +56,9 @@ public struct STARequest: Sendable, Hashable, Codable {
         requiresPostLayoutInputs: Bool = false,
         variation: STAVariation = STAVariation(),
         configurationDigest: ContentDigest? = nil,
-        randomSeed: UInt64? = nil
+        randomSeed: UInt64? = nil,
+        characterizationPolicy: STACharacterizationPolicy = .declaredCornerSelection,
+        characterizationBindings: [STACharacterizationBinding] = []
     ) throws {
         guard !runID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !topDesignName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -98,6 +102,8 @@ public struct STARequest: Sendable, Hashable, Codable {
         self.variation = variation
         self.configurationDigest = configurationDigest
         self.randomSeed = randomSeed
+        self.characterizationPolicy = characterizationPolicy
+        self.characterizationBindings = characterizationBindings
         self.inputs = ([design]
             + libraries.map(\.artifact)
             + [constraints, pdkManifest]
@@ -143,7 +149,9 @@ public struct STARequest: Sendable, Hashable, Codable {
                 ContentDigest.self,
                 forKey: .configurationDigest
             ),
-            randomSeed: container.decodeIfPresent(UInt64.self, forKey: .randomSeed)
+            randomSeed: container.decodeIfPresent(UInt64.self, forKey: .randomSeed),
+            characterizationPolicy: container.decode(STACharacterizationPolicy.self, forKey: .characterizationPolicy),
+            characterizationBindings: container.decode([STACharacterizationBinding].self, forKey: .characterizationBindings)
         )
         guard decodedInputs == inputs else {
             throw DecodingError.dataCorruptedError(

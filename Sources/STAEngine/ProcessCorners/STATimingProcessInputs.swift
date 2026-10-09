@@ -2,21 +2,25 @@ import CircuiteFoundation
 import Foundation
 import PDKCore
 import TimingCore
+import TimingPDKProfileInspection
 
 struct STATimingProcessInputs: Sendable {
     let librariesByCorner: [String: TimingLibrary]
     let selection: STAProcessSelection
+    let sourcesByCorner: [String: OwnedLibertySource]
 
     static func load(
         _ request: STARequest,
         reader: any TimingArtifactReading,
-        parser: any TimingLibraryParsing
+        parser: any LibertySourceParsing,
+        resources: STAExecutionResources
     ) async throws -> Self {
         guard request.pdkManifest.descriptor.role == .input,
               request.pdkManifest.descriptor.format == .json,
               request.pdkManifest.digest.algorithm == .sha256 else {
             throw TimingError.invalidInput("STA requires an input-role SHA-256 JSON process manifest.")
         }
+        guard request.pdkManifest.byteCount <= resources.limits.maximumInputBytes else { throw STAPreparationError.capacity("Manifest input exceeds native transform byte ceiling") }
         let data = try await reader.read(request.pdkManifest)
         let manifest: PDKManifest
         do { manifest = try PDKManifestCodec.decode(data: data) }
@@ -36,6 +40,7 @@ struct STATimingProcessInputs: Sendable {
         let assets = Dictionary(uniqueKeysWithValues: manifest.assets.map { ($0.assetID, $0) })
         var libraries: [String: TimingLibrary] = [:]
         var references: [String: ArtifactReference] = [:]
+        var sources: [String: OwnedLibertySource] = [:]
         for reference in request.libraries {
             try Task.checkCancellation()
             guard !reference.cornerIDs.isEmpty,
@@ -70,8 +75,30 @@ struct STATimingProcessInputs: Sendable {
                 }
                 references[cornerID] = reference.artifact.reference
             }
-            let parsed = try parser.parse(try await reader.read(reference.artifact))
-            for cornerID in reference.cornerIDs { libraries[cornerID] = parsed }
+            let source: OwnedLibertySource
+            if let catalog = resources.inspectedSources {
+                source = try catalog.source(for: reference.artifact.reference)
+            } else {
+                guard reference.artifact.byteCount <= resources.limits.maximumInputBytes else { throw STAPreparationError.capacity("Liberty input exceeds native byte ceiling") }
+                let bytes = try await reader.read(reference.artifact)
+                source = try bytes.withUnsafeBytes { raw in
+                    let expected = raw.bindMemory(to: UInt8.self)
+                    let parsed = try parser.parseSource(expected.span,
+                        limits: resources.sourceLimits, resources: resources.sourceResources)
+                    try resources.sourceResources.chargeWork(UInt64(expected.count))
+                    guard parsed.byteCount == expected.count else { throw TimingError.invalidInput("Owned Liberty parse replaced source bytes") }
+                    let matches = parsed.withBytes { actual in
+                        for index in 0..<actual.count { if actual[index] != expected[index] { return false } }
+                        return true
+                    }
+                    guard matches else { throw TimingError.invalidInput("Owned Liberty parse replaced source bytes") }
+                    return parsed
+                }
+            }
+            guard UInt64(source.byteCount) == reference.artifact.byteCount else {
+                throw TimingError.invalidInput("Owned Liberty parse has a different source byte count")
+            }
+            for cornerID in reference.cornerIDs { libraries[cornerID] = source.library; sources[cornerID] = source }
         }
         var selectedCorners: [PDKCornerDefinition] = []
         var selectedLibraries: [String: TimingLibrary] = [:]
@@ -93,7 +120,8 @@ struct STATimingProcessInputs: Sendable {
                 manifest: request.pdkManifest.reference,
                 corners: selectedCorners,
                 librariesByCorner: selectedReferences
-            )
+            ),
+            sourcesByCorner: sources.filter { request.requestedCornerIDs.contains($0.key) }
         )
     }
 }

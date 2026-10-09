@@ -4,7 +4,7 @@
 
 Own native static timing analysis. Parent: [TimingEngine](../../DESIGN.md).
 Child: [ProcessCorners](ProcessCorners/DESIGN.md).
-Child: [PreparedExecution](PreparedExecution/DESIGN.md), proposed.
+Child: [PreparedExecution](PreparedExecution/DESIGN.md).
 
 ## Responsibilities and Boundaries
 
@@ -19,7 +19,7 @@ flow approval, extraction and physical mutation remain outside this module.
 |---|---|---|---|---|
 | [Package](../../DESIGN.md) | parent | Raw observations and trust ownership | Native analysis | Completion is not process qualification |
 | [ProcessCorners](ProcessCorners/DESIGN.md) | child | Validated per-corner library and selection | Scenario input admission | Never merge libraries across corners |
-| [PreparedExecution](PreparedExecution/DESIGN.md) | child | Proposed prepared input/configuration and scenario execution | Native handoff | APIs/schema v4 remain unimplemented |
+| [PreparedExecution](PreparedExecution/DESIGN.md) | child | Prepared input/configuration and scenario execution | Native handoff | Immutable checked owner and v4 observation scope |
 | [PDKKit](../../../PDKKit/DESIGN.md) | depends on | Manifest validation and exact corner mappings | Process authority | PDK identity must match the request |
 
 ## Architecture
@@ -42,7 +42,7 @@ All derived load keys contribute to cell LUT load, including external roots abse
 from D_NET coverage. D_NET declared inventory is never a load. The payload retains
 reduction evidence with exact parasitic input identity; diagnostics and capability
 limitations expose distributed RC/intra-net dynamic loss and header disagreement.
-Producer algorithm identity is 2.0.0 and request/result schema is v3; old evidence
+Producer algorithm identity is 3.0.0 and request/result schema is v4; old evidence
 cannot claim the new algorithm scope. Completion is a cap-load observation, not
 distributed post-layout signoff or process qualification.
 

@@ -13,6 +13,9 @@ public struct STAPayload: Sendable, Hashable, Codable {
     public var parasiticReduction: TimingParasiticReductionEvidence?
     public var provenance: TimingArtifactProvenance
     public var processSelection: STAProcessSelection?
+    public var effectiveConfiguration: STAEffectiveConfiguration?
+    public var characterization: [STACharacterizationObservation]
+    public var libraryConsumption: [STALibraryConsumption]
 
     public init(
         worstSetupSlack: Double?,
@@ -25,7 +28,10 @@ public struct STAPayload: Sendable, Hashable, Codable {
         repairCandidates: [STARepairCandidate] = [],
         parasiticReduction: TimingParasiticReductionEvidence? = nil,
         provenance: TimingArtifactProvenance = TimingArtifactProvenance(),
-        processSelection: STAProcessSelection? = nil
+        processSelection: STAProcessSelection? = nil,
+        effectiveConfiguration: STAEffectiveConfiguration? = nil,
+        characterization: [STACharacterizationObservation] = [],
+        libraryConsumption: [STALibraryConsumption] = []
     ) {
         self.worstSetupSlack = worstSetupSlack
         self.worstHoldSlack = worstHoldSlack
@@ -38,6 +44,9 @@ public struct STAPayload: Sendable, Hashable, Codable {
         self.parasiticReduction = parasiticReduction
         self.provenance = provenance
         self.processSelection = processSelection
+        self.effectiveConfiguration = effectiveConfiguration
+        self.characterization = characterization
+        self.libraryConsumption = libraryConsumption
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -52,6 +61,9 @@ public struct STAPayload: Sendable, Hashable, Codable {
         case parasiticReduction
         case provenance
         case processSelection
+        case effectiveConfiguration
+        case characterization
+        case libraryConsumption
     }
 
     public init(from decoder: Decoder) throws {
@@ -67,7 +79,10 @@ public struct STAPayload: Sendable, Hashable, Codable {
             repairCandidates: try container.decode([STARepairCandidate].self, forKey: .repairCandidates),
             parasiticReduction: try container.decodeIfPresent(TimingParasiticReductionEvidence.self, forKey: .parasiticReduction),
             provenance: try container.decode(TimingArtifactProvenance.self, forKey: .provenance),
-            processSelection: try container.decodeIfPresent(STAProcessSelection.self, forKey: .processSelection)
+            processSelection: try container.decodeIfPresent(STAProcessSelection.self, forKey: .processSelection),
+            effectiveConfiguration: try container.decodeIfPresent(STAEffectiveConfiguration.self, forKey: .effectiveConfiguration),
+            characterization: try container.decode([STACharacterizationObservation].self, forKey: .characterization),
+            libraryConsumption: try container.decode([STALibraryConsumption].self, forKey: .libraryConsumption)
         )
     }
 
@@ -84,5 +99,8 @@ public struct STAPayload: Sendable, Hashable, Codable {
         try container.encodeIfPresent(parasiticReduction, forKey: .parasiticReduction)
         try container.encode(provenance, forKey: .provenance)
         try container.encodeIfPresent(processSelection, forKey: .processSelection)
+        try container.encodeIfPresent(effectiveConfiguration, forKey: .effectiveConfiguration)
+        try container.encode(characterization, forKey: .characterization)
+        try container.encode(libraryConsumption, forKey: .libraryConsumption)
     }
 }

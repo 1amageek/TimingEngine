@@ -13,11 +13,11 @@
 
 ## Trust integration
 
-The next prepared native input/configuration implementation follows
+The prepared native input/configuration implementation follows
 [PreparedExecution](Sources/STAEngine/PreparedExecution/DESIGN.md), using the optional
 [profile inspection module](Sources/TimingPDKProfileInspection/DESIGN.md) for retained
 Liberty grammar owners. Existing codec and strict corner evidence is reused; the
-host owns final adoption and resume validation. These connections remain pending.
+host owns final adoption and resume validation. These connections are implemented with strict source ownership and v4 observations.
 
 TimingEngine produces exact raw analysis and correlation artifacts with location-independent identity and execution-scoped availability. Host integration presents those artifacts to ToolQualification for process-evidence reconstruction; TimingCore does not reverse-depend on the trust package. DesignFlowKernel applies policy and approval after ToolQualification validation.
 

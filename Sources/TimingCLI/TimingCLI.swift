@@ -130,7 +130,16 @@ struct TimingCLI {
             pdkVersion: pdkVersion,
             pdkDigest: pdkDigest,
             parasitics: parasitics,
-            requiresPostLayoutInputs: values.contains("--requires-post-layout-inputs")
+            maxPaths: try option("--max-paths", in: values).map { value in
+                guard let count = Int(value), count > 0 else { throw TimingError.invalidInput("--max-paths requires a positive integer") }
+                return count
+            } ?? 20,
+            requiresPostLayoutInputs: values.contains("--requires-post-layout-inputs"),
+            configurationDigest: try option("--expected-configuration-digest", in: values).map { try ContentDigest(algorithm: .sha256, hexadecimalValue: $0) },
+            characterizationPolicy: option("--condition", in: values) == nil ? .declaredCornerSelection : .requireObservedConditions,
+            characterizationBindings: option("--condition", in: values).map {
+                [STACharacterizationBinding(cornerID: cornerIDs[0], conditionName: $0)]
+            } ?? []
         )
         let store: FileSystemTimingArtifactStore?
         if let outputDirectory {

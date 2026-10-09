@@ -72,7 +72,7 @@ requires parent scenario and caller regression verification.
 ### Proposed common-profile consumption handoff
 
 The current native intake already proves the corner-to-Liberty/PVT guarantees
-above; preserve them. The proposed
+above; preserve them. The implemented
 [PDK profile](../../../../PDKKit/Sources/PDKCore/Profile/DESIGN.md) supplies the
 explicit stage subset and parent selection identity. Native intake returns its
 actual STAProcessSelection plus exact source/section evidence for comparison by
@@ -92,3 +92,9 @@ STAProcessCornerTests adds wrong parent profile, wrong required subset, altered
 PVT/library identity and extra contributing source refusal. Domain result/request
 schemas advance only when new consumed-profile fields are implemented, and their
 callers/retained readers migrate together without legacy fallback.
+
+The prepared native path retains `OwnedLibertySource` per exact supplied source.
+Profile mode consumes the checked retained catalog; ordinary mode verifies source
+identity through the reader and owned codec. Execution retains distinct source
+owners and never reopens source paths. [PreparedExecution](../PreparedExecution/DESIGN.md)
+owns effective settings, explicit characterization policies and handoff lifetime.

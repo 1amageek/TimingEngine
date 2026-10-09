@@ -8,7 +8,7 @@ let logicDesignDependency: Package.Dependency = .package(
 
 let pdkKitDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/PDKKit.git",
-    revision: "06212417a47d8dec4a3c541a0612a1ac08e66b45"
+    revision: "04a8be5b3cb09a6e38c2fdbce572f463b602b712"
 )
 
 let signoffToolSupportDependency: Package.Dependency = .package(
@@ -32,6 +32,7 @@ let package = Package(
     products: [
         .library(name: "TimingCore", targets: ["TimingCore"]),
         .library(name: "STAEngine", targets: ["STAEngine"]),
+        .library(name: "TimingPDKProfileInspection", targets: ["TimingPDKProfileInspection"]),
         .library(name: "SignalIntegrityEngine", targets: ["SignalIntegrityEngine"]),
         .library(name: "TimingEngine", targets: ["TimingEngine"]),
         .executable(name: "timingengine", targets: ["TimingCLI"]),
@@ -56,15 +57,25 @@ let package = Package(
             exclude: ["DESIGN.md", "ParasiticReduction/DESIGN.md", "LibertyCodec/DESIGN.md"]
         ),
         .target(
+            name: "TimingPDKProfileInspection",
+            dependencies: ["TimingCore",
+                .product(name: "PDKCore", package: "PDKKit"),
+                .product(name: "PDKProfileAdmission", package: "PDKKit"),
+                .product(name: "PDKSourceCapture", package: "PDKKit"),
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation")],
+            exclude: ["DESIGN.md"]
+        ),
+        .target(
             name: "STAEngine",
             dependencies: [
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"),
                 "TimingCore",
+                "TimingPDKProfileInspection",
                 .product(name: "LogicIR", package: "LogicDesign"),
                 .product(name: "PDKCore", package: "PDKKit")
             ],
-            exclude: ["DESIGN.md", "ProcessCorners/DESIGN.md"]
+            exclude: ["DESIGN.md", "ProcessCorners/DESIGN.md", "PreparedExecution/DESIGN.md"]
         ),
         .target(
             name: "SignalIntegrityEngine",
@@ -110,6 +121,18 @@ let package = Package(
             ]
         ),
         .testTarget(name: "LibertyCodecTests", dependencies: ["TimingCore"]),
+        .testTarget(name: "TimingPDKProfileInspectionTests", dependencies: [
+            "TimingCore", "TimingPDKProfileInspection", .product(name: "PDKCore", package: "PDKKit"),
+            .product(name: "PDKProfileAdmission", package: "PDKKit"), .product(name: "PDKSourceCapture", package: "PDKKit"),
+            .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
+            .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation")],
+            path: "Tests/NativePreparedProof/Tests/TimingPDKProfileInspectionTests"),
+        .testTarget(name: "STAPreparedExecutionTests", dependencies: [
+            "STAEngine", "TimingCore", "TimingPDKProfileInspection", .product(name: "PDKCore", package: "PDKKit"),
+            .product(name: "PDKProfileAdmission", package: "PDKKit"), .product(name: "PDKSourceCapture", package: "PDKKit"),
+            .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
+            .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation")],
+            path: "Tests/NativePreparedProof/Tests/STAPreparedExecutionTests"),
         .testTarget(
             name: "TimingEngineTests",
             dependencies: [

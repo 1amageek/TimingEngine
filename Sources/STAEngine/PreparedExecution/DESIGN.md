@@ -2,7 +2,7 @@
 
 ## Purpose and Scope
 
-Status: proposed, not implemented. Parent: [STAEngine](../DESIGN.md). No children.
+Status: implemented. Parent: [STAEngine](../DESIGN.md). No children.
 Own immutable native STA preparation, effective configuration identity and exact
 handoff to scenario execution. Preserve strict process/corner/source rules.
 
@@ -18,7 +18,7 @@ STAExecuting; no factory or compatibility envelope is introduced.
 
 | Design | Relationship | Contract Used | Summary | Cautions |
 |---|---|---|---|---|
-| [Module](../DESIGN.md) | parent | Native engine/report behavior | Same scenario algorithm | Prepared APIs unimplemented |
+| [Module](../DESIGN.md) | parent | Native engine/report behavior | Same scenario algorithm | Immutable checked owner and v4 observations |
 | [ProcessCorners](../ProcessCorners/DESIGN.md) | depends on | Exact per-corner library and selection | Strict join | No merged library or PVT interpolation |
 | [LibertyCodec](../../TimingCore/LibertyCodec/DESIGN.md) | depends on | Owned real library/raw conditions | Shared grammar | Numeric process is not named-process proof |
 | [Inspection](../../TimingPDKProfileInspection/DESIGN.md) | optional depends on | Retained inspected catalog | Parse once through analysis | No reverse TimingCore/PDKKit dependency |
@@ -34,9 +34,9 @@ exact readers/catalog -> process join + design/SDC/optional SPEF intake
 
 ## Contracts and Invariants
 
-Current facts: STATimingProcessInputs checks exact manifest/source joins and then
-ordinary-parses Liberty; STARequest stores caller configurationDigest. The owned
-codec exists, but this connection does not. References:
+Current facts: STATimingProcessInputs checks exact manifest/source joins and reuses
+retained owned Liberty grammar or parses verified bytes through the same codec.
+STARequest.configurationDigest is an optional expected identity. References:
 [loader](../ProcessCorners/STATimingProcessInputs.swift), [request](../STARequest.swift),
 [engine](../NativeSTAEngine.swift).
 
@@ -60,7 +60,7 @@ The initial deterministic native lane does not consume randomSeed; a supplied se
 is typed unsupported rather than hashed and reported as effective. Only settings
 actually used by the scenario algorithm may enter an applied-configuration record.
 
-ST-03: Proposed STACharacterizationPolicy has `declaredCornerSelection` and
+ST-03: STACharacterizationPolicy has `declaredCornerSelection` and
 `requireObservedConditions`. The first proves exact declared source selection and
 retains raw metadata without claiming a selected observed characterization group.
 The second requires explicit condition-name bindings per corner, resolves each
@@ -77,7 +77,7 @@ of real libraries/catalog, graph, resolved constraints, parasitic reduction,
 scenarios, identities and observations. The same owner supplies analysis and output
 claims. Mutable workspace is per execution, not shared with immutable libraries.
 
-Proposed protocols implemented directly by NativeSTAEngine:
+Protocols implemented directly by NativeSTAEngine:
 
 ```swift
 public protocol STAExecutionPreparing: Sendable {
@@ -122,12 +122,44 @@ evidence establishes no WASM/Embedded or process qualification.
 
 ## Verification and Change Impact
 
-Proposed STAPreparedExecutionTests uses real distinct-corner delays. Prove effective
+STAPreparedExecutionTests uses real distinct-corner delays. Prove effective
 variation/mode/maxPaths/slew/policy identity changes, wrong caller digest, execution
 after path mutation, raw numeric process/partial metadata, explicit group selection,
 missing/wrong voltage/temperature, independent concurrent runs and budget/cancellation.
 Reuse unchanged strict STAProcessCornerTests and codec evidence. Implement request/
 result/report schema v4 with actual input/config and characterization records;
-migrate CLI, corpus, external correlation readers and host together. Current schema
-remains v3 until implementation. Older schemas fail explicitly; external producers
+migrate CLI, corpus, external correlation readers and host together. Current schema is v4. Older schemas fail explicitly; external producers
 can report only their actually implemented scope.
+
+## Implemented Read Contract and Limits
+
+`PreparedSTAExecution` exposes immutable request/input references, a domain-framed
+`executionInputIdentity`, `effectiveConfiguration`/`configurationDigest`, exact
+`processSelection`, raw/selected characterization, graph-selected `libraryConsumption`
+and optional `inspectedSources`.
+The latter retains the actual admitted contextual graph; source contexts are never
+copied from a consumption expectation. Execution uses its retained libraries and
+parsed inputs after source paths change. Each invocation allocates new scenario
+workspace and never shares mutable algorithm state.
+
+`STAExecutionLimits` independently caps input bytes before native transforms,
+design elements, scenario fan-out and requested paths. `STALibertyResources` caps
+actual grammar work/live+temporary payload bytes and checks one monotonic deadline.
+These are distinct scope contracts: transform ceilings are not allocator/RSS
+accounting and do not inherit the strict Liberty storage guarantee. Unavailable
+strict transform accounting is explicitly refused when requested. Intake limits
+are excluded from effective config; the requested semantic path output limit is
+included. The native lane is deterministic and rejects a supplied randomSeed.
+
+The effective config decoder recomputes the digest from the retained values and
+rejects tampering. Default mode is resolved before hashing. Global input slew and
+output load are taken from parsed constraints. Source IDs and materialization paths
+are outside configuration identity. Report/result v4 contains the actual effective
+configuration and raw/selected observations; external engines omit records outside
+their implemented scope.
+
+Behavioral owners:
+[STAPreparedExecutionTests](../../../Tests/NativePreparedProof/Tests/STAPreparedExecutionTests)
+and unchanged strict process-corner regression. Tests are ordinary SwiftPM targets;
+[the independent proof package](../../../Tests/NativePreparedProof/Package.swift)
+selects those same sources without compiling unrelated legacy test products.

@@ -2,8 +2,7 @@
 
 ## Purpose and Scope
 
-Status: proposed optional SwiftPM product/target, not implemented or added to the
-manifest yet. Parent: [TimingEngine](../../DESIGN.md). No children. Own the adapter
+Status: implemented optional SwiftPM product/target. Parent: [TimingEngine](../../DESIGN.md). No children. Own the adapter
 between TimingCore's owned Liberty grammar and PDK profile inspection.
 
 ## Responsibilities and Boundaries
@@ -33,7 +32,7 @@ checked capture -> scoped inspector session -> LibertySourceParsing
 
 ## Contracts and Invariants
 
-The proposed concrete TimingPDKProfileInspectionSession conforms directly to the
+The concrete TimingPDKProfileInspectionSession conforms directly to the
 existing PDKProfileSourceInspecting protocol. It translates a bounded capture
 borrow into LibertySourceParsing with an adapter to the same invocation resource
 owner. Actual cells/pins and raw condition facts come from that result. Leaf
@@ -49,7 +48,7 @@ and parser/policy identity, separate from corner bindings. Inspection and execut
 use the same library owner. Sharing immutable grammar backing does not erase full
 descriptors or contextual fact occurrences. There is no global cache or weak backing.
 
-Proposed `retainedSources(for: AdmittedPDKProfile) async throws(TimingProfileInspectionError)
+`retainedSources(for: AdmittedPDKProfile) async throws(TimingProfileInspectionError)
 -> TimingInspectedLibertySources` validates the session's actual references/context
 against the admitted source graph before exporting an internal-constructor immutable
 catalog. It retains actual capture/library/accounting owners and supplies exact
@@ -83,8 +82,24 @@ Native host evidence does not establish other platforms or numerical quality.
 
 ## Verification and Change Impact
 
-Proposed TimingPDKProfileInspectionTests depends on this target and real admission,
+TimingPDKProfileInspectionTests depends on this target and real admission,
 without STA/Xcircuite. Prove cells/pins, raw process/partial metadata, demanded coverage
 refusal, exact lookup, one parse shared through execution, shutdown/last-copy
 retention and budget/cancellation propagation. Reuse valid LibertyCodec proof.
 Changes affect registration, STA preparation and fresh-replay inspector factories.
+
+## Implemented Native Scope
+
+The inspector accepts strict owned Liberty grammar and demanded `cells`, `pins`
+and `dependencyClosure`; numeric condition metadata is available through the
+retained source owner. It emits no full PVT or operating-temperature fact from an
+unselected group. The catalog retains the admitted profile/source graph and exposes
+`sourceInputs`, `admittedProfile` and exact `source(for:)` lookup. Admission closed
+resources remain retained through receipts without invoking new admission work.
+
+`inspect` has no suspension within the actor body. Parse publication, export and
+shutdown are therefore ordered; shutdown cannot race a suspended parse, and a
+queued inspection after shutdown is refused. Exported immutable catalogs survive
+shutdown. Real tests are owned by
+[TimingPDKProfileInspectionTests](../../Tests/NativePreparedProof/Tests/TimingPDKProfileInspectionTests).
+Native Swift 6.4.0/macOS CPU evidence covers only these paths.

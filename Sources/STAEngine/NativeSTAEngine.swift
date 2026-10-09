@@ -3,8 +3,9 @@ import CircuiteFoundation
 import LogicIR
 import PDKCore
 import TimingCore
+import TimingPDKProfileInspection
 
-public struct NativeSTAEngine: STAExecuting {
+public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedExecuting {
     public static let capability = TimingCapability(
         engineID: "timing.sta",
         supportedInputFormats: [.liberty, .json, .verilog, .sdc, .spef],
@@ -17,7 +18,7 @@ public struct NativeSTAEngine: STAExecuting {
     public typealias Output = STAExecutionResult
     public let reader: any TimingArtifactReading
     public let artifactStore: (any TimingArtifactStoring)?
-    public let libraryParser: any TimingLibraryParsing
+    public let libraryParser: any LibertySourceParsing
     public let constraintParser: any TimingConstraintParsing
     public let designParser: any TimingDesignParsing
     public let parasiticParser: any TimingParasiticParsing
@@ -27,7 +28,7 @@ public struct NativeSTAEngine: STAExecuting {
         reader: (any TimingArtifactReading)? = nil,
         artifactStore: (any TimingArtifactStoring)? = nil,
         workspaceRoot: URL? = nil,
-        libraryParser: any TimingLibraryParsing = LibertyParser(),
+        libraryParser: any LibertySourceParsing = LibertyParser(),
         constraintParser: any TimingConstraintParsing = SDCParser(),
         designParser: any TimingDesignParsing = TimingDesignParser(),
         parasiticParser: any TimingParasiticParsing = SPEFParser(),
@@ -45,58 +46,23 @@ public struct NativeSTAEngine: STAExecuting {
     public func execute(_ request: STARequest) async throws -> STAExecutionResult {
         let startedAt = Date()
         do {
-            guard request.variation.isValid else {
-                throw TimingError.invalidInput("STA variation derates must be finite and positive.")
+            let resources = STAExecutionResources(reader: reader,
+                sourceLimits: try LibertySourceParseLimits(maximumNestingDepth: 64),
+                sourceResources: STALibertyResources(), limits: try STAExecutionLimits())
+            let prepared = try await prepare(request, resources: resources)
+            return try await execute(prepared)
+        } catch let error as STAPreparationError {
+            if case .input(let cause) = error { return try blockedEnvelope(request: request, startedAt: startedAt, error: cause) }
+            if case .cancelled = error { return try cancelledEnvelope(request: request, startedAt: startedAt) }
+            return try blockedEnvelope(request: request, startedAt: startedAt,
+                error: .unsupportedSemantic(format: "STA preparation", semantic: String(describing: error)))
+        } catch let error as STAExecutionError {
+            if case .cancelled = error { return try cancelledEnvelope(request: request, startedAt: startedAt) }
+            if case .underlying(let cause) = error, let timing = cause as? TimingError {
+                if case .artifactWriteFailed = timing { return try failedEnvelope(request: request, startedAt: startedAt, error: timing) }
+                return try blockedEnvelope(request: request, startedAt: startedAt, error: timing)
             }
-            let inputs = try await loadInputs(request)
-            try validateCanonicalInputs(inputs)
-            let provenanceIssues = LogicDesignProvenanceValidation.issues(
-                for: logicDesignReference(for: request),
-                requireProvenance: request.requiresPostLayoutInputs
-            )
-            guard provenanceIssues.isEmpty else {
-                return try provenanceBlockedEnvelope(
-                    request: request,
-                    startedAt: startedAt,
-                    issues: provenanceIssues
-                )
-            }
-            let reduced = try inputs.parasitics.map { try parasiticReducer.reduce($0) }
-            let result = try analyze(
-                request: request,
-                design: inputs.design,
-                librariesByCorner: inputs.processInputs.librariesByCorner,
-                constraints: inputs.constraints,
-                parasitics: reduced,
-                cornerIDs: inputs.cornerIDs,
-                modeIDs: inputs.modeIDs,
-                processSelection: inputs.processInputs.selection
-            )
-            var artifactBindings: [TimingArtifactBinding] = []
-            if let artifactStore {
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                let reportData = try encoder.encode(result.payload)
-                let artifact = try await artifactStore.store(
-                    reportData,
-                    artifactName: "timing-sta-report",
-                    runID: request.runID,
-                    kind: .report,
-                    format: .json
-                )
-                artifactBindings.append(artifact)
-            }
-            let completedAt = Date()
-            return try STAExecutionResult(
-                runID: request.runID,
-                status: result.status,
-                payload: result.payload,
-                inputBindings: request.artifactBindings,
-                artifactBindings: artifactBindings,
-                diagnostics: result.diagnostics,
-                provenance: try makeProvenance(startedAt: startedAt, completedAt: completedAt, inputs: request.inputs),
-                schemaVersion: STARequest.currentSchemaVersion
-            )
+            throw error
         } catch let error as TimingError {
             if case .artifactWriteFailed = error {
                 return try failedEnvelope(request: request, startedAt: startedAt, error: error)
@@ -122,6 +88,99 @@ public struct NativeSTAEngine: STAExecuting {
         }
     }
 
+    public func prepare(_ request: STARequest, resources: STAExecutionResources)
+        async throws(STAPreparationError) -> PreparedSTAExecution {
+        do {
+            try Task.checkCancellation()
+            // FIXME(INCOMPLETE_IMPLEMENTATION): Native prepare has no strict payload/work accountant for
+            // design/SDC/SPEF/graph/scenario transforms. Callers demanding it are refused before intake;
+            // admission must remain blocked until every transform pre-admits its own allocations and work.
+            guard !resources.requiresStrictTransformAccounting else { throw STAPreparationError.unsupportedBoundedTransformAccounting }
+            guard request.randomSeed == nil else { throw STAPreparationError.unsupportedRandomSeed }
+            guard request.variation.isValid else { throw TimingError.invalidInput("Invalid STA derates") }
+            guard request.maxPaths <= resources.limits.maximumPaths else { throw STAPreparationError.capacity("Path limit exceeded") }
+            let inputs = try await loadInputs(request, resources: resources)
+            try validateCanonicalInputs(inputs)
+            let issues = LogicDesignProvenanceValidation.issues(for: logicDesignReference(for: request),
+                requireProvenance: request.requiresPostLayoutInputs)
+            guard issues.isEmpty else { throw TimingError.invalidInput("STA design provenance is incomplete") }
+            let observations = try characterization(request, inputs: inputs.processInputs)
+            let configuration = try STAEffectiveConfiguration(request: request, modes: inputs.modeIDs, constraints: inputs.constraints)
+            if let expected = request.configurationDigest, expected != configuration.digest { throw STAPreparationError.configurationMismatch }
+            let reduced = try inputs.parasitics.map { try parasiticReducer.reduce($0) }
+            try Task.checkCancellation()
+            return try PreparedSTAExecution(request: request, design: inputs.design, processInputs: inputs.processInputs,
+                constraints: inputs.constraints, parasitics: reduced, modeIDs: inputs.modeIDs,
+                catalog: resources.inspectedSources, configuration: configuration, characterization: observations)
+        } catch let error as STAPreparationError { throw error }
+        catch let error as LibertySourceError { throw .liberty(error) }
+        catch let error as TimingError { throw .input(error) }
+        catch is CancellationError { throw .cancelled }
+        catch { throw .underlying(error) }
+    }
+
+    public func execute(_ prepared: PreparedSTAExecution) async throws(STAExecutionError) -> STAExecutionResult {
+        let request = prepared.request
+        let startedAt = Date()
+        do {
+            try Task.checkCancellation()
+            let result = try analyze(request: request, design: prepared.design,
+                librariesByCorner: prepared.processInputs.librariesByCorner, constraints: prepared.constraints,
+                parasitics: prepared.parasitics, cornerIDs: request.requestedCornerIDs,
+                modeIDs: prepared.modeIDs, processSelection: prepared.processSelection)
+            var payload = result.payload
+            payload.effectiveConfiguration = prepared.effectiveConfiguration
+            payload.characterization = prepared.characterization
+            payload.libraryConsumption = prepared.libraryConsumption
+            var artifactBindings: [TimingArtifactBinding] = []
+            if let artifactStore {
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                let artifact = try await artifactStore.store(encoder.encode(payload), artifactName: "timing-sta-report",
+                    runID: request.runID, kind: .report, format: .json)
+                artifactBindings.append(artifact)
+            }
+            try Task.checkCancellation()
+            return try STAExecutionResult(runID: request.runID, status: result.status, payload: payload,
+                inputBindings: request.artifactBindings, artifactBindings: artifactBindings, diagnostics: result.diagnostics,
+                provenance: makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
+                schemaVersion: STARequest.currentSchemaVersion)
+        } catch is CancellationError { throw .cancelled }
+        catch { throw .underlying(error) }
+    }
+
+    private func characterization(_ request: STARequest, inputs: STATimingProcessInputs) throws -> [STACharacterizationObservation] {
+        let bindings = request.characterizationBindings
+        guard Set(bindings.map(\.cornerID)).count == bindings.count,
+              bindings.allSatisfy({ request.requestedCornerIDs.contains($0.cornerID) && !$0.conditionName.isEmpty
+                  && ($0.requiredNumericProcess?.isFinite ?? true) }) else {
+            throw STAPreparationError.characterization("Invalid or duplicate explicit condition binding")
+        }
+        if request.characterizationPolicy == .declaredCornerSelection, !bindings.isEmpty {
+            throw STAPreparationError.characterization("Declared selection cannot claim observed condition bindings")
+        }
+        var observations: [STACharacterizationObservation] = []
+        for corner in inputs.selection.corners {
+            guard let source = inputs.sourcesByCorner[corner.cornerID],
+                  let reference = inputs.selection.librariesByCorner[corner.cornerID] else {
+                throw STAPreparationError.characterization("Missing retained source owner")
+            }
+            let binding = bindings.first { $0.cornerID == corner.cornerID }
+            if request.characterizationPolicy == .requireObservedConditions {
+                guard let binding, let condition = source.operatingConditions.first(where: { $0.name == binding.conditionName }),
+                      condition.voltage == corner.pvt.voltage, condition.temperature == corner.pvt.temperatureCelsius,
+                      binding.requiredNumericProcess == nil || condition.process == binding.requiredNumericProcess else {
+                    throw STAPreparationError.characterization("Explicit source voltage/temperature/process observation does not match corner")
+                }
+            }
+            for condition in source.operatingConditions {
+                observations.append(.init(cornerID: corner.cornerID, source: reference, conditionName: condition.name,
+                    numericProcess: condition.process, voltage: condition.voltage, temperatureCelsius: condition.temperature,
+                    selected: request.characterizationPolicy == .requireObservedConditions && condition.name == binding?.conditionName))
+            }
+        }
+        return observations
+    }
+
     private struct LoadedInputs: Sendable {
         let design: TimingDesign
         let processInputs: STATimingProcessInputs
@@ -131,13 +190,17 @@ public struct NativeSTAEngine: STAExecuting {
         let modeIDs: [String]
     }
 
-    private func loadInputs(_ request: STARequest) async throws -> LoadedInputs {
+    private func loadInputs(_ request: STARequest, resources: STAExecutionResources) async throws -> LoadedInputs {
         guard !request.libraries.isEmpty else { throw TimingError.missingArtifact(role: "timing-library") }
+        let reader = resources.reader
+        for binding in request.artifactBindings {
+            guard binding.byteCount <= resources.limits.maximumInputBytes else { throw STAPreparationError.capacity("Native source transform byte ceiling exceeded") }
+        }
         let designData = try await reader.read(request.design)
         let design = try designParser.parse(designData, topDesignName: request.topDesignName)
 
         let processInputs = try await STATimingProcessInputs.load(
-            request, reader: reader, parser: libraryParser
+            request, reader: reader, parser: libraryParser, resources: resources
         )
         let cornerIDs = request.requestedCornerIDs
 
@@ -147,6 +210,11 @@ public struct NativeSTAEngine: STAExecuting {
                 ? ["default"]
                 : request.requestedModeIDs
         )
+        let (scenarioCount, overflow) = modeIDs.count.multipliedReportingOverflow(by: cornerIDs.count)
+        guard !overflow, scenarioCount <= resources.limits.maximumScenarios,
+              design.instances.count + design.ports.count + design.nets.count <= resources.limits.maximumDesignElements else {
+            throw STAPreparationError.capacity("Native design/scenario transform ceiling exceeded")
+        }
         var constraints: [String: TimingConstraintSet] = [:]
         for modeID in modeIDs {
             constraints[modeID] = try constraintParser.parse(constraintData, modeID: modeID)
@@ -221,6 +289,7 @@ public struct NativeSTAEngine: STAExecuting {
         var diagnostics: [DesignDiagnostic] = []
 
         for modeID in modeIDs {
+            try Task.checkCancellation()
             guard let constraint = constraints[modeID] else {
                 throw TimingError.invalidInput("No constraints were parsed for mode '\(modeID)'.")
             }
@@ -231,6 +300,7 @@ public struct NativeSTAEngine: STAExecuting {
                 )
             }
             for cornerID in cornerIDs {
+                try Task.checkCancellation()
                 guard let library = librariesByCorner[cornerID] else {
                     throw TimingError.invariantViolation("The selected STA scenario has no admitted library.")
                 }
@@ -742,6 +812,12 @@ public struct NativeSTAEngine: STAExecuting {
         }
     }
 
+    private func cancelledEnvelope(request: STARequest, startedAt: Date) throws -> STAExecutionResult {
+        try STAExecutionResult(runID: request.runID, status: .cancelled, payload: emptyPayload(request: request),
+            inputBindings: request.artifactBindings,
+            provenance: makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs))
+    }
+
     private func blockedEnvelope(
         request: STARequest,
         startedAt: Date,
@@ -836,7 +912,7 @@ public struct NativeSTAEngine: STAExecuting {
                 sourceDesignDigest: request.canonicalDesignDigest?.hexadecimalValue ?? request.design.digest.hexadecimalValue,
                 inputDesignDigest: request.design.digest.hexadecimalValue,
                 producerID: "timing.sta",
-                producerVersion: "2.0.0",
+                producerVersion: "3.0.0",
                 runID: request.runID
             )
         )
@@ -851,7 +927,7 @@ public struct NativeSTAEngine: STAExecuting {
             producer: ProducerIdentity(
                 kind: .engine,
                 identifier: "timing.sta",
-                version: "2.0.0",
+                version: "3.0.0",
                 build: TimingRuntimeIdentity.currentExecutableDigest()
             ),
             inputs: inputs,
@@ -859,7 +935,7 @@ public struct NativeSTAEngine: STAExecuting {
                 entryPoint: "STAEngine.NativeSTAEngine.execute"
             ),
             environment: try TimingRuntimeIdentity.environmentFingerprint(
-                toolchain: "timing.sta-2.0.0"
+                toolchain: "timing.sta-3.0.0"
             ),
             startedAt: startedAt,
             completedAt: completedAt
