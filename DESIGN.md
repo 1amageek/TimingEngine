@@ -121,6 +121,13 @@ contract, not process qualification or unexecuted domain test coverage.
 
 ## Verification and Change Impact
 
+The [CI workflow](.github/workflows/sky130A-qualification.yml) consumes the
+[CoreSpice host deployment contract](../CoreSpice/DESIGN.md#responsibilities-and-boundaries)
+for its runner and compiler selection. Setup verifies the host OS and architecture,
+the official installer signature, and the selected release compiler before the
+existing verification steps. Configuration alone is not executed CI or process
+qualification evidence.
+
 TimingCore and STAEngine own their affected behavioral tests and new prepared-path
 completion conditions. The optional adapter owns independent real-admission tests;
 Xcircuite owns cumulative normal-graph/CLI/resume integration. Existing codec and

@@ -11,9 +11,10 @@ permissions:
 
 jobs:
   sky130A:
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 120
     env:
+      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
       SKY130_REVISION: c6d73a35f524070e85faff4a6a9eef49553ebc2b
       OPENSTA_REVISION: dc5ccd2d6941289a6a7d3c918b10b493f44a7f56
     steps:
@@ -26,6 +27,39 @@ jobs:
           repository: parallaxsw/OpenSTA
           ref: ${{ env.OPENSTA_REVISION }}
           path: .opensta-source
+
+      - name: Select signed OSS Swift 6.4.0
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -euo pipefail
+          sw_vers
+          test "$(sw_vers -productVersion | cut -d. -f1)" -eq 27
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+          pkg="$RUNNER_TEMP/swift-6.4.0-RELEASE-osx.pkg"
+          curl --fail --location --max-time 600 \
+            https://download.swift.org/swift-6.4.0-release/xcode/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE-osx.pkg \
+            --output "$pkg"
+          pkgutil --check-signature "$pkg" > "$RUNNER_TEMP/swift-signature.txt"
+          cat "$RUNNER_TEMP/swift-signature.txt"
+          grep -Fq 'Developer ID Installer: Swift Open Source (V9AUD2URP3)' \
+            "$RUNNER_TEMP/swift-signature.txt"
+          installer -target CurrentUserHomeDirectory -pkg "$pkg"
+          toolchain="$HOME/Library/Developer/Toolchains/swift-6.4.0-RELEASE.xctoolchain"
+          toolchain_id="$(plutil -extract CFBundleIdentifier raw "$toolchain/Info.plist")"
+          test "$toolchain_id" = org.swift.640202609131a
+          test "$(plutil -extract Version raw "$toolchain/Info.plist")" = 6.4.20260913101
+          export TOOLCHAINS="$toolchain_id"
+          export PATH="$toolchain/usr/bin:$PATH"
+          echo "TOOLCHAINS=$TOOLCHAINS" >> "$GITHUB_ENV"
+          echo "$toolchain/usr/bin" >> "$GITHUB_PATH"
+          test "$(command -v swift)" = "$toolchain/usr/bin/swift"
+          test "$(xcrun --find swift)" = "$toolchain/usr/bin/swift"
+          swift --version | tee "$RUNNER_TEMP/swift-version.txt"
+          grep -Fxq 'Apple Swift version 6.4 (swift-6.4-RELEASE)' "$RUNNER_TEMP/swift-version.txt"
+          xcrun swift --version | tee "$RUNNER_TEMP/xcrun-swift-version.txt"
+          grep -Fxq 'Apple Swift version 6.4 (swift-6.4-RELEASE)' "$RUNNER_TEMP/xcrun-swift-version.txt"
 
       - name: Cache independent tool and process assets
         uses: actions/cache@v4

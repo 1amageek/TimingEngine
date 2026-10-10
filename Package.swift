@@ -1,4 +1,4 @@
-// swift-tools-version: 6.3
+// swift-tools-version: 6.4
 import PackageDescription
 
 let logicDesignDependency: Package.Dependency = .package(
@@ -7,7 +7,7 @@ let logicDesignDependency: Package.Dependency = .package(
 )
 
 let pdkKitDependency: Package.Dependency = .package(url: "https://github.com/1amageek/PDKKit.git",
-    revision: "c3491863601c16357e40e57dd2f6a7b648535c6a"
+    revision: "58fa393275080e0a88dc8ac9f8a95fc0c054b019"
 )
 
 let signoffToolSupportDependency: Package.Dependency = .package(
@@ -27,7 +27,7 @@ let toolQualificationDependency: Package.Dependency = .package(
 
 let package = Package(
     name: "TimingEngine",
-    platforms: [.macOS(.v26)],
+    platforms: [.macOS("27.0")],
     products: [
         .library(name: "TimingCore", targets: ["TimingCore"]),
         .library(name: "STAEngine", targets: ["STAEngine"]),
