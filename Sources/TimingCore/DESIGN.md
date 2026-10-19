@@ -105,8 +105,9 @@ or ambiguous arcs and unsupported data produce typed characterization errors.
 
 ## State, Ownership, and Lifecycle
 
-Invocation-local immutable value state. No shared mutable cache, pointer or
-platform-specific isolation is added.
+Invocation-local immutable parsed value state. Artifact storage additionally owns
+per-operation host descriptors and scoped pointer borrows as described below. It
+adds no shared mutable cache or target-specific isolation.
 
 ## Failure, Concurrency, and Constraints
 
@@ -146,3 +147,60 @@ owns its admission and compatibility; legacy v2 retains only its explicit cap-lo
 [PathConstraints](PathConstraints/DESIGN.md) owns explicit primary source waveform/transition/propagated facts. [LibertyCodec](LibertyCodec/DESIGN.md) retains clock-to-Q edge source presence. [STA ClockPropagation](../STAEngine/NativeExecution/ClockPropagation/DESIGN.md) consumes those facts without introducing clock execution policy into TimingCore.
 
 [LibertyCodec](LibertyCodec/DESIGN.md) owns caller-accounted strict characterization from scoped source bytes and actual clock-to-Q source edge presence. Existing ordinary lookup remains unchanged.
+
+## Contained Immutable Artifact Storage
+
+TimingCore owns `FileSystemTimingArtifactStore`; the native analysis engine does
+not own output filesystem policy. The CLI's optional contained `--out` and the
+public store constructor accept existing or not-yet-created output directories.
+An existing workspace may use a filesystem alias. The original public roundtrip
+also permits creation of one missing workspace directory below an existing parent;
+no additional missing-workspace-parent capability is claimed.
+
+The constructor resolves the nearest existing ancestor through the platform's
+canonical path operation and appends missing directory components. Workspace and
+output are normalized by the same rule before root-relative admission. Caller
+pre-normalization is not required. Content identity, descriptor, root ID and
+relative availability schema remain unchanged.
+
+```text
+admitted workspace/output URLs -> immutable canonical relative components
+store(Data) -> scoped no-follow workspace descriptor
+  -> no-follow output/run directory traversal and bounded creation
+  -> exclusive temporary regular file -> complete bytes
+  -> atomic no-replace publication -> checked cleanup/close -> exact binding
+```
+
+Each store call owns its descriptors; store copies share no mutable descriptor or
+cache. All directory traversal is descriptor-relative and no-follow before any
+creation or write. An output/run/final symlink introduced after construction is a
+failure, without following it to create an outside directory or artifact. The
+operation anchors the opened workspace capability; it does not claim protection
+against an actor renaming the capability's own underlying directory namespace.
+The existing published CF FileSystem owner provides read/discovery only and has no
+public writing or root-descriptor API. Timing uses its existing reader unchanged
+and keeps only the necessary private host write operations in this store.
+
+Publication cannot replace an existing artifact. The same exact regular-file
+bytes are idempotent; different bytes or a nonregular/symlink final entry fail.
+An exclusive private temporary file is removed on failure/cancellation and after
+publication. Descriptor and cleanup failures remain observable, including a
+primary failure followed by a cleanup failure. A successful no-replace publication
+is the commit point; cancellation is checked before mutation, during bounded
+writes/comparison, and immediately before this point. Cancellation after the
+commit point does not relabel an already published artifact as uncommitted.
+
+Directory work is linear in admitted path components and byte work in input size.
+Only scoped descriptors and a fixed-size comparison buffer are added; the input
+Data is borrowed during writes and is not rematerialized. This public store has
+no new invocation-wide resource-budget claim or platform scope beyond the
+existing host implementation.
+
+[TimingArtifactStoreTests](../../Tests/TimingEngineTests/TimingArtifactStoreTests.swift)
+owns missing alias/nested output and established missing-workspace compatibility,
+escape admission, post-init output/run/final symlink drift without outside effects,
+immutable replay/conflict and concurrent publication, pre-cancellation cleanup,
+and public-reader roundtrip. Original immutable and output-symlink tests remain.
+The actual public CLI missing-output failure and actual public post-init drift
+receipt are the pre-fix counterexamples. Only this artifact path and its API/CLI
+save/reload consumer require requalification; no timing numerical model changes.
