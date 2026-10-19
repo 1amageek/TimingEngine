@@ -1,7 +1,7 @@
 import Foundation
 
 public struct TimingExternalOracleRequest: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
     public static let defaultTimeoutSeconds = 300.0
 
     public var schemaVersion: Int
@@ -11,6 +11,8 @@ public struct TimingExternalOracleRequest: Sendable, Hashable, Codable {
     public var arguments: [String]
     public var workingDirectory: String
     public var timeoutSeconds: Double
+    public var maximumOutputByteCount: UInt64
+    public var cleanupTimeoutSeconds: Double
 
     public init(
         runID: String,
@@ -18,7 +20,9 @@ public struct TimingExternalOracleRequest: Sendable, Hashable, Codable {
         executablePath: String,
         arguments: [String] = [],
         workingDirectory: String,
-        timeoutSeconds: Double = Self.defaultTimeoutSeconds
+        timeoutSeconds: Double = Self.defaultTimeoutSeconds,
+        maximumOutputByteCount: UInt64,
+        cleanupTimeoutSeconds: Double
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID
@@ -27,6 +31,8 @@ public struct TimingExternalOracleRequest: Sendable, Hashable, Codable {
         self.arguments = arguments
         self.workingDirectory = workingDirectory
         self.timeoutSeconds = timeoutSeconds
+        self.maximumOutputByteCount = maximumOutputByteCount
+        self.cleanupTimeoutSeconds = cleanupTimeoutSeconds
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -36,7 +42,7 @@ public struct TimingExternalOracleRequest: Sendable, Hashable, Codable {
         case executablePath
         case arguments
         case workingDirectory
-        case timeoutSeconds
+        case timeoutSeconds, maximumOutputByteCount, cleanupTimeoutSeconds
     }
 
     public init(from decoder: Decoder) throws {
@@ -55,6 +61,8 @@ public struct TimingExternalOracleRequest: Sendable, Hashable, Codable {
         self.arguments = try container.decode([String].self, forKey: .arguments)
         self.workingDirectory = try container.decode(String.self, forKey: .workingDirectory)
         self.timeoutSeconds = try container.decode(Double.self, forKey: .timeoutSeconds)
+        self.maximumOutputByteCount = try container.decode(UInt64.self, forKey: .maximumOutputByteCount)
+        self.cleanupTimeoutSeconds = try container.decode(Double.self, forKey: .cleanupTimeoutSeconds)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -66,5 +74,7 @@ public struct TimingExternalOracleRequest: Sendable, Hashable, Codable {
         try container.encode(arguments, forKey: .arguments)
         try container.encode(workingDirectory, forKey: .workingDirectory)
         try container.encode(timeoutSeconds, forKey: .timeoutSeconds)
+        try container.encode(maximumOutputByteCount, forKey: .maximumOutputByteCount)
+        try container.encode(cleanupTimeoutSeconds, forKey: .cleanupTimeoutSeconds)
     }
 }

@@ -9,7 +9,7 @@ public struct TimingCharacterizationThresholds: Sendable, Equatable {
     public let slewLowerFall: Double
     public let slewUpperFall: Double
 
-    init(
+    package init(
         inputRise: Double, inputFall: Double, outputRise: Double, outputFall: Double,
         slewLowerRise: Double, slewUpperRise: Double, slewLowerFall: Double, slewUpperFall: Double
     ) {

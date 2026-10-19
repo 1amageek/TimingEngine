@@ -232,7 +232,38 @@ struct TimingCLIProcessTests {
         ))
     }
 
-    private func runExecutable(
+    @Test("Actual OpenSTA version-probe timeout retains original cause and binary streams")
+    func openSTAVersionProbeFailureRetainsRawBytes() throws {
+        let fixture = try OpenSTAProcessFixture(toolBody: "exit 0")
+        defer { fixture.remove() }
+        try Data("#!/bin/sh\nprintf '\\377'; printf '\\376' >&2; exec sleep 5\n".utf8).write(to: fixture.executable)
+        var args = fixture.arguments(version: "3.1.0")
+        let index = try #require(args.firstIndex(of: "--timeout")) + 1
+        args[index] = "0.15"
+        let observed = try runExecutable(named: "opensta-oracle-adapter", arguments: args)
+        #expect(observed.exitCode != 0)
+        let output = Data(observed.standardOutput.utf8)
+        try retainCLIExecution(root: fixture.root, output: output, caseID: "version-probe-raw-failure")
+        let result = try JSONDecoder().decode(STAExecutionResult.self, from: output)
+        #expect(result.status == .failed)
+        #expect(result.diagnostics.contains { $0.code.rawValue == "OPENSTA_TIMED_OUT" })
+        let object = try #require(JSONSerialization.jsonObject(with: output) as? [String: Any])
+        let failure = try #require(object["processFailure"] as? [String: String])
+        #expect(failure["cause"] == "OPENSTA_TIMED_OUT")
+        #expect(Data(base64Encoded: try #require(failure["standardOutputBase64"])) == Data([0xff]))
+        #expect(Data(base64Encoded: try #require(failure["standardErrorBase64"])) == Data([0xfe]))
+    }
+
+    private func retainCLIExecution(root: URL, output: Data, caseID: String) throws {
+        guard let base = ProcessInfo.processInfo.environment["TIMING_CLI_EVIDENCE_ROOT"] else { return }
+        let directory = URL(filePath: base).appending(path: caseID + "-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: root, to: directory)
+        try output.write(to: directory.appending(path: "execution-result.json"), options: .withoutOverwriting)
+        print("retained timing CLI evidence: " + directory.path)
+    }
+
+    func runExecutable(
         named name: String,
         arguments: [String]
     ) throws -> (exitCode: Int32, standardOutput: String) {
@@ -241,13 +272,11 @@ struct TimingCLIProcessTests {
         process.arguments = arguments
         let standardOutput = Pipe()
         process.standardOutput = standardOutput
-        process.standardError = Pipe()
+        process.standardError = FileHandle.nullDevice
         try process.run()
+        let bytes = standardOutput.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return (
-            process.terminationStatus,
-            String(decoding: standardOutput.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        )
+        return (process.terminationStatus, String(decoding: bytes, as: UTF8.self))
     }
 
     private func executableURL(named name: String) throws -> URL {
@@ -347,7 +376,7 @@ private struct OpenSTAProcessFixture {
             "--pdk-manifest", pdkManifest.path(percentEncoded: false),
             "--top", "top",
             "--workspace-root", root.path(percentEncoded: false),
-            "--timeout", "5"
+            "--timeout", "5", "--maximum-output-bytes", "65536", "--cleanup-timeout", "5"
         ]
     }
 

@@ -20,7 +20,7 @@ public struct EquipotentialTimingParasiticReducer: TimingParasiticReducing {
     }
 
     private func reduceInventory(_ source: TimingParasitics) throws -> TimingLumpedParasitics {
-        guard source.schemaVersion == TimingParasitics.currentSchemaVersion,
+        guard (source.schemaVersion == 2 || source.schemaVersion == TimingParasitics.currentSchemaVersion),
               Set(source.networks.map(\.name)).count == source.networks.count else {
             throw TimingParasiticReductionError.invalidInventory("Unsupported schema or duplicate networks.")
         }

@@ -3,26 +3,26 @@ import PackageDescription
 
 let logicDesignDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/LogicDesign.git",
-    revision: "d13cebf1454e124a352f87186a22a70ef47d99a5"
+    revision: "4d3e0649fd6f417f1f4a01be7219f2105ba1221a"
 )
 
 let pdkKitDependency: Package.Dependency = .package(url: "https://github.com/1amageek/PDKKit.git",
-    revision: "4bd00d6c7cecc5ef1d5854d60f310fb94a3045b9"
+    revision: "1050fef9325df488d4de32ed3f078686d9e12d1a"
 )
 
 let signoffToolSupportDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/SignoffToolSupport.git",
-    exact: "26.812.0"
+    revision: "e15ea6cd60ca1957297aafbba839e51a478d735e"
 )
 
 let circuiteFoundationDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/CircuiteFoundation.git",
-    revision: "ae88104c556f5802819713ed741f5b2fffffc2d9"
+    revision: "5f132c58209123433e0e479e1ea61096e46061ba"
 )
 
 let toolQualificationDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/ToolQualification.git",
-    revision: "7a69d2ba4e3c4c2262478312f9217de4293a7ab7"
+    revision: "601ff5933396be4ba62c77b8bb0502e2f601f159"
 )
 
 let package = Package(
@@ -48,12 +48,13 @@ let package = Package(
         .target(
             name: "TimingCore",
             dependencies: [
+                .product(name: "LogicIR", package: "LogicDesign"),
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 .product(name: "CircuiteFoundationFoundation", package: "CircuiteFoundation"),
                 .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"),
                 .product(name: "CircuiteFoundationFileSystem", package: "CircuiteFoundation")
             ],
-            exclude: ["DESIGN.md", "ParasiticReduction/DESIGN.md", "LibertyCodec/DESIGN.md"]
+            exclude: ["DESIGN.md", "ParasiticReduction/DESIGN.md", "LibertyCodec/DESIGN.md", "CanonicalModel/DESIGN.md", "PathConstraints/DESIGN.md", "NumericBounds/DESIGN.md"]
         ),
         .target(
             name: "TimingPDKProfileInspection",
@@ -74,7 +75,7 @@ let package = Package(
                 .product(name: "LogicIR", package: "LogicDesign"),
                 .product(name: "PDKCore", package: "PDKKit")
             ],
-            exclude: ["DESIGN.md", "ProcessCorners/DESIGN.md", "PreparedExecution/DESIGN.md"]
+            exclude: ["DESIGN.md", "NativeExecution/ClockPropagation/DESIGN.md", "NativeExecution/ConservativeCoupling/DESIGN.md", "NativeExecution/ConservativeCoupling/SourceFamilies/DESIGN.md", "NativeExecution/DESIGN.md", "NativeExecution/DistributedRC/DESIGN.md", "NativeExecution/PathAnalysis/DESIGN.md", "NativeExecution/PathAnalysis/SequentialExecution/DESIGN.md", "NativeExecution/PulsePropagation/DESIGN.md", "PreparedExecution/DESIGN.md", "ProcessCorners/DESIGN.md"]
         ),
         .target(
             name: "SignalIntegrityEngine",
@@ -95,7 +96,7 @@ let package = Package(
                 "SignalIntegrityEngine",
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 .product(name: "SignoffToolSupport", package: "SignoffToolSupport"),
-            ]
+            ], exclude: ["DESIGN.md", "ScalarReference/DESIGN.md"]
         ),
         .executableTarget(
             name: "TimingCLI",
@@ -106,7 +107,7 @@ let package = Package(
                 "TimingEngine",
                 .product(name: "LogicIR", package: "LogicDesign"),
                 .product(name: "PDKCore", package: "PDKKit"),
-            ]
+            ], exclude: ["DESIGN.md"]
         ),
         .executableTarget(
             name: "OpenSTAOracleAdapter",
@@ -117,9 +118,9 @@ let package = Package(
                 .product(name: "CircuiteFoundationFoundation", package: "CircuiteFoundation"),
                 .product(name: "CircuiteFoundationFileSystem", package: "CircuiteFoundation"),
                 .product(name: "SignoffToolSupport", package: "SignoffToolSupport"),
-            ]
+            ], exclude: ["DESIGN.md"]
         ),
-        .testTarget(name: "LibertyCodecTests", dependencies: ["TimingCore"]),
+        .testTarget(name: "LibertyCodecTests", dependencies: ["TimingCore", .product(name: "LogicIR", package: "LogicDesign"), .product(name: "LogicKernelCore", package: "LogicDesign")]),
         .testTarget(name: "TimingPDKProfileInspectionTests", dependencies: [
             "TimingCore", "TimingPDKProfileInspection", .product(name: "PDKCore", package: "PDKKit"),
             .product(name: "PDKProfileAdmission", package: "PDKKit"), .product(name: "PDKSourceCapture", package: "PDKKit"),
@@ -135,6 +136,7 @@ let package = Package(
         .testTarget(
             name: "TimingEngineTests",
             dependencies: [
+                .product(name: "LogicIR", package: "LogicDesign"),
                 "TimingCore",
                 "STAEngine",
                 "SignalIntegrityEngine",
@@ -144,7 +146,8 @@ let package = Package(
                 .product(name: "CircuiteFoundationFoundation", package: "CircuiteFoundation"),
                 .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"),
                 .product(name: "CircuiteFoundationFileSystem", package: "CircuiteFoundation"),
-                .product(name: "ToolQualification", package: "ToolQualification")
+                .product(name: "ToolQualification", package: "ToolQualification"),
+                .product(name: "SignoffToolSupport", package: "SignoffToolSupport")
             ],
             resources: [
                 .copy("../../Corpus"),

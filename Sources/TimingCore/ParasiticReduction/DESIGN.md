@@ -3,7 +3,7 @@
 ## Purpose and Scope
 
 Own the explicit equipotential cap-load approximation over admitted TimingParasitics
-v2 source inventory. Parent: [TimingCore](../DESIGN.md). No children. No distributed
+v3 source inventory. Parent: [TimingCore](../DESIGN.md). No children. No distributed
 RC solver, extraction, logical binding inference or process qualification is owned.
 
 ## Responsibilities and Boundaries
@@ -88,3 +88,24 @@ mirrors, lost parallel records, ambiguous mirror admission, header-derived loads
 unknown owners, missing positive inventory and invalid numeric/schema values.
 Native STA/SI tests prove actual LUT/noise consumption, loss diagnostics and payload
 round-trip. Changes invalidate those consumers and canonical database preservation.
+
+## Distributed Source Preservation
+
+TimingParasitics v3 additionally owns exact positive/zero RES source values, both
+resolved endpoints, connection declarations and the declared pin delimiter. RES
+local IDs are independent of CAP IDs. Every RES endpoint retains its exact resolved owner; inventory sums cannot reconstruct topology. Cross-net source records remain representable for the existing explicit legacy resistance-inventory approximation; distributed propagation rejects them before operator construction. The parser rejects unknown scoped owners, duplicate IDs, nonfinite values and SI conversion underflow.
+Legacy v2 JSON remains explicitly usable by the equipotential projection only; distributed consumers require v3 source topology and reparse SPEF rather than infer missing endpoints.
+The equipotential reducer remains explicitly approximate and consumes the existing
+CAP contract; it never claims the preserved R topology has been evaluated.
+
+Native distributed propagation belongs to STAEngine NativeExecution. Its input
+identity binds the same preserved SPEF bytes; no endpoint is inferred from a net's
+D_NET header, nor is a missing source/sink connection silently synthesized.
+
+An explicit exact zero RES preserves an ideal equality between distinct endpoint
+identities. Nodal coalescing belongs only to the distributed consumer; the source
+inventory and equipotential loss evidence never delete or rename its terminals.
+PEX canonical-terminal SPEF export exposes exact canonical pin tokens directly.
+Timing consumes actual CONN/CAP/RES tokens and values, not PEX's private identity
+annotation. Encoded-only generated PEX SPEF requires re-export in that explicit
+profile; Timing does not guess a canonical pin from its encoded spelling.

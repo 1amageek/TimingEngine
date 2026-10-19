@@ -7,6 +7,7 @@ import Testing
 @testable import TimingEngine
 import TimingCore
 import STAEngine
+import SignoffToolSupport
 
 @Suite("Timing corpus and correlation")
 struct CorpusTests {
@@ -561,7 +562,8 @@ struct CorpusTests {
                 runID: "oracle-blocked",
                 oracleID: "missing-oracle",
                 executablePath: "/path/to/missing/oracle",
-                workingDirectory: FileManager.default.temporaryDirectory.path(percentEncoded: false)
+                workingDirectory: FileManager.default.temporaryDirectory.path(percentEncoded: false),
+                maximumOutputByteCount: 65536, cleanupTimeoutSeconds: 5
             )
         )
         #expect(result.status == .blocked)
@@ -602,7 +604,7 @@ struct CorpusTests {
                 oracleID: "fixture-oracle",
                 executablePath: "/bin/cat",
                 arguments: [reportURL.path(percentEncoded: false)],
-                workingDirectory: directory.path(percentEncoded: false)
+                workingDirectory: directory.path(percentEncoded: false), maximumOutputByteCount: 65536, cleanupTimeoutSeconds: 5
             )
         )
         #expect(observed.status == .completed)
@@ -634,7 +636,7 @@ struct CorpusTests {
         let observed = try await LocalTimingExternalOracleRunner().execute(
             TimingExternalOracleRequest(
                 runID: "oracle-schema", oracleID: "fixture-oracle", executablePath: "/bin/cat",
-                arguments: [reportURL.path(percentEncoded: false)], workingDirectory: directory.path(percentEncoded: false)
+                arguments: [reportURL.path(percentEncoded: false)], workingDirectory: directory.path(percentEncoded: false), maximumOutputByteCount: 65536, cleanupTimeoutSeconds: 5
             )
         )
         #expect(observed.status == .failed)
@@ -674,7 +676,7 @@ struct CorpusTests {
                 oracleID: "fixture-oracle",
                 executablePath: "/bin/cat",
                 arguments: [reportURL.path(percentEncoded: false)],
-                workingDirectory: directory.path(percentEncoded: false)
+                workingDirectory: directory.path(percentEncoded: false), maximumOutputByteCount: 65536, cleanupTimeoutSeconds: 5
             )
         )
         #expect(observed.status == .failed)
@@ -685,18 +687,18 @@ struct CorpusTests {
     func externalOracleTimeout() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "timing-oracle-timeout-(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let result = try await LocalTimingExternalOracleRunner().execute(
-            TimingExternalOracleRequest(
-                runID: "oracle-timeout",
-                oracleID: "fixture-oracle",
-                executablePath: "/bin/sh",
-                arguments: ["-c", "sleep 2"],
-                workingDirectory: directory.path(percentEncoded: false),
-                timeoutSeconds: 0.05
-            )
-        )
-        #expect(result.status == .failed)
-        #expect(result.diagnostics == ["external_oracle_timed_out"])
+        do {
+            _ = try await LocalTimingExternalOracleRunner().execute(
+                TimingExternalOracleRequest(runID: "oracle-timeout", oracleID: "fixture-oracle",
+                    executablePath: "/bin/sh", arguments: ["-c", "sleep 2"],
+                    workingDirectory: directory.path, timeoutSeconds: 0.05,
+                    maximumOutputByteCount: 65536, cleanupTimeoutSeconds: 5))
+            Issue.record("Timeout unexpectedly completed")
+        } catch let error as TimedProcessError {
+            guard case .executionFailed(let failure) = error else { throw error }
+            #expect(failure.cause == .timedOut(timeoutSeconds: 0.05))
+            #expect(failure.cleanupHandle == nil)
+        }
     }
 
     @Test("external oracle request rejects obsolete schema")

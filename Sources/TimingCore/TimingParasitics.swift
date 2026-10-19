@@ -46,33 +46,67 @@ public struct TimingParasitics: Sendable, Hashable, Codable {
         }
     }
 
+    public struct ResistanceRecord: Sendable, Hashable, Codable {
+        public let source: SourceID
+        public let first: Endpoint
+        public let second: Endpoint
+        /// Exact zero preserves an ideal voltage-equality source record between endpoint identities.
+        public let resistance: Double
+
+        public init(source: SourceID, first: Endpoint, second: Endpoint, resistance: Double) {
+            self.source = source; self.first = first; self.second = second; self.resistance = resistance
+        }
+    }
+
     public struct Network: Sendable, Hashable, Codable {
         public let name: String
         public let declaredCapacitance: Double
         public let resistanceInventory: Double
         public let capacitances: [CapacitanceRecord]
+        public let resistances: [ResistanceRecord]
+        public let connections: [Endpoint]
 
         public var groundCapacitance: Double {
             capacitances.reduce(0) { $0 + ($1.second == nil ? $1.capacitance : 0) }
         }
 
         public init(name: String, declaredCapacitance: Double = 0,
-                    resistanceInventory: Double = 0, capacitances: [CapacitanceRecord] = []) {
+                    resistanceInventory: Double = 0, capacitances: [CapacitanceRecord] = [],
+                    resistances: [ResistanceRecord] = [], connections: [Endpoint] = []) {
             self.name = name
             self.declaredCapacitance = declaredCapacitance
             self.resistanceInventory = resistanceInventory
             self.capacitances = capacitances
+            self.resistances = resistances
+            self.connections = connections
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case name, declaredCapacitance, resistanceInventory, capacitances, resistances, connections
+        }
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            try self.init(name: c.decode(String.self, forKey: .name),
+                declaredCapacitance: c.decode(Double.self, forKey: .declaredCapacitance),
+                resistanceInventory: c.decode(Double.self, forKey: .resistanceInventory),
+                capacitances: c.decode([CapacitanceRecord].self, forKey: .capacitances),
+                resistances: c.decodeIfPresent([ResistanceRecord].self, forKey: .resistances) ?? [],
+                connections: c.decodeIfPresent([Endpoint].self, forKey: .connections) ?? [])
         }
     }
 
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
+    /// Legacy inventory is usable only for the explicit equipotential projection.
+    public var hasDistributedTopology: Bool { schemaVersion == Self.currentSchemaVersion }
     public let schemaVersion: Int
     public let designName: String?
+    public let pinDelimiter: String
     public let networks: [Network]
 
-    public init(designName: String? = nil, networks: [Network] = []) {
+    public init(designName: String? = nil, pinDelimiter: String = ":", networks: [Network] = []) {
         self.schemaVersion = Self.currentSchemaVersion
         self.designName = designName
+        self.pinDelimiter = pinDelimiter
         self.networks = networks
     }
 
@@ -80,16 +114,18 @@ public struct TimingParasitics: Sendable, Hashable, Codable {
         networks.first { $0.name == name }
     }
 
-    private enum CodingKeys: String, CodingKey { case schemaVersion, designName, networks }
+    private enum CodingKeys: String, CodingKey { case schemaVersion, designName, pinDelimiter, networks }
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let version = try container.decode(Int.self, forKey: .schemaVersion)
-        guard version == Self.currentSchemaVersion else {
+        guard version == 2 || version == Self.currentSchemaVersion else {
             throw DecodingError.dataCorruptedError(forKey: .schemaVersion, in: container,
                 debugDescription: "Unsupported timing parasitic source inventory schema.")
         }
-        self.init(designName: try container.decodeIfPresent(String.self, forKey: .designName),
-                  networks: try container.decode([Network].self, forKey: .networks))
+        schemaVersion = version
+        designName = try container.decodeIfPresent(String.self, forKey: .designName)
+        pinDelimiter = try container.decodeIfPresent(String.self, forKey: .pinDelimiter) ?? ":"
+        networks = try container.decode([Network].self, forKey: .networks)
     }
 }

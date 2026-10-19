@@ -104,3 +104,22 @@ The CLI accepts `--condition`, `--max-paths` and
 `--expected-configuration-digest`; condition selects the observed policy. Native
 actual config/characterization records are present in emitted v4 results. Old
 schemas are rejected by the canonical reader, including external correlation.
+
+## Bounded External Oracle Dependency Migration
+
+TimingExternalOracleRequest schema 3 requires maximumOutputByteCount and
+cleanupTimeoutSeconds from its caller. OpenSTA CLI requires
+--maximum-output-bytes and --cleanup-timeout, including version probing.
+Typed lower process failures preserve exact raw Data, the original cause and any
+pending cleanup handle; callers must close or transfer that handle. Existing
+STA schema 4 and initial-context record version 1 retain their own authority.
+See [OpenSTA](Sources/OpenSTAOracleAdapter/DESIGN.md) and
+[external oracle consumption](Sources/TimingEngine/DESIGN.md).
+
+## Strict Prepared Request CLI
+
+The source-owned schema-4 request may be executed through `run-sta --request`
+with an explicit bounded request-file size and workspace root. Strict source
+validation against the same Prepared owner precedes artifact publication.
+All request/source/native resource overrides and refusal rules are owned by
+[TimingCLI](Sources/TimingCLI/DESIGN.md); the CLI cannot invent source conditions.

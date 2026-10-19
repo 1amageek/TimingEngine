@@ -14,6 +14,8 @@ public struct TimingExternalOracleResult: Sendable, Hashable, Codable {
     public var exitCode: Int32?
     public var stdout: String
     public var stderr: String
+    public var standardOutputData: Data?
+    public var standardErrorData: Data?
     public var payload: STAPayload?
     public var diagnostics: [String]
 
@@ -24,6 +26,8 @@ public struct TimingExternalOracleResult: Sendable, Hashable, Codable {
         exitCode: Int32? = nil,
         stdout: String = "",
         stderr: String = "",
+        standardOutputData: Data? = nil,
+        standardErrorData: Data? = nil,
         payload: STAPayload? = nil,
         diagnostics: [String] = []
     ) {
@@ -33,6 +37,8 @@ public struct TimingExternalOracleResult: Sendable, Hashable, Codable {
         self.exitCode = exitCode
         self.stdout = stdout
         self.stderr = stderr
+        self.standardOutputData = standardOutputData
+        self.standardErrorData = standardErrorData
         self.payload = payload
         self.diagnostics = diagnostics
     }

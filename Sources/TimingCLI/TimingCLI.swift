@@ -59,6 +59,19 @@ struct TimingCLI {
     }
 
     private static func runSTA(_ values: [String]) async throws {
+        if values == ["--help"] { print(TimingSTARequestCommand.help); return }
+        if values.contains("--request") {
+            do { try await TimingSTARequestCommand.run(values) }
+            catch let cause as STAPreparationError {
+                throw TimingError.invalidInput("Strict STA preparation failed: \(cause)")
+            } catch let cause as STAExecutionError {
+                throw TimingError.invalidInput("Strict STA execution or source validation failed: \(cause)")
+            }
+            return
+        }
+        guard !TimingSTARequestCommand.resourceOptions.contains(where:{ values.contains($0) }) else {
+            throw TimingError.invalidInput("Strict STA resource options require --request")
+        }
         let workspaceRoot = option("--workspace-root", in: values).map {
             URL(filePath: $0, directoryHint: .isDirectory)
                 .standardizedFileURL.resolvingSymlinksInPath()

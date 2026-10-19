@@ -3,16 +3,22 @@
 public final class OwnedLibertySource: Sendable {
     public let library: TimingLibrary
     public let cells: [LibertySourceCell]
+    public let thresholds: TimingCharacterizationThresholds?
+    public let thresholdIssue: TimingCharacterizationError?
+    public let hasPinThresholdOverrides: Bool
     public let operatingConditions: [LibertySourceOperatingCondition]
     private let bytes: [UInt8]
     private let storage: LibertyParseStorage
     private let metadata: LibertySourceStorageReservation
     public var byteCount: Int { bytes.count }
+    internal var normalPowerResources: any LibertySourceResourceAccounting { storage.resources }
 
     internal init(library: TimingLibrary, cells: [LibertySourceCell],
-                  operatingConditions: [LibertySourceOperatingCondition], bytes: [UInt8],
+                  operatingConditions: [LibertySourceOperatingCondition], thresholds: TimingCharacterizationThresholds?, thresholdIssue: TimingCharacterizationError?,
+                  hasPinThresholdOverrides: Bool, bytes: [UInt8],
                   storage: LibertyParseStorage, metadata: LibertySourceStorageReservation) {
         self.library = library; self.cells = cells; self.operatingConditions = operatingConditions
+        self.thresholds = thresholds; self.thresholdIssue = thresholdIssue; self.hasPinThresholdOverrides = hasPinThresholdOverrides
         self.bytes = bytes; self.storage = storage; self.metadata = metadata
     }
 

@@ -65,7 +65,7 @@ struct STAProcessTestFixture {
         ])
     }
 
-    private static func binding(_ data: Data, path: String, kind: ArtifactKind, format: ArtifactFormat) throws -> TimingArtifactBinding {
+    static func binding(_ data: Data, path: String, kind: ArtifactKind, format: ArtifactFormat) throws -> TimingArtifactBinding {
         let reference = try ArtifactReference(
             digest: SHA256ContentDigester().digest(data: data, using: .sha256),
             byteCount: UInt64(data.count),

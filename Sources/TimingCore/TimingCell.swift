@@ -7,6 +7,8 @@ public struct TimingCell: Sendable, Hashable, Codable {
     public var arcs: [TimingArc]
     public var sequentialModel: TimingSequentialModel?
     public var powerModel: TimingPowerModel?
+    public var pulseWidthConstraints: [TimingPulseWidthConstraint]
+    public var directionalControlArcs: [TimingDirectionalControlArc]
 
     public init(
         name: String,
@@ -14,7 +16,9 @@ public struct TimingCell: Sendable, Hashable, Codable {
         pins: [TimingPin] = [],
         arcs: [TimingArc] = [],
         sequentialModel: TimingSequentialModel? = nil,
-        powerModel: TimingPowerModel? = nil
+        powerModel: TimingPowerModel? = nil,
+        pulseWidthConstraints: [TimingPulseWidthConstraint] = [],
+        directionalControlArcs: [TimingDirectionalControlArc] = []
     ) {
         self.name = name
         self.area = area
@@ -22,6 +26,8 @@ public struct TimingCell: Sendable, Hashable, Codable {
         self.arcs = arcs
         self.sequentialModel = sequentialModel
         self.powerModel = powerModel
+        self.pulseWidthConstraints = pulseWidthConstraints
+        self.directionalControlArcs = directionalControlArcs
     }
 
     public var inputPins: [TimingPin] {
@@ -47,6 +53,8 @@ public struct TimingCell: Sendable, Hashable, Codable {
         case arcs
         case sequentialModel
         case powerModel
+        case pulseWidthConstraints
+        case directionalControlArcs
     }
 
     public init(from decoder: Decoder) throws {
@@ -57,7 +65,9 @@ public struct TimingCell: Sendable, Hashable, Codable {
             pins: try container.decode([TimingPin].self, forKey: .pins),
             arcs: try container.decode([TimingArc].self, forKey: .arcs),
             sequentialModel: try container.decodeIfPresent(TimingSequentialModel.self, forKey: .sequentialModel),
-            powerModel: try container.decodeIfPresent(TimingPowerModel.self, forKey: .powerModel)
+            powerModel: try container.decodeIfPresent(TimingPowerModel.self, forKey: .powerModel),
+            pulseWidthConstraints: try container.decodeIfPresent([TimingPulseWidthConstraint].self, forKey: .pulseWidthConstraints) ?? [],
+            directionalControlArcs: try container.decodeIfPresent([TimingDirectionalControlArc].self, forKey: .directionalControlArcs) ?? []
         )
     }
 
@@ -69,5 +79,7 @@ public struct TimingCell: Sendable, Hashable, Codable {
         try container.encode(arcs, forKey: .arcs)
         try container.encodeIfPresent(sequentialModel, forKey: .sequentialModel)
         try container.encodeIfPresent(powerModel, forKey: .powerModel)
+        if !pulseWidthConstraints.isEmpty { try container.encode(pulseWidthConstraints, forKey: .pulseWidthConstraints) }
+        if !directionalControlArcs.isEmpty { try container.encode(directionalControlArcs, forKey: .directionalControlArcs) }
     }
 }

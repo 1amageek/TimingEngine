@@ -14,6 +14,28 @@ struct OpenSTAOracleAdapter {
             guard executionResult.status == .completed else {
                 Foundation.exit(1)
             }
+        } catch let error as TimedProcessError {
+            if case .executionFailed(let failure) = error, let handle = failure.cleanupHandle {
+                // An OS cleanup-pending state cannot promise bounded CLI termination.
+                // Preserve this owner and first failure; do not restart oracle execution.
+                let budget = option("--cleanup-timeout", in: arguments).flatMap(Double.init)
+                guard let budget, budget.isFinite, budget > 0 else {
+                    fatalError("A launched process must retain its validated cleanup budget")
+                }
+                while true {
+                    do { try await handle.close(timeoutSeconds: budget); break }
+                    catch let cleanupError {
+                        do { try emit(["status": "cleanup-pending", "processID": String(handle.processID),
+                            "cause": processDiagnosticCode(for: error), "cleanup": String(describing: cleanupError)]) }
+                        catch { FileHandle.standardError.write(Data("OpenSTA cleanup remains pending\n".utf8)) }
+                    }
+                }
+            }
+            let runID = option("--run-id", in: arguments) ?? "opensta-oracle-run"
+            do {
+                try emitProcessFailure(runID: runID, error: error)
+            } catch { FileHandle.standardError.write(Data("OpenSTA process failed\n".utf8)) }
+            Foundation.exit(1)
         } catch let error as OpenSTAExecutableValidationError {
             let runID = option("--run-id", in: arguments) ?? "opensta-oracle-run"
             do {
@@ -51,6 +73,10 @@ struct OpenSTAOracleAdapter {
         let modeID = option("--mode", in: arguments) ?? "default"
         let cornerID = option("--corner", in: arguments) ?? "default"
         let timeoutSeconds = try timeout(in: arguments)
+        guard let output = UInt64(try required("--maximum-output-bytes", in: arguments)), output > 0,
+              let cleanup = Double(try required("--cleanup-timeout", in: arguments)), cleanup.isFinite, cleanup > 0 else {
+            throw TimingError.invalidInput("Output and cleanup budgets must be explicit positive values.")
+        }
         let spefPath = option("--spef", in: arguments)
         guard let workspaceRoot = option("--workspace-root", in: arguments).map({
             URL(filePath: $0, directoryHint: .isDirectory)
@@ -64,7 +90,8 @@ struct OpenSTAOracleAdapter {
         let executable = try await executableValidator.validate(
             path: staPath,
             expectedVersion: oracleVersion,
-            timeoutSeconds: timeoutSeconds
+            timeoutSeconds: timeoutSeconds,
+            maximumOutputByteCount: output, cleanupTimeoutSeconds: cleanup
         )
         let referenceBuilder = TimingArtifactReferenceBuilder()
         let designReference = try makeBinding(
@@ -154,11 +181,11 @@ struct OpenSTAOracleAdapter {
         )
 
         do {
-            let processResult = try await TimedProcessRunner(timeoutSeconds: timeoutSeconds).run(process: process)
+            let processResult = try await TimedProcessRunner(timeoutSeconds: timeoutSeconds, maximumOutputByteCount: output, cleanupTimeoutSeconds: cleanup).run(process: process)
             let streamReferences = try persistProcessStreams(
                 runID: runID,
-                standardOutput: processResult.standardOutput,
-                standardError: processResult.standardError,
+                standardOutput: processResult.standardOutputData,
+                standardError: processResult.standardErrorData,
                 directory: executionWorkspace.root,
                 workspaceRoot: workspaceRoot,
                 builder: referenceBuilder
@@ -250,6 +277,13 @@ struct OpenSTAOracleAdapter {
                 artifacts: retainedArtifacts
             )
         } catch let error as TimedProcessError {
+            if case .executionFailed(let failure) = error, let handle = failure.cleanupHandle {
+                do { try await handle.close(timeoutSeconds: cleanup) }
+                catch let cleanupError {
+                    _ = cleanupError
+                    throw error
+                }
+            }
             let captured = capturedOutput(from: error)
             let streamReferences = try persistProcessStreams(
                 runID: runID,
@@ -326,8 +360,8 @@ struct OpenSTAOracleAdapter {
 
     private static func persistProcessStreams(
         runID: String,
-        standardOutput: String,
-        standardError: String,
+        standardOutput: Data,
+        standardError: Data,
         directory: URL,
         workspaceRoot: URL?,
         builder: TimingArtifactReferenceBuilder
@@ -348,7 +382,7 @@ struct OpenSTAOracleAdapter {
         return try streams.map { stream in
             let url = directory.appending(path: ".timingengine-opensta-\(safeRunID).\(stream.suffix).log")
             do {
-                try Data(stream.content.utf8).write(to: url, options: .atomic)
+                try stream.content.write(to: url, options: .atomic)
             } catch {
                 throw TimingError.artifactWriteFailed(
                     path: url.path(percentEncoded: false),
@@ -368,15 +402,11 @@ struct OpenSTAOracleAdapter {
 
     private static func capturedOutput(
         from error: TimedProcessError
-    ) -> (standardOutput: String, standardError: String) {
-        switch error {
-        case .cancellationCheckFailed(_, _, let standardOutput, let standardError),
-             .cancelled(_, let standardOutput, let standardError),
-             .timedOut(_, _, let standardOutput, let standardError):
-            (standardOutput, standardError)
-        case .invalidConfiguration, .launchFailed:
-            ("", "")
+    ) -> (standardOutput: Data, standardError: Data) {
+        if case .executionFailed(let failure) = error {
+            return (failure.standardOutputData, failure.standardErrorData)
         }
+        return (Data(), Data())
     }
 
     private static func makeBinding(
@@ -665,13 +695,34 @@ struct OpenSTAOracleAdapter {
         )
     }
 
+    private static func emitProcessFailure(runID: String, error: TimedProcessError) throws {
+        let data = try JSONEncoder().encode(failureResult(runID: runID, code: processDiagnosticCode(for: error),
+            message: error.localizedDescription))
+        guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw TimingError.invariantViolation("Canonical process failure is not a JSON object")
+        }
+        if case .executionFailed(let failure) = error {
+            object["processFailure"] = ["cause": processDiagnosticCode(for: error),
+                "standardOutputBase64": failure.standardOutputData.base64EncodedString(),
+                "standardErrorBase64": failure.standardErrorData.base64EncodedString()]
+        }
+        let encoded = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        print(String(decoding: encoded, as: UTF8.self))
+    }
+
     private static func processDiagnosticCode(for error: TimedProcessError) -> String {
         switch error {
-        case .invalidConfiguration: return "OPENSTA_INVALID_TIMEOUT"
+        case .invalidConfiguration: return "OPENSTA_INVALID_PROCESS_CONFIGURATION"
         case .launchFailed: return "OPENSTA_LAUNCH_FAILED"
-        case .cancellationCheckFailed: return "OPENSTA_CANCELLATION_CHECK_FAILED"
-        case .cancelled: return "OPENSTA_CANCELLED"
-        case .timedOut: return "OPENSTA_TIMED_OUT"
+        case .executionFailed(let failure):
+            switch failure.cause {
+            case .cancelled: return "OPENSTA_CANCELLED"
+            case .controlFailed: return "OPENSTA_CONTROL_FAILED"
+            case .timedOut: return "OPENSTA_TIMED_OUT"
+            case .outputLimitExceeded: return "OPENSTA_OUTPUT_LIMIT_EXCEEDED"
+            case .ioFailed: return "OPENSTA_IO_FAILED"
+            case .cleanupIncomplete: return "OPENSTA_CLEANUP_INCOMPLETE"
+            }
         }
     }
 

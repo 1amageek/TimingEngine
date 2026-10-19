@@ -18,7 +18,9 @@ struct OpenSTAExecutableValidator: Sendable {
     func validate(
         path: String,
         expectedVersion: String,
-        timeoutSeconds: Double
+        timeoutSeconds: Double,
+        maximumOutputByteCount: UInt64,
+        cleanupTimeoutSeconds: Double
     ) async throws -> ValidatedExecutable {
         let executableURL = URL(filePath: path)
             .standardizedFileURL
@@ -45,8 +47,11 @@ struct OpenSTAExecutableValidator: Sendable {
         let versionResult: TimedProcessResult
         do {
             versionResult = try await TimedProcessRunner(
-                timeoutSeconds: min(timeoutSeconds, 30)
+                timeoutSeconds: min(timeoutSeconds, 30),
+                maximumOutputByteCount: maximumOutputByteCount, cleanupTimeoutSeconds: cleanupTimeoutSeconds
             ).run(executableURL: executableURL, arguments: ["-version"])
+        } catch let error as TimedProcessError {
+            throw error
         } catch {
             throw OpenSTAExecutableValidationError.versionProbeFailed(
                 path: executablePath,

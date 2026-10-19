@@ -211,7 +211,8 @@ struct TimingCoreTests {
             )
         )
 
-        #expect(constraints.inputDelays.map(\.port) == ["a", "b"])
+        #expect(constraints.inputDelays.filter(\.isMax).map(\.port) == ["a", "b"])
+        #expect(constraints.inputDelays.filter { !$0.isMax }.map(\.port) == ["a", "b"])
         #expect(constraints.inputDelays.allSatisfy { $0.clock == "clk" })
     }
 
@@ -443,6 +444,12 @@ struct TimingCoreTests {
           direction : input;
           timing () {
             related_pin : "CLK";
+            timing_type : hold_rising;
+            rise_constraint (t) { values ("0.0"); }
+            fall_constraint (t) { values ("0.0"); }
+          }
+          timing () {
+            related_pin : "CLK";
             timing_type : setup_rising;
             rise_constraint (t) { index_1 ("0.1"); index_2 ("0.0"); values ("0.2"); }
             fall_constraint (t) { index_1 ("0.1"); index_2 ("0.0"); values ("0.2"); }
@@ -451,6 +458,7 @@ struct TimingCoreTests {
         pin (CLK) { direction : input; clock : true; }
         pin (Q) {
           direction : output;
+          function : "IQ";
           timing () {
             related_pin : "CLK";
             timing_type : rising_edge;

@@ -30,6 +30,8 @@ public struct SPEFParser: TimingParasiticParsing {
         var networks: [String: TimingParasitics.Network] = [:]
         var connections: [String: String] = [:]
         var pendingCapacitances: [(source: TimingParasitics.SourceID, first: String, second: String?, capacitance: Double)] = []
+        var pendingResistances: [(source: TimingParasitics.SourceID, first: String, second: String, resistance: Double)] = []
+        var resistanceIdentifiers: Set<UInt64> = []
         var localIdentifiers: Set<UInt64> = []
         var currentNetwork: String?
         var declarationLine = 1
@@ -70,6 +72,9 @@ public struct SPEFParser: TimingParasiticParsing {
             guard !line.isEmpty, !line.hasPrefix("//") else { continue }
             let fields = line.split(whereSeparator: \.isWhitespace).map(String.init)
             guard let first = fields.first else { continue }
+            if first == "*PROGRAM", line.contains(" PEX_IDENTITY_V1"), !line.contains(" PEX_CANONICAL_TERMINALS_V1") {
+                throw TimingError.unsupportedSemantic(format: "SPEF", semantic: "Encoded PEX terminals require explicit canonical-terminal export.")
+            }
             if first == "*NAME_MAP" { inNameMap = true; continue }
             if inNameMap, first.first == "*", first.dropFirst().allSatisfy(\.isNumber), first.count > 1 {
                 guard fields.count == 2 else {
@@ -121,6 +126,7 @@ public struct SPEFParser: TimingParasiticParsing {
                 resistance = 0
                 section = nil
                 localIdentifiers = []
+                resistanceIdentifiers = []
                 continue
             }
             if first == "*END" {
@@ -164,11 +170,18 @@ public struct SPEFParser: TimingParasiticParsing {
                     capacitance: capacitance
                 ))
             } else if section == "res" {
-                guard fields.count >= 4 else {
+                guard fields.count == 4 else {
                     throw TimingError.parseFailure(format: "SPEF", line: lineNumber, message: "Invalid resistance entry.")
                 }
                 let value = try sourceValue(fields.last ?? "", quantity: "resistance", line: lineNumber)
-                _ = try convertToSI(value, scale: resistanceScale, quantity: "resistance", line: lineNumber)
+                guard let identifier = UInt64(fields[0]), identifier > 0,
+                      resistanceIdentifiers.insert(identifier).inserted else {
+                    throw TimingError.parseFailure(format: "SPEF", line: lineNumber,
+                        message: "Resistance identifiers must be positive and unique within a network.")
+                }
+                let ohms = try convertToSI(value, scale: resistanceScale, quantity: "resistance", line: lineNumber)
+                pendingResistances.append((.init(declaringNet: currentNetwork, identifier: identifier, line: lineNumber),
+                    try expand(fields[1], line: lineNumber), try expand(fields[2], line: lineNumber), ohms))
                 resistance += value
             }
         }
@@ -216,10 +229,20 @@ public struct SPEFParser: TimingParasiticParsing {
             records[entry.source.declaringNet, default: []].append(.init(
                 source: entry.source, first: first, second: second, capacitance: entry.capacitance))
         }
-        return TimingParasitics(networks: networks.values.sorted { $0.name < $1.name }.map { network in
+        var resistances: [String: [TimingParasitics.ResistanceRecord]] = [:]
+        for entry in pendingResistances {
+            let first = TimingParasitics.Endpoint(name: unescape(entry.first), ownerNet: try owner(of: entry.first, line: entry.source.line))
+            let second = TimingParasitics.Endpoint(name: unescape(entry.second), ownerNet: try owner(of: entry.second, line: entry.source.line))
+            resistances[entry.source.declaringNet, default: []].append(.init(source: entry.source,
+                first: first, second: second, resistance: entry.resistance))
+        }
+        return TimingParasitics(pinDelimiter: String(delimiter), networks: networks.values.sorted { $0.name < $1.name }.map { network in
             .init(name: network.name, declaredCapacitance: network.declaredCapacitance,
                   resistanceInventory: network.resistanceInventory,
-                  capacitances: records[network.name] ?? [])
+                  capacitances: records[network.name] ?? [], resistances: resistances[network.name] ?? [],
+                  connections: connections.filter { $0.value == network.name }.keys.sorted().map {
+                      .init(name: $0, ownerNet: network.name)
+                  })
         })
     }
 

@@ -4,7 +4,9 @@
 
 Own canonical timing values, parsers and characterized load/slew evaluation.
 Parent: [TimingEngine](../../DESIGN.md). Children:
-[LibertyCodec](LibertyCodec/DESIGN.md) and [ParasiticReduction](ParasiticReduction/DESIGN.md).
+[LibertyCodec](LibertyCodec/DESIGN.md), [ParasiticReduction](ParasiticReduction/DESIGN.md),
+[CanonicalModel](CanonicalModel/DESIGN.md), [PathConstraints](PathConstraints/DESIGN.md),
+and [NumericBounds](NumericBounds/DESIGN.md).
 
 ## Responsibilities and Boundaries
 
@@ -13,6 +15,14 @@ characterization profile accepts selected cells from Liberty text only, separati
 capacitance-only sink cells from propagation cells. Evaluation is permitted only
 for the explicit propagation-cell subset. CTS owns
 source integrity, corner selection, sink connectivity, RC and arrival propagation.
+
+Owned Liberty functional projection is also defined by LibertyCodec. It preserves
+original function/sequential facts for the host logic-library compiler, without
+deriving them from timing models or granting mapping eligibility.
+Source-defined sequential model/binding and positioned numeric source identity
+are owned by the same [LibertyCodec contract](LibertyCodec/DESIGN.md#source-defined-sequential-models).
+Legacy single-pin views are optional; downstream execution must distinguish the
+explicit source/legacy definition before selecting a sequential algorithm.
 SPEFParser owns standard SPEF name expansion and node-to-net ownership before
 publishing TimingParasitics. It does not interpret exporter-private identity
 annotations or depend on extraction implementations. Canonical JSON and the
@@ -24,6 +34,7 @@ ordinary STA parser contract do not prove source presence.
 |---|---|---|---|---|
 | [TimingEngine](../../DESIGN.md) | parent | Domain timing ownership | Canonical values | No qualification claim |
 | [LibertyCodec](LibertyCodec/DESIGN.md) | child | Shared grammar and owned source parsing | Actual source/facts and neutral accounting | No named process interpretation or artifact authority |
+| [NumericBounds](NumericBounds/DESIGN.md) | child | Package-only outward interval arithmetic | Source ranges and STA certificates | Finite enclosures; no physical source authority |
 | [STAEngine](../STAEngine/DESIGN.md) | used by | TimingLibraryParsing | Existing STA intake | Ordinary parsing is not strict characterization |
 | [PhysicalDesignEngine](../../../PhysicalDesignEngine/DESIGN.md) | used by | TimingCharacterizationParsing | CTS numerical evaluation | Require exact selected source and checked queries |
 
@@ -50,7 +61,9 @@ and strictly positive after Double parsing and SI conversion. Zero, negative,
 nonfinite and underflowed values are typed parse failures. Flags, named subsets,
 collection options, extra arguments and other object forms are typed unsupported.
 Each accepted command sets the existing defaultInputSlew; repeated commands use the
-last accepted global value, retaining mode identity. No IR/schema fields are added.
+last accepted global value, retaining mode identity. The optional explicit source
+fact and backward-compatible JSON contract are owned by
+[PathConstraints](PathConstraints/DESIGN.md#contracts-and-invariants).
 Native STA seeds both edges of every input and bidirectional port from this value;
 internal nets use propagated library output transitions. The scalar reference
 analyzer's existing reuse of the default at each stage is a separate model and only
@@ -120,3 +133,16 @@ TimingCore parser, Native STA and process/corner tests own composing regression 
 must separately prove actual source binding, RC loads and per-edge propagation.
 
 [SDCInputTransitionTests](../../Tests/TimingEngineTests/SDCInputTransitionTests.swift) owns global transition units, positive SI admission, options/subset refusal and mode/last-value behavior. NativeEngineTests.inputTransitionSeedsAndPropagatesSlew proves actual per-edge input/bidirectional initialization and two-stage internal propagation with independent LUT numbers.
+
+[CanonicalModel](CanonicalModel/DESIGN.md) owns TimingDesign v2 explicit port/net and binary constant admission.
+
+Native source-bound sequential checks are owned by [LibertyCodec](LibertyCodec/DESIGN.md#source-bound-sequential-timing-checks); ordinary propagation LUT evaluation remains unchanged.
+
+Distributed-source schema v3 extends preserved SPEF inventory with exact resistor
+endpoints, connection declarations and pin delimiter. The
+[ParasiticReduction contract](ParasiticReduction/DESIGN.md#distributed-source-preservation)
+owns its admission and compatibility; legacy v2 retains only its explicit cap-load capability and must be reparsed for distributed analysis.
+
+[PathConstraints](PathConstraints/DESIGN.md) owns explicit primary source waveform/transition/propagated facts. [LibertyCodec](LibertyCodec/DESIGN.md) retains clock-to-Q edge source presence. [STA ClockPropagation](../STAEngine/NativeExecution/ClockPropagation/DESIGN.md) consumes those facts without introducing clock execution policy into TimingCore.
+
+[LibertyCodec](LibertyCodec/DESIGN.md) owns caller-accounted strict characterization from scoped source bytes and actual clock-to-Q source edge presence. Existing ordinary lookup remains unchanged.

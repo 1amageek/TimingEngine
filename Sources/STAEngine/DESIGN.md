@@ -5,6 +5,7 @@
 Own native static timing analysis. Parent: [TimingEngine](../../DESIGN.md).
 Child: [ProcessCorners](ProcessCorners/DESIGN.md).
 Child: [PreparedExecution](PreparedExecution/DESIGN.md).
+Child: [NativeExecution](NativeExecution/DESIGN.md).
 
 ## Responsibilities and Boundaries
 
@@ -42,7 +43,7 @@ All derived load keys contribute to cell LUT load, including external roots abse
 from D_NET coverage. D_NET declared inventory is never a load. The payload retains
 reduction evidence with exact parasitic input identity; diagnostics and capability
 limitations expose distributed RC/intra-net dynamic loss and header disagreement.
-Producer algorithm identity is 3.0.0 and request/result schema is v4; old evidence
+Producer algorithm identity is 3.4.0 and request/result schema is v4; old evidence
 cannot claim the new algorithm scope. Completion is a cap-load observation, not
 distributed post-layout signoff or process qualification.
 
@@ -81,3 +82,13 @@ execution-contract and corpus tests verify composing callers. Native analysis,
 CLI selection and corpus binding changes require these checks with a timeout.
 CLI process tests locate the executable relative to their own resource bundle,
 so verification does not depend on another test loading a bundle first.
+
+[NativeExecution](NativeExecution/DESIGN.md) owns alias timing and explicit static endpoint classification; aggregate nil slack alone is never proof of constraint satisfaction.
+
+
+## Certified Coupled Boundary Model
+
+`STARequest.conservativeCoupledRC` selects the certified model described by
+[NativeExecution](NativeExecution/DESIGN.md). It requires strict owned-source
+execution and is mutually exclusive with observed-grid `distributedRC`. Existing
+schema-4 requests remain readable; old results gain no certification authority.

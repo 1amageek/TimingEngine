@@ -9,6 +9,7 @@ public struct TimingArc: Sendable, Hashable, Codable {
     public var transitionRise: TimingLUT
     public var transitionFall: TimingLUT
     public var isConstraint: Bool
+    public var sourceIdentity: LibertyTimingSourceIdentity?
 
     public init(
         fromPin: String,
@@ -18,7 +19,8 @@ public struct TimingArc: Sendable, Hashable, Codable {
         delayFall: TimingLUT,
         transitionRise: TimingLUT,
         transitionFall: TimingLUT,
-        isConstraint: Bool = false
+        isConstraint: Bool = false,
+        sourceIdentity: LibertyTimingSourceIdentity? = nil
     ) {
         self.fromPin = fromPin
         self.toPin = toPin
@@ -28,6 +30,7 @@ public struct TimingArc: Sendable, Hashable, Codable {
         self.transitionRise = transitionRise
         self.transitionFall = transitionFall
         self.isConstraint = isConstraint
+        self.sourceIdentity = sourceIdentity
     }
 
     public func delay(for outputEdge: TimingEdge) -> TimingLUT {

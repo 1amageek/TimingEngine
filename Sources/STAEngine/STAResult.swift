@@ -9,6 +9,7 @@ public struct STAPathStage: Sendable, Hashable, Codable {
     public var outputNet: String
     public var inputEdge: TimingEdge
     public var outputEdge: TimingEdge
+    public var inputWireDelay: Double?
     public var delay: Double
     public var outputSlew: Double
     public var load: Double
@@ -23,7 +24,8 @@ public struct STAPathStage: Sendable, Hashable, Codable {
         outputEdge: TimingEdge,
         delay: Double,
         outputSlew: Double,
-        load: Double
+        load: Double,
+        inputWireDelay: Double? = nil
     ) {
         self.instance = instance
         self.cell = cell
@@ -35,6 +37,7 @@ public struct STAPathStage: Sendable, Hashable, Codable {
         self.delay = delay
         self.outputSlew = outputSlew
         self.load = load
+        self.inputWireDelay = inputWireDelay
     }
 }
 
@@ -47,6 +50,7 @@ public struct STAPath: Sendable, Hashable, Codable {
     public var required: Double
     public var slack: Double
     public var stages: [STAPathStage]
+    public var analysisKind: STAAnalysisKind?
 
     public init(
         modeID: String,
@@ -56,7 +60,8 @@ public struct STAPath: Sendable, Hashable, Codable {
         arrival: Double,
         required: Double,
         slack: Double,
-        stages: [STAPathStage]
+        stages: [STAPathStage],
+        analysisKind: STAAnalysisKind? = .setup
     ) {
         self.modeID = modeID
         self.cornerID = cornerID
@@ -65,44 +70,7 @@ public struct STAPath: Sendable, Hashable, Codable {
         self.arrival = arrival
         self.required = required
         self.slack = slack
-        self.stages = stages
-    }
-}
-
-public struct STAEndpoint: Sendable, Hashable, Codable {
-    public var modeID: String
-    public var cornerID: String
-    public var endpoint: String
-    public var setupSlack: Double?
-    public var holdSlack: Double?
-    public var recoverySlack: Double?
-    public var removalSlack: Double?
-    public var pulseWidthSlack: Double?
-    public var dataArrival: Double?
-    public var requiredArrival: Double?
-
-    public init(
-        modeID: String,
-        cornerID: String,
-        endpoint: String,
-        setupSlack: Double? = nil,
-        holdSlack: Double? = nil,
-        recoverySlack: Double? = nil,
-        removalSlack: Double? = nil,
-        pulseWidthSlack: Double? = nil,
-        dataArrival: Double? = nil,
-        requiredArrival: Double? = nil
-    ) {
-        self.modeID = modeID
-        self.cornerID = cornerID
-        self.endpoint = endpoint
-        self.setupSlack = setupSlack
-        self.holdSlack = holdSlack
-        self.recoverySlack = recoverySlack
-        self.removalSlack = removalSlack
-        self.pulseWidthSlack = pulseWidthSlack
-        self.dataArrival = dataArrival
-        self.requiredArrival = requiredArrival
+        self.stages = stages; self.analysisKind = analysisKind
     }
 }
 

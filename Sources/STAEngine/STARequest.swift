@@ -27,8 +27,14 @@ public struct STARequest: Sendable, Hashable, Codable {
     public let variation: STAVariation
     public let configurationDigest: ContentDigest?
     public let randomSeed: UInt64?
+    public let distributedRC: STADistributedRCOptions?
+    public let conservativeCoupledRC: STAConservativeCoupledRCOptions?
     public let characterizationPolicy: STACharacterizationPolicy
     public let characterizationBindings: [STACharacterizationBinding]
+    /// Requires complete source-qualified role coverage and checked actual numerical samples.
+    public let requireStrictSourceEvidence: Bool
+    public let operatingSupplyAssumptions: [STAOperatingSupplyAssumption]
+    public let controlPulseSources: [STAControlPulseSource]
 
     public var artifactBindings: [TimingArtifactBinding] {
         [design]
@@ -58,7 +64,12 @@ public struct STARequest: Sendable, Hashable, Codable {
         configurationDigest: ContentDigest? = nil,
         randomSeed: UInt64? = nil,
         characterizationPolicy: STACharacterizationPolicy = .declaredCornerSelection,
-        characterizationBindings: [STACharacterizationBinding] = []
+        characterizationBindings: [STACharacterizationBinding] = [],
+        distributedRC: STADistributedRCOptions? = nil,
+        conservativeCoupledRC: STAConservativeCoupledRCOptions? = nil,
+        requireStrictSourceEvidence: Bool = false,
+        operatingSupplyAssumptions: [STAOperatingSupplyAssumption] = [],
+        controlPulseSources: [STAControlPulseSource] = []
     ) throws {
         guard !runID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !topDesignName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -82,6 +93,12 @@ public struct STARequest: Sendable, Hashable, Codable {
         }
         try Self.validateUniqueNonempty(requestedModeIDs, label: "mode")
         try Self.validateUniqueNonempty(requestedCornerIDs, label: "corner")
+        let supplyKeys = operatingSupplyAssumptions.map { [$0.cornerID, $0.instance, $0.pin] }
+        guard Set(supplyKeys).count == supplyKeys.count,
+              operatingSupplyAssumptions.allSatisfy({ assumption in
+                  requestedCornerIDs.contains(assumption.cornerID)
+                      && [assumption.instance, assumption.cell, assumption.pin, assumption.sourcePGType].allSatisfy({ !$0.isEmpty })
+              }) else { throw TimingError.invalidInput("Duplicate, foreign or incomplete operating supply assumptions") }
         self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID
         self.design = design
@@ -104,6 +121,17 @@ public struct STARequest: Sendable, Hashable, Codable {
         self.randomSeed = randomSeed
         self.characterizationPolicy = characterizationPolicy
         self.characterizationBindings = characterizationBindings
+        guard conservativeCoupledRC == nil || (distributedRC == nil && requireStrictSourceEvidence) else {
+            throw TimingError.invalidInput("Certified coupled RC requires strict source evidence and excludes observed-grid RC")
+        }
+        self.distributedRC = distributedRC
+        self.conservativeCoupledRC = conservativeCoupledRC
+        self.requireStrictSourceEvidence = requireStrictSourceEvidence
+        self.operatingSupplyAssumptions = operatingSupplyAssumptions
+        guard Set(controlPulseSources.map { [$0.modeID, $0.sourcePort] }).count == controlPulseSources.count else {
+            throw TimingError.invalidInput("Duplicate control pulse sources")
+        }
+        self.controlPulseSources = controlPulseSources
         self.inputs = ([design]
             + libraries.map(\.artifact)
             + [constraints, pdkManifest]
@@ -151,7 +179,12 @@ public struct STARequest: Sendable, Hashable, Codable {
             ),
             randomSeed: container.decodeIfPresent(UInt64.self, forKey: .randomSeed),
             characterizationPolicy: container.decode(STACharacterizationPolicy.self, forKey: .characterizationPolicy),
-            characterizationBindings: container.decode([STACharacterizationBinding].self, forKey: .characterizationBindings)
+            characterizationBindings: container.decode([STACharacterizationBinding].self, forKey: .characterizationBindings),
+            distributedRC: container.decodeIfPresent(STADistributedRCOptions.self, forKey: .distributedRC),
+            conservativeCoupledRC: container.decodeIfPresent(STAConservativeCoupledRCOptions.self, forKey: .conservativeCoupledRC),
+            requireStrictSourceEvidence: container.decodeIfPresent(Bool.self, forKey: .requireStrictSourceEvidence) ?? false,
+            operatingSupplyAssumptions: container.decodeIfPresent([STAOperatingSupplyAssumption].self, forKey: .operatingSupplyAssumptions) ?? [],
+            controlPulseSources: container.decodeIfPresent([STAControlPulseSource].self, forKey: .controlPulseSources) ?? []
         )
         guard decodedInputs == inputs else {
             throw DecodingError.dataCorruptedError(

@@ -13,7 +13,8 @@ extension LibertyParser {
         } catch let error as LibertySourceError { throw error }
         catch let error as TimingError {
             if case .parseFailure(_, let line, _) = error { throw .syntax(line: line) }
-            throw .syntax(line: 1)
+            if case .unsupportedSemantic(_, let semantic) = error { throw .unsupportedSemantics(semantic) }
+            throw .conversion(error)
         } catch let error as TimingCharacterizationError {
             switch error {
             case .ambiguousSource: throw .unsupportedSemantics("Ambiguous Liberty source")
@@ -39,25 +40,21 @@ extension LibertyParser {
         try admitCoverage(roots, storage: storage)
         let parser = LibertyParser(storage: storage)
         let converted = try parser.convert(roots)
+        var library = converted.library
+        var compiledCells = LibertyMap<TimingCell>()
         var cells = LibertyBuffer<LibertySourceCell>()
         var conditions = LibertyBuffer<LibertySourceOperatingCondition>()
         for node in roots[0].children {
             try parser.checkText(node.name)
             if node.name == "cell" {
-                guard let name = node.arguments.first else { throw LibertySourceError.syntax(line: node.sourceLine) }
-                var pins = LibertyBuffer<LibertySourcePin>()
-                for child in node.children {
-                    try parser.checkText(child.name)
-                    guard child.name == "pin" else { continue }
-                    guard let pin = child.arguments.first else { throw LibertySourceError.syntax(line: child.sourceLine) }
-                    for prior in pins {
-                        try parser.checkText(prior.name); try parser.checkText(pin)
-                        guard prior.name != pin else { throw LibertySourceError.unsupportedSemantics("Duplicate source pin") }
-                    }
-                    try pins.append(.init(name: pin, line: child.sourceLine, byteOffset: child.byteOffset), storage: storage)
+                let projection = LibertyFunctionalProjection(storage: storage, maximumNesting: limits.maximumNestingDepth)
+                let facts = try projection.cell(node)
+                guard var numerical = converted.library.cells[facts.name] else { throw LibertySourceError.unsupportedSemantics("Source lost its numerical cell") }
+                if !facts.sequential.isEmpty {
+                    numerical.sequentialModel = try LibertySequentialBinding(storage: storage).model(facts, numerical: numerical.sequentialModel)
                 }
-                try cells.append(.init(name: name, pins: pins.array(storage: storage), line: node.sourceLine,
-                    byteOffset: node.byteOffset), storage: storage)
+                try compiledCells.set(numerical, for: facts.name, storage: storage)
+                try cells.append(facts, storage: storage)
             } else if node.name == "operating_conditions" {
                 let name = node.arguments.first ?? "default"
                 for prior in conditions {
@@ -72,15 +69,31 @@ extension LibertyParser {
                     temperature: condition.temperature, line: node.sourceLine, byteOffset: node.byteOffset), storage: storage)
             }
         }
+        let thresholds: TimingCharacterizationThresholds?
+        let thresholdIssue: TimingCharacterizationError?
+        do { thresholds = try parser.thresholds(roots[0]); thresholdIssue = nil }
+        catch let issue as TimingCharacterizationError { thresholds = nil; thresholdIssue = issue }
+        var pinThresholdOverrides = false
+        for cell in roots[0].children where cell.name == "cell" {
+            for pin in cell.children where pin.name == "pin" {
+                for fact in pin.children {
+                    try parser.checkText(fact.name)
+                    if fact.name.contains("threshold_pct") || fact.name == "slew_derate_from_library" {
+                        pinThresholdOverrides = true
+                    }
+                }
+            }
+        }
         let cellFacts = try cells.array(storage: storage)
         let conditionFacts = try conditions.array(storage: storage)
+        library.cells = try compiledCells.dictionary(storage: storage)
         let metadata = try storage.reserve((TimingLibrary, [LibertySourceCell],
-            [LibertySourceOperatingCondition], [UInt8], LibertyParseStorage, LibertySourceStorageReservation).self, capacity: 1)
-        return OwnedLibertySource(library: converted.library, cells: cellFacts,
-            operatingConditions: conditionFacts, bytes: original, storage: storage, metadata: metadata)
+            [LibertySourceOperatingCondition], TimingCharacterizationThresholds?, TimingCharacterizationError?, Bool, [UInt8], LibertyParseStorage, LibertySourceStorageReservation).self, capacity: 1)
+        return OwnedLibertySource(library: library, cells: cellFacts,
+            operatingConditions: conditionFacts, thresholds: thresholds, thresholdIssue: thresholdIssue, hasPinThresholdOverrides: pinThresholdOverrides, bytes: original, storage: storage, metadata: metadata)
     }
 
-    private func validate(_ bytes: borrowing Span<UInt8>, resources: any LibertySourceResourceAccounting) throws {
+    internal func validate(_ bytes: borrowing Span<UInt8>, resources: any LibertySourceResourceAccounting) throws {
         var index = 0; var nonASCII = false
         while index < bytes.count {
             try resources.check(); try resources.chargeWork(1)

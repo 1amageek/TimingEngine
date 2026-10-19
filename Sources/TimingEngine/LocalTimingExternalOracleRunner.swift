@@ -31,20 +31,10 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
         process.executableURL = URL(filePath: request.executablePath)
         process.arguments = request.arguments
         process.currentDirectoryURL = workingDirectoryURL
-        let processResult: TimedProcessResult
-        do {
-            processResult = try await TimedProcessRunner(
-                timeoutSeconds: request.timeoutSeconds
-            ).run(process: process)
-        } catch let error as TimedProcessError {
-            return TimingExternalOracleResult(
-                runID: request.runID,
-                oracleID: request.oracleID,
-                status: .failed,
-                stderr: error.localizedDescription,
-                diagnostics: [diagnosticCode(for: error)]
-            )
-        }
+        // Typed failures retain exact captured bytes and any pending cleanup owner.
+        let processResult = try await TimedProcessRunner(timeoutSeconds: request.timeoutSeconds,
+            maximumOutputByteCount: request.maximumOutputByteCount,
+            cleanupTimeoutSeconds: request.cleanupTimeoutSeconds).run(process: process)
         let stdout = processResult.standardOutput
         let stderr = processResult.standardError
         let exitCode = processResult.exitCode
@@ -56,17 +46,21 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
                 exitCode: exitCode,
                 stdout: stdout,
                 stderr: stderr,
+                standardOutputData: processResult.standardOutputData,
+                standardErrorData: processResult.standardErrorData,
                 diagnostics: ["external_oracle_nonzero_exit"]
             )
         }
         do {
-            let result = try decodeFoundationResult(stdout)
+            let result = try JSONDecoder().decode(STAExecutionResult.self, from: processResult.standardOutputData)
             guard result.runID == request.runID else {
                 return invalidResult(
                     request: request,
                     exitCode: exitCode,
                     stdout: stdout,
                     stderr: stderr,
+                    standardOutputData: processResult.standardOutputData,
+                    standardErrorData: processResult.standardErrorData,
                     diagnostic: "external_oracle_run_id_mismatch"
                 )
             }
@@ -81,6 +75,8 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
                 exitCode: exitCode,
                 stdout: stdout,
                 stderr: stderr,
+                standardOutputData: processResult.standardOutputData,
+                standardErrorData: processResult.standardErrorData,
                 payload: result.payload,
                 diagnostics: diagnostics
             )
@@ -92,13 +88,11 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
                 exitCode: exitCode,
                 stdout: stdout,
                 stderr: stderr,
+                standardOutputData: processResult.standardOutputData,
+                standardErrorData: processResult.standardErrorData,
                 diagnostics: ["external_oracle_output_invalid"]
             )
         }
-    }
-
-    private func decodeFoundationResult(_ stdout: String) throws -> STAExecutionResult {
-        try JSONDecoder().decode(STAExecutionResult.self, from: Data(stdout.utf8))
     }
 
     private func invalidResult(
@@ -106,6 +100,8 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
         exitCode: Int32,
         stdout: String,
         stderr: String,
+        standardOutputData: Data,
+        standardErrorData: Data,
         diagnostic: String
     ) -> TimingExternalOracleResult {
         TimingExternalOracleResult(
@@ -115,6 +111,8 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
             exitCode: exitCode,
             stdout: stdout,
             stderr: stderr,
+            standardOutputData: standardOutputData,
+            standardErrorData: standardErrorData,
             diagnostics: [diagnostic]
         )
     }
@@ -132,18 +130,4 @@ public actor LocalTimingExternalOracleRunner: TimingExternalOracleRunning {
         }
     }
 
-    private func diagnosticCode(for error: TimedProcessError) -> String {
-        switch error {
-        case .invalidConfiguration:
-            return "external_oracle_invalid_timeout"
-        case .launchFailed:
-            return "external_oracle_launch_failed"
-        case .cancellationCheckFailed:
-            return "external_oracle_cancellation_check_failed"
-        case .cancelled:
-            return "external_oracle_cancelled"
-        case .timedOut:
-            return "external_oracle_timed_out"
-        }
-    }
 }
