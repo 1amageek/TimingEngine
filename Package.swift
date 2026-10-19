@@ -3,11 +3,11 @@ import PackageDescription
 
 let logicDesignDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/LogicDesign.git",
-    revision: "4d3e0649fd6f417f1f4a01be7219f2105ba1221a"
+    revision: "5e1d3eec838a0add91c617413682d186a5182335"
 )
 
 let pdkKitDependency: Package.Dependency = .package(url: "https://github.com/1amageek/PDKKit.git",
-    revision: "1050fef9325df488d4de32ed3f078686d9e12d1a"
+    revision: "f59dfd1dbdd20545ddf97e6a0ab9a956ad7ca809"
 )
 
 let signoffToolSupportDependency: Package.Dependency = .package(

@@ -181,9 +181,9 @@ remain unchanged. This license decision changes no numerical or source authority
 
 ### Exact Public Dependency Admission
 
-The public release floor is LogicDesign 4d3e0649, PDKKit 1050fef9,
+The current public dependency floor is LogicDesign 5e1d3eec, PDKKit f59dfd1d,
 CircuiteFoundation 5f132c58, SignoffToolSupport e15ea6cd and ToolQualification
-601ff593. PDKKit pins public mask a1104f11 and CoreSpice cfcadac5; that CoreSpice
+601ff593. PDKKit pins public mask 67410f83 and CoreSpice cfcadac5; that CoreSpice
 pins public swift-osdi 1.2.0. These exact prerequisite commits have been published.
 
 The prior development evidence remains bound to PDKKit 9f54fd14 and CoreSpice
@@ -237,3 +237,35 @@ all stdout before waiting for termination and sends unused stderr to the origina
 null sink. This prevents pipe-capacity deadlock without truncating JSON or changing
 the tested CLI/numerical behavior. The outer verification wrapper owns bounded
 timeout cleanup of observed candidate descendants, including separate process groups.
+
+
+## STA Consumer Source-Floor Alignment
+
+This candidate starts at public `0d7179e39f242b6fe7b3d0e1929485697d2076a3`.
+All production/test/resource bytes, modes and symlink targets remain exact to that
+public source, including prepared STA, initial source contexts and contained
+immutable artifact publication. Only root documentation, the following two exact
+selectors and the freshly resolved lock change:
+
+| Dependency | Exact public revision | Required lower contract |
+|---|---|---|
+| LogicDesign | `5e1d3eec838a0add91c617413682d186a5182335` | Published validated actual-cell IR source floor; existing STA value/identity use remains unchanged |
+| PDKKit | `f59dfd1dbdd20545ddf97e6a0ab9a956ad7ca809` | Canonical technology metadata admission aligned with its public mask source floor |
+
+CF, Signoff, ToolQualification, CoreSpice and SDK selectors retain the existing
+public dependency premises. Fresh resolution uses canonical HTTPS without local
+paths, edits or mirrors. Original public `0d7179` source/context, 134-case and
+artifact-store qualification receipts retain their original input/source scopes;
+they are not relabeled as execution on the new dependency graph.
+
+The affected consuming profile executes the six original
+`STAPreparedExecutionTests`, then the unchanged four-source public consumer and
+six input fixtures: actual prepare/context/execution, same-owner source validation,
+resource/cancellation/refund, typed artifact binding, fresh reader and a separate
+cold process comparing complete API/CLI payloads. The candidate CLI uses its actual
+new compiled production closure. Client linking has no test/package privilege and
+uses only public API. Full old suites are not repeated when their owned source and
+premises are unchanged. This is Native dependency compatibility, not a new source
+family existence, all-history physical response, process or release guarantee.
+The public-base SI implementation remains unchanged; no private SI schema-4 source
+or equivalence claim is introduced.
