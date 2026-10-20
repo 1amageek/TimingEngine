@@ -3,7 +3,8 @@
 ## Purpose and Scope
 
 Child of [ConservativeCoupling](../DESIGN.md), with no children. Own the versioned
-initialRoots source-context projection and outward normalized value/slope queries. Time uses the retained TimingCore SI seconds, including negative times.
+initialRoots source-context projection, outward normalized value/slope queries,
+and sealed joint initial/window projections of the same source family. Time uses the retained TimingCore SI seconds, including negative times.
 The existing NativeSTAConservativeWires producer selects every source and its
 owned characterization domain. This component adds no response solver or Core
 integration.
@@ -90,3 +91,71 @@ Native behavioral tests do not establish new WASM/Embedded execution evidence.
 The package-only TimingCharacterizationThresholds initializer is exposed within
 this package for the standalone record decoder; no new public unchecked threshold
 constructor or old payload decoder behavior is added.
+
+## Joint Initial/Window Projection
+
+`STAConservativeSourceContext.jointSlice(sourceAt:initialTime:over:)` is the
+only public producer of `STAConservativeSourceJointSlice`. The immutable,
+non-Codable result has a private initializer and retains the actual checked
+context and one admitted storage reservation. Its read-only fields are
+`contextRecord`, `sourceIndex`, `initialTimeSI`, `windowSI`, `initialValue`,
+`windowValue`, and `almostEverywhereSlope`. A decoded record, caller function,
+independent jet or caller-supplied bound cannot construct a slice.
+
+```text
+same checked context / source / retained family
+    + initial-time hull contained in time window (SI seconds)
+    -> one preadmitted projection owner
+    -> existing kernel at initial hull and whole window
+    -> initial value / whole-window value / a.e. derivative outer bounds
+```
+
+Every admitted function of the original family is covered: for every initial
+instant in `initialTimeSI`, its value is in `initialValue`; over `windowSI`, its
+values are in `windowValue` and its derivative is in `almostEverywhereSlope`
+almost everywhere. These are projections of one retained family, not a claim
+that every tuple in their Cartesian product is realizable. The unrestricted
+family remains all bounded absolutely continuous functions with values in
+[0,1] and derivative in the retained rise/fall slope bounds, including zero.
+It is not narrowed to a finite parameterization, finite ramps or an initial
+plateau. Existence of one-sided derivatives is not required or promised.
+
+Constants are nonempty by their constant member. Unrestricted families contain
+constant members. For clocks, the checked record already requires finite,
+positive slew/period and strictly separated outward rise/fall/next-rise windows.
+Thus a permitted ramp/plateau member exists over every integer cycle. Selecting
+one such member establishes nonemptiness only; the family and bounds still
+cover every per-edge/per-cycle reference and slew choice admitted by the existing
+history contract. Negative cycles are never clamped or replaced by a finite past.
+The existing clock arithmetic and cycle/overflow refusals remain unchanged.
+
+`initialTimeSI` and `windowSI` are finite Double hulls with the former contained
+in the latter. Their original endpoints are retained without rounding or time
+translation. An upper consumer with compensated times must prove that its exact
+initial and terminal times are contained in these hulls; Timing neither truncates
+those values nor acquires a CoreSpice dependency. Positive flow duration,
+physical rails, actual voltage-law/source correspondence and common analysis
+identity remain upper obligations. Source origin is preserved, so an assumed
+prescribed cell output acquires no independent physical-source authority.
+
+Before result admission the factory checks index and time containment using the
+existing cumulative control. Checked addition admits the result value and
+reservation metadata plus one existing state-budget slot before either kernel
+query. The two synchronous queries use the same private arithmetic kernel and
+same control. There are no intermediate arrays, caller callbacks, new limits or
+budget resets. Work and cancellation are checked before publication. Failure
+releases the temporary result lease; copies retain the context and reservation
+until the final copy dies. The existing Mutex work owner, source accountant and
+state budget remain shared on every target; all new stored state is immutable.
+
+Focused `STAConservativeSourceJointSliceTests` must distinguish real prepared
+context production, constant/all-AC preservation, periodic negative cycles,
+phase/slew intervals, corners and whole periods, retained time hulls, invalid
+index/time containment, storage refusal, mid-query cancellation, shared work
+and final-copy refunds. `STAInitialSourceContextTests` remains the affected
+existing owner regression. Qualification: all 15 selected declarations (eight new, seven existing) passed
+with zero skips in two suites (0.169 seconds body time). `qualification-r1.json`
+binds the exact source, build and runtime evidence; `joint-slice-review-r1.json`
+(`fe02b63b6a45ab1edfdea5ddc6899b2ad153864f741ab7cfbdea1e600a88af9f`)
+records the one scoped review closed with no findings. The final document-only
+closure retains that finite behavioral scope.

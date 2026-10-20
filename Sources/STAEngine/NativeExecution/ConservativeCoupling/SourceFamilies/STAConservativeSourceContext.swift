@@ -22,6 +22,36 @@ public struct STAConservativeSourceContext: Sendable {
         catch is CancellationError { throw .cancelled }
         catch { throw .underlying(error) }
     }
+
+    /// Projects initial and window bounds from this same nonempty normalized family.
+    /// All times are SI hulls; an upper consumer must bind its exact times to them.
+    public func jointSlice(sourceAt index: Int, initialTime: ClosedRange<Double>,
+        over window: ClosedRange<Double>) throws(STAExecutionError) -> STAConservativeSourceJointSlice {
+        do {
+            try control.checkpoint(amount: 8)
+            guard record.sources.indices.contains(index),
+                  initialTime.lowerBound.isFinite, initialTime.upperBound.isFinite,
+                  window.lowerBound.isFinite, window.upperBound.isFinite,
+                  window.lowerBound <= initialTime.lowerBound,
+                  initialTime.upperBound <= window.upperBound else {
+                throw invalid("joint source index or time containment")
+            }
+            let bytes = MemoryLayout<STAConservativeSourceJointSlice>.stride.addingReportingOverflow(
+                MemoryLayout<LibertySourceStorageReservation>.stride)
+            guard !bytes.overflow else { throw LibertySourceError.arithmeticOverflow }
+            let outputLease = try control.reserve(bytes: bytes.partialValue, slots: 1)
+            let initial = try encloseBound(sourceAt: index, over: initialTime)
+            let whole = try encloseBound(sourceAt: index, over: window)
+            let slopeLower = min(whole.leftSlope.lowerBound, whole.rightSlope.lowerBound)
+            let slopeUpper = max(whole.leftSlope.upperBound, whole.rightSlope.upperBound)
+            try control.checkpoint()
+            return .checkedProjection(context: self, sourceIndex: index, initialTimeSI: initialTime,
+                windowSI: window, initialValue: initial.value, windowValue: whole.value,
+                almostEverywhereSlope: slopeLower...slopeUpper, lease: outputLease)
+        } catch is CancellationError { throw .cancelled }
+        catch { throw .underlying(error) }
+    }
+
     private func encloseBound(sourceAt index: Int, over time: ClosedRange<Double>) throws -> Enclosure {
         typealias I = TimingNumericInterval
         try control.checkpoint()
