@@ -204,9 +204,8 @@ See `DESIGN.md`, `INTERFACES.md`, `CAPABILITY.md`, `MILESTONES.md` and `GOAL_STA
 
 ## Current STA consumer dependency alignment
 
-The [current dependency contract](DESIGN.md#current-cancellation-dependency-alignment)
-selects PDKKit `d27217e8312c072f4fde731d722e48f3040d5a5b` and transitive
-CoreSpice `5fa29e8accb1ff9de0d1e5f8bc9efe128accf0b7`, preserving all Timing code,
-tests and resources from public `0177d7da87bfe824f79e8dbce19ffcc00a65f70b`.
-Earlier runtime evidence retains its original graph; this pin-only successor
-adds no STA/SI or physical-history authority.
+The [current dependency contract](DESIGN.md#current-source-containment-dependency-alignment)
+selects PDKKit `2c35305fd943174b98009368cf0481f3b308718f` and transitive CoreSpice `70ebb46d96edf58a173fccc3f76ccb163076238f`.
+This pin-only successor of public `d6d0bec0ee5b97a25687ad0db02e127b6d3a9df0` preserves
+every implementation, test and resource byte. Earlier runtime receipts retain
+their original graph; final Physical integration owns new consumer execution.
