@@ -204,12 +204,9 @@ See `DESIGN.md`, `INTERFACES.md`, `CAPABILITY.md`, `MILESTONES.md` and `GOAL_STA
 
 ## Current STA consumer dependency alignment
 
-The exact public dependency floor and finite consuming qualification are owned by
-[the package design](DESIGN.md#sta-consumer-source-floor-alignment). This update
-preserves all public `0d7179` production/test/resource bytes and the initial-source
-and immutable-artifact contracts. It aligns the published LogicDesign/PDK source
-floors without changing STA/SI algorithms or granting additional physical/history
-or process authority. Historical source/context and artifact-store evidence retains
-its original scope; the new graph has its own prepared-STA and full-payload cold
-API/CLI persistence evidence. Signal integrity retains the existing public-base
-profile and is not equated with a private later schema.
+[The package design](DESIGN.md#current-native-flow-dependency-alignment) records
+the pin-only successor to public `77255cdd`: PDKKit `a538326c` selects CoreSpice
+`40eefa8e`, with all Timing production/test/resource bytes unchanged. The affected
+qualification uses the six original prepared-STA tests. Historical full-suite and
+cold API/CLI persistence evidence keeps its original scope. This dependency
+alignment adds no STA/SI, source-family, physical-history or process guarantee.

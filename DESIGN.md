@@ -179,9 +179,9 @@ on 2026-10-19. [LICENSE](LICENSE) records that grant;
 and external PDK/model assets from relicensing. Existing qualification input bytes
 remain unchanged. This license decision changes no numerical or source authority.
 
-### Exact Public Dependency Admission
+### Historical Exact Public Dependency Admission
 
-The current public dependency floor is LogicDesign 5e1d3eec, PDKKit f59dfd1d,
+The dependency floor of that qualification was LogicDesign 5e1d3eec, PDKKit f59dfd1d,
 CircuiteFoundation 5f132c58, SignoffToolSupport e15ea6cd and ToolQualification
 601ff593. PDKKit pins public mask 67410f83 and CoreSpice cfcadac5; that CoreSpice
 pins public swift-osdi 1.2.0. These exact prerequisite commits have been published.
@@ -239,9 +239,9 @@ the tested CLI/numerical behavior. The outer verification wrapper owns bounded
 timeout cleanup of observed candidate descendants, including separate process groups.
 
 
-## STA Consumer Source-Floor Alignment
+## Historical STA Consumer Source-Floor Alignment
 
-This candidate starts at public `0d7179e39f242b6fe7b3d0e1929485697d2076a3`.
+That candidate starts at public `0d7179e39f242b6fe7b3d0e1929485697d2076a3`.
 All production/test/resource bytes, modes and symlink targets remain exact to that
 public source, including prepared STA, initial source contexts and contained
 immutable artifact publication. Only root documentation, the following two exact
@@ -269,3 +269,22 @@ premises are unchanged. This is Native dependency compatibility, not a new sourc
 family existence, all-history physical response, process or release guarantee.
 The public-base SI implementation remains unchanged; no private SI schema-4 source
 or equivalence claim is introduced.
+
+
+## Current Native Flow Dependency Alignment
+
+This pin-only successor starts at public TimingEngine
+`77255cdd2e89d94876775baf328e1647d96451ec`. Its production, test and resource
+bytes, file modes, symlink targets, products and licenses remain unchanged.
+PDKKit is pinned to published `a538326cec683bbd41a971c123d817e6093233e3`,
+whose unchanged PDK APIs now select public CoreSpice
+`40eefa8efe9960def7d7151298e96f898cbebab2`. Other direct selectors are unchanged.
+The tracked lock is regenerated from canonical HTTPS with no mirrors, paths or
+edited checkouts. This reconciles exact revisions for consuming Physical flows;
+it adds no Timing API, numerical algorithm or source-family guarantee.
+
+Qualification executes the six original prepared-admission and prepared-behavior
+tests in `STAPreparedExecutionTests` on that actual graph, including immutable
+execution, corner/source identity, strict budgets, cancellation and schema reading.
+Earlier full suites and API/CLI cold-persistence receipts retain their original
+source and dependency scope and are not reported as rerun on this successor.
