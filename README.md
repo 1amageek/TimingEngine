@@ -204,9 +204,9 @@ See `DESIGN.md`, `INTERFACES.md`, `CAPABILITY.md`, `MILESTONES.md` and `GOAL_STA
 
 ## Current STA consumer dependency alignment
 
-[The package design](DESIGN.md#current-native-flow-dependency-alignment) records
-the pin-only successor to public `77255cdd`: PDKKit `a538326c` selects CoreSpice
-`40eefa8e`, with all Timing production/test/resource bytes unchanged. The affected
-qualification uses the six original prepared-STA tests. Historical full-suite and
-cold API/CLI persistence evidence keeps its original scope. This dependency
-alignment adds no STA/SI, source-family, physical-history or process guarantee.
+The [current dependency contract](DESIGN.md#current-cancellation-dependency-alignment)
+selects PDKKit `d27217e8312c072f4fde731d722e48f3040d5a5b` and transitive
+CoreSpice `5fa29e8accb1ff9de0d1e5f8bc9efe128accf0b7`, preserving all Timing code,
+tests and resources from public `0177d7da87bfe824f79e8dbce19ffcc00a65f70b`.
+Earlier runtime evidence retains its original graph; this pin-only successor
+adds no STA/SI or physical-history authority.

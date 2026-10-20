@@ -271,7 +271,7 @@ The public-base SI implementation remains unchanged; no private SI schema-4 sour
 or equivalence claim is introduced.
 
 
-## Current Native Flow Dependency Alignment
+## Prior Native Flow Dependency Alignment
 
 This pin-only successor starts at public TimingEngine
 `77255cdd2e89d94876775baf328e1647d96451ec`. Its production, test and resource
@@ -288,3 +288,32 @@ tests in `STAPreparedExecutionTests` on that actual graph, including immutable
 execution, corner/source identity, strict budgets, cancellation and schema reading.
 Earlier full suites and API/CLI cold-persistence receipts retain their original
 source and dependency scope and are not reported as rerun on this successor.
+
+
+## Current Cancellation Dependency Alignment
+
+This pin-only successor starts at public TimingEngine `0177d7da87bfe824f79e8dbce19ffcc00a65f70b`.
+All production/test/resource bytes, modes, products and license boundaries remain
+unchanged. The following exact published selectors reconcile the same Core graph:
+
+| Dependency | Exact revision |
+|---|---|
+| PDKKit | `d27217e8312c072f4fde731d722e48f3040d5a5b` |
+
+The transitive CoreSpice revision is `5fa29e8accb1ff9de0d1e5f8bc9efe128accf0b7`. Its only
+production change from `40eefa8e` checks per-call cancellation after the first
+Native voltage-observation reservation, before metadata reservation. It changes
+no public API, parser, STA, PDK or Logic semantics. PDK source inspection uses
+`SPICEParser.parseProfile`; CoreSpiceIO has no dependency on the CoreSpice target
+that owns Native Flow. Timing uses its own STA/PDK products, and Logic required
+STA and replay use NativeSTAEngine. These consumer paths cannot call the changed
+Native Flow observation assembly.
+
+Fresh canonical HTTPS resolution and exact source preservation establish this
+mechanical compatibility step without paths, mirrors or edited dependencies.
+Existing consumer runtime receipts retain their original graph scope; no tests
+or builds are reported as rerun here. CoreSpice owns the demonstrated first-
+reservation cancellation red/green and finding-only recheck. The final Physical
+consumer compile/runtime owns integration on the reconciled graph, not these
+pin-only publications. No new physical/history/process or release guarantee is
+granted. The existing tracked lock is regenerated from that actual public graph.
