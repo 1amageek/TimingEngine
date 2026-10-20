@@ -1,5 +1,5 @@
 {
-  "originHash" : "a2a58523606e3a30fd953bdb92efd7946ee9de1bbf0bbdd5de1c24abe1214228",
+  "originHash" : "010b60bc9282146adba04c8e202070a8dbe46f4b887e9f07c327da0224e8990c",
   "pins" : [
     {
       "identity" : "circuitefoundation",
@@ -14,7 +14,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/CoreSpice.git",
       "state" : {
-        "revision" : "70ebb46d96edf58a173fccc3f76ccb163076238f"
+        "revision" : "82eb35e8bc57402880db3529c8a1dc2045349d87"
       }
     },
     {
@@ -30,7 +30,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/1amageek/PDKKit.git",
       "state" : {
-        "revision" : "2c35305fd943174b98009368cf0481f3b308718f"
+        "revision" : "1bd686f8a4b47a90ef136b5f7dbcca7390971b8e"
       }
     },
     {

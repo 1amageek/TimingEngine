@@ -202,10 +202,18 @@ TimingEngine is independently usable through its typed API and CLI. A runtime su
 See `DESIGN.md`, `INTERFACES.md`, `CAPABILITY.md`, `MILESTONES.md` and `GOAL_STATUS.md` for the complete contracts and status.
 
 
-## Current STA consumer dependency alignment
+## Historical STA consumer dependency alignment
 
-The [current dependency contract](DESIGN.md#current-source-containment-dependency-alignment)
+The [current dependency contract](DESIGN.md#historical-source-containment-dependency-alignment)
 selects PDKKit `2c35305fd943174b98009368cf0481f3b308718f` and transitive CoreSpice `70ebb46d96edf58a173fccc3f76ccb163076238f`.
 This pin-only successor of public `d6d0bec0ee5b97a25687ad0db02e127b6d3a9df0` preserves
 every implementation, test and resource byte. Earlier runtime receipts retain
 their original graph; final Physical integration owns new consumer execution.
+
+
+## Current simulation-parameter dependency floor
+
+The [current dependency contract](DESIGN.md#current-simulation-parameter-dependency-alignment)
+selects PDKKit `1bd686f8a4b47a90ef136b5f7dbcca7390971b8e`.
+Its CoreSpice source is `82eb35e8bc57402880db3529c8a1dc2045349d87`; CF `5f132c58` and SDK `1.2.0` remain fixed.
+Source behavior is retained; final Physical integration owns new consumer execution.
