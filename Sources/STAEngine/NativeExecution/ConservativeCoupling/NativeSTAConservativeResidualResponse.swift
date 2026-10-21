@@ -18,6 +18,14 @@ internal struct NativeSTAConservativeResidualResponse {
         let hSegments: [C.Segment]
         let hError: N.Matrix
         let hPrimitiveOscillation: N.Matrix
+        let payload: LibertySourceStorageReservation?
+        init(receiverRows: [Int], sourceCount: Int, gL1: N.Matrix, hL1: N.Matrix, direct: N.Matrix,
+             hSegments: [C.Segment], hError: N.Matrix, hPrimitiveOscillation: N.Matrix,
+             payload: LibertySourceStorageReservation? = nil) {
+            self.receiverRows = receiverRows; self.sourceCount = sourceCount; self.gL1 = gL1; self.hL1 = hL1
+            self.direct = direct; self.hSegments = hSegments; self.hError = hError
+            self.hPrimitiveOscillation = hPrimitiveOscillation; self.payload = payload
+        }
     }
 
     func prepare(_ certificate: C.Facts, work: inout UInt64) throws -> Facts {
@@ -50,6 +58,7 @@ internal struct NativeSTAConservativeResidualResponse {
         } }
         try numerical.slots(certificate.segments.count, times: 6)
         var hSegments: [C.Segment] = []
+        let segmentPayload = try numerical.budget.reservePayload(C.Segment.self, capacity: certificate.segments.count, kind: .liveOwnedBytes)
         hSegments.reserveCapacity(certificate.segments.count)
         var previousTime = 0.0
         for segment in certificate.segments {
@@ -64,6 +73,7 @@ internal struct NativeSTAConservativeResidualResponse {
             let duration = try I(point: segment.end).subtracting(I(point: segment.start))
             guard duration.lowerBound > 0 else { throw invalid("response segment duration not positive") }
             try numerical.slots(4)
+            let payload = try numerical.budget.reservePayload(N.Matrix.self, capacity: 4, kind: .liveOwnedBytes)
             var projected: [N.Matrix] = []
             projected.reserveCapacity(4)
             for coefficient in segment.bernstein {
@@ -91,7 +101,7 @@ internal struct NativeSTAConservativeResidualResponse {
                 }
                 primitive[row, source] = value
             } }
-            hSegments.append(C.Segment(start: segment.start, end: segment.end, bernstein: projected))
+            hSegments.append(C.Segment(start: segment.start, end: segment.end, bernstein: projected, payload: payload))
             previousTime = segment.end
         }
         guard receivers == 0 || !certificate.segments.isEmpty else { throw invalid("missing response trajectory") }
@@ -104,7 +114,7 @@ internal struct NativeSTAConservativeResidualResponse {
         }
         try numerical.slots(certificate.direct.values.count)
         return Facts(receiverRows: certificate.receiverRows, sourceCount: sources, gL1: g, hL1: h,
-            direct: certificate.direct, hSegments: hSegments, hError: hError, hPrimitiveOscillation: primitive)
+            direct: certificate.direct, hSegments: hSegments, hError: hError, hPrimitiveOscillation: primitive, payload: segmentPayload)
     }
 
     /// The entire checked trajectory error remains in every suffix, including after its horizon.
@@ -310,6 +320,12 @@ internal struct NativeSTAConservativeResidualResponse {
             try numerical.tick(&work)
             try numerical.slots(16)
             try numerical.slots(sources, times: 8)
+            let contributionPayload = try numerical.budget.reservePayload(NativeSTAConservativeTransitionDiagnostic.Contribution.self,
+                capacity: sources, kind: .liveOwnedBytes)
+            let diagnostics: TimingControlledDiagnostics<(K.ResidualPrepared, LibertySourceStorageReservation?)>?
+            if let resources = numerical.budget.transformResources {
+                diagnostics = try .init(resources: resources, retaining: (prepared, contributionPayload))
+            } else { diagnostics = nil }
             var contributions: [NativeSTAConservativeTransitionDiagnostic.Contribution] = []
             contributions.reserveCapacity(sources)
             for other in 0..<sources {
@@ -335,7 +351,9 @@ internal struct NativeSTAConservativeResidualResponse {
                 ownTermUpperBound: own.upperBound, aggressorDerivativeUpperBound: aggressorDerivative.upperBound,
                 minimumDerivative: derivativeRange, maximumDerivativeUpperBound: maximumDerivative.upperBound,
                 horizon: horizon, segmentCount: facts.hSegments.count, contributions: contributions)
-            throw KError.unprovedUniqueTransition(source: source, sink: sink, edge: edge, diagnostic: diagnostic)
+            let failure = KError.unprovedUniqueTransition(source: source, sink: sink, edge: edge, diagnostic: diagnostic)
+            if let diagnostics { throw diagnostics.failure(failure) }
+            throw failure
         }
         guard maximumDerivative.upperBound > 0 else { throw KError.inconsistentBounds("nonpositive absolute derivative bound") }
         let minimumSlew = try span.divided(by: I(point: maximumDerivative.upperBound)).lowerBound

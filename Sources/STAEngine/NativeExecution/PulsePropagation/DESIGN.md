@@ -76,3 +76,31 @@ ramps must have proved nonoverlapping full-rail histories. Pulse checks pair the
 latest opening with earliest closing and subtract the largest original pulse
 law over the complete opening-slew interval. Range receipts remain companion
 owned-source evidence, and exact prepared replay checks them.
+
+
+## Strict Transform Payload Ownership
+
+The original scenario budget owns optional strict transform accounting. Concrete
+root/driver/wave/receiver inventories, traversal scratch and copied event segments
+receive typed pre-growth reservations; temporary owners end with the actual
+operation and returned/cached waves retain live reservations across copies.
+Work reaches the same caller ledger, and reservation/check callbacks execute
+outside accounting-state locks. Nil-accountant numerical order, source laws,
+polarity and all existing refusal guards remain unchanged.
+
+`NativeStrictNumerical` tests exercise source-backed pulse propagation and
+capacity, cancellation and final-owner cleanup. The selected
+[Native qualification](../../PreparedExecution/DESIGN.md#strict-native-qualification-scope)
+passed without adding source or history authority.
+
+Segment arrays and physical UTF-8 identities use the shared ClockPropagation
+construction contract: a typed array lease per event and separately shared text
+lineage. Source-derived capacities bound root/driver/net/receiver maps; each
+receiver's pin and reverse-cone scratch is lexical. The final immutable carrier
+holds actual net/receiver waves, and `finishTransformRetention` seals publication.
+No control source, phase, polarity, LUT arithmetic or observed-mode ideal-wire
+behavior changes. The existing sequential charge operation already charges the
+original source accountant; only newly materialized payload/copy work adds
+scheduled transform charges. `NativeStrictNumericalPropagationTests` owns direct
+buffered-pulse parity, original-accountant characterization, actual Clock/RC
+composition, quota/cancel, copied-owner and final-refund checks.

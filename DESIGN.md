@@ -365,3 +365,39 @@ source and assumptions. This step records canonical public dependency resolution
 no numerical build or test is claimed as rerun. The final Physical consumer owns
 compiled/runtime integration on this graph. No stable tag or broader physical,
 interval or history qualification is granted. The tracked lock records this graph.
+
+
+## Stable Public Floor and Controlled Native Integration
+
+The successor starts from public parent
+`812036ecfcbbefdb784be344c8a1087c7eec8766`. Existing upstream package metadata
+and all unaffected implementation, test, resource, license and file modes are
+preserved. The controlled Native work is joined as its reviewed scoped
+source delta; private repository history and local dependency overrides are not
+part of this adoption.
+
+| Direct dependency | Selected public requirement |
+|---|---|
+| CircuiteFoundation | exact `26.1021.1` |
+| ToolQualification | exact `26.1021.1` |
+| LogicDesign | `9fbffcb1dfbf37517dfc05aa0f37f53c6a5e7659` |
+| PDKKit | `82fddd548af704b3f0723eada8e5b09df2dad6e4` |
+| SignoffToolSupport | `e15ea6cd60ca1957297aafbba839e51a478d735e` |
+
+The package continues to compose [TimingCore](Sources/TimingCore/DESIGN.md) and
+[STAEngine](Sources/STAEngine/DESIGN.md) under their owning contracts. The root
+manifest already owns `LibertyCodecTests`, `TimingEngineTests` and
+`STAPreparedExecutionTests`, including the latter's existing source path below
+`Tests/NativePreparedProof`. Qualification executes those root products against
+the same candidate and canonical public dependency graph. The nested proof
+package's local dependency manifest is not used for this public composition.
+
+Strict Native transform qualification is bound to the exact selected public
+graph. Earlier focused receipts retain their original dependency identities; the
+T1/T2/T3 corrected source passed the selected Native host gates on that graph,
+with its actual execution composition and finite scope recorded in
+[PreparedExecution](Sources/STAEngine/PreparedExecution/DESIGN.md#strict-native-qualification-scope).
+Source assembly or published dependency types alone establish no strict success.
+The owning module designs define the resource, failure and retained-owner
+invariants and their focused behavioral tests; this package adds
+no new solver, source-family, physical or history authority.

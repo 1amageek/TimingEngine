@@ -13,7 +13,7 @@ extension NativeSTAEngine {
                 throw STAPreparationError.capacity("Initial source scenario count")
             }
             let control = try NativeSTAInitialSourceControl(limits: prepared.limits,
-                resources: prepared.sourceResources, contextCount: count.partialValue)
+                resources: prepared.sourceResources, contextCount: count.partialValue, transformResources: prepared.transformResources)
             var work: UInt64 = 0
             func tick(_ n: UInt64 = 1) throws {
                 try NativeSTASequentialExecution.charge(n, work: &work, limits: prepared.limits,
@@ -40,6 +40,8 @@ extension NativeSTAEngine {
                         if role.modeID == mode && role.cornerID == corner { roleCount += 1 }
                     }
                     try control.stateBudget.reserve(roleCount)
+                    let rolePayload = try control.stateBudget.reservePayload(STASourceEvidence.Role.self, capacity: roleCount, kind: .temporaryBytes)
+                    defer { withExtendedLifetime(rolePayload) {} }
                     var roles: [STASourceEvidence.Role] = []
                     roles.reserveCapacity(roleCount)
                     for role in prepared.sourceRoleInventory {

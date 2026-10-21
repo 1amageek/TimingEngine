@@ -3,11 +3,11 @@ import PackageDescription
 
 let logicDesignDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/LogicDesign.git",
-    revision: "5e1d3eec838a0add91c617413682d186a5182335"
+    revision: "9fbffcb1dfbf37517dfc05aa0f37f53c6a5e7659"
 )
 
 let pdkKitDependency: Package.Dependency = .package(url: "https://github.com/1amageek/PDKKit.git",
-    revision: "1bd686f8a4b47a90ef136b5f7dbcca7390971b8e"
+    revision: "82fddd548af704b3f0723eada8e5b09df2dad6e4"
 )
 
 let signoffToolSupportDependency: Package.Dependency = .package(
@@ -17,12 +17,12 @@ let signoffToolSupportDependency: Package.Dependency = .package(
 
 let circuiteFoundationDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/CircuiteFoundation.git",
-    revision: "5f132c58209123433e0e479e1ea61096e46061ba"
+    exact: "26.1021.1"
 )
 
 let toolQualificationDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/ToolQualification.git",
-    revision: "601ff5933396be4ba62c77b8bb0502e2f601f159"
+    exact: "26.1021.1"
 )
 
 let package = Package(
@@ -54,7 +54,7 @@ let package = Package(
                 .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"),
                 .product(name: "CircuiteFoundationFileSystem", package: "CircuiteFoundation")
             ],
-            exclude: ["DESIGN.md", "ParasiticReduction/DESIGN.md", "LibertyCodec/DESIGN.md", "CanonicalModel/DESIGN.md", "PathConstraints/DESIGN.md", "NumericBounds/DESIGN.md"]
+            exclude: ["DESIGN.md", "ParasiticReduction/DESIGN.md", "LibertyCodec/DESIGN.md", "CanonicalModel/DESIGN.md", "PathConstraints/DESIGN.md", "NumericBounds/DESIGN.md", "SourceTransforms/DESIGN.md"]
         ),
         .target(
             name: "TimingPDKProfileInspection",
@@ -73,7 +73,8 @@ let package = Package(
                 "TimingCore",
                 "TimingPDKProfileInspection",
                 .product(name: "LogicIR", package: "LogicDesign"),
-                .product(name: "PDKCore", package: "PDKKit")
+                .product(name: "PDKCore", package: "PDKKit"),
+                .product(name: "PDKDiscovery", package: "PDKKit")
             ],
             exclude: ["DESIGN.md", "NativeExecution/ClockPropagation/DESIGN.md", "NativeExecution/ConservativeCoupling/DESIGN.md", "NativeExecution/ConservativeCoupling/SourceFamilies/DESIGN.md", "NativeExecution/DESIGN.md", "NativeExecution/DistributedRC/DESIGN.md", "NativeExecution/PathAnalysis/DESIGN.md", "NativeExecution/PathAnalysis/SequentialExecution/DESIGN.md", "NativeExecution/PulsePropagation/DESIGN.md", "PreparedExecution/DESIGN.md", "ProcessCorners/DESIGN.md"]
         ),
@@ -120,7 +121,7 @@ let package = Package(
                 .product(name: "SignoffToolSupport", package: "SignoffToolSupport"),
             ], exclude: ["DESIGN.md"]
         ),
-        .testTarget(name: "LibertyCodecTests", dependencies: ["TimingCore", .product(name: "LogicIR", package: "LogicDesign"), .product(name: "LogicKernelCore", package: "LogicDesign")]),
+        .testTarget(name: "LibertyCodecTests", dependencies: ["TimingCore", .product(name: "CircuiteFoundation", package: "CircuiteFoundation"), .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"), .product(name: "CircuiteFoundationFoundation", package: "CircuiteFoundation"), .product(name: "LogicIR", package: "LogicDesign"), .product(name: "LogicKernelCore", package: "LogicDesign")]),
         .testTarget(name: "TimingPDKProfileInspectionTests", dependencies: [
             "TimingCore", "TimingPDKProfileInspection", .product(name: "PDKCore", package: "PDKKit"),
             .product(name: "PDKProfileAdmission", package: "PDKKit"), .product(name: "PDKSourceCapture", package: "PDKKit"),
@@ -129,6 +130,7 @@ let package = Package(
             path: "Tests/NativePreparedProof/Tests/TimingPDKProfileInspectionTests"),
         .testTarget(name: "STAPreparedExecutionTests", dependencies: [
             "STAEngine", "TimingCore", "TimingPDKProfileInspection", .product(name: "PDKCore", package: "PDKKit"),
+            .product(name: "PDKDiscovery", package: "PDKKit"),
             .product(name: "PDKProfileAdmission", package: "PDKKit"), .product(name: "PDKSourceCapture", package: "PDKKit"),
             .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
             .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation")],

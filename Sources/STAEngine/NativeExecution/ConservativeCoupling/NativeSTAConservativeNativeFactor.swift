@@ -24,6 +24,17 @@ internal final class NativeSTAConservativeNativeFactor {
     private var capacitance: UnsafeMutablePointer<Double>?
     private var values: UnsafeMutablePointer<Double>?
     private var scratch: UnsafeMutablePointer<Double>?
+    private var adjacencyPayload: LibertySourceStorageReservation?
+    private var degreesPayload: LibertySourceStorageReservation?
+    private var neighborsPayload: LibertySourceStorageReservation?
+    private var orderPayload: LibertySourceStorageReservation?
+    private var inversePayload: LibertySourceStorageReservation?
+    private var columnStartsPayload: LibertySourceStorageReservation?
+    private var scratchPayload: LibertySourceStorageReservation?
+    private var rowIndicesPayload: LibertySourceStorageReservation?
+    private var conductancePayload: LibertySourceStorageReservation?
+    private var capacitancePayload: LibertySourceStorageReservation?
+    private var valuesPayload: LibertySourceStorageReservation?
     private var nonzeros = 0
     private var factored = false
     private var closed = false
@@ -39,13 +50,13 @@ internal final class NativeSTAConservativeNativeFactor {
             }
             wordsPerRow = try sum(dimension, 63) / 64
             adjacencyCount = try product(dimension, wordsPerRow)
-            adjacency = try storage(count: adjacencyCount, zero: UInt64(0), work: &work)
-            degrees = try storage(count: dimension, zero: 0, work: &work)
-            neighbors = try storage(count: dimension, zero: 0, work: &work)
-            order = try storage(count: dimension, zero: 0, work: &work)
-            inverse = try storage(count: dimension, zero: 0, work: &work)
-            columnStarts = try storage(count: dimension + 1, zero: 0, work: &work)
-            scratch = try storage(count: dimension, zero: 0.0, work: &work)
+            adjacency = try storage(count: adjacencyCount, zero: UInt64(0), payload: &adjacencyPayload, work: &work)
+            degrees = try storage(count: dimension, zero: 0, payload: &degreesPayload, work: &work)
+            neighbors = try storage(count: dimension, zero: 0, payload: &neighborsPayload, work: &work)
+            order = try storage(count: dimension, zero: 0, payload: &orderPayload, work: &work)
+            inverse = try storage(count: dimension, zero: 0, payload: &inversePayload, work: &work)
+            columnStarts = try storage(count: dimension + 1, zero: 0, payload: &columnStartsPayload, work: &work)
+            scratch = try storage(count: dimension, zero: 0.0, payload: &scratchPayload, work: &work)
             try resetGraph(g, c, work: &work)
             for column in 0..<dimension {
                 try numerical.tick(&work, dimension)
@@ -63,10 +74,10 @@ internal final class NativeSTAConservativeNativeFactor {
                 columnStarts![column + 1] = try sum(columnStarts![column], columnStarts![column + 1])
             }
             nonzeros = columnStarts![dimension]
-            rowIndices = try storage(count: nonzeros, zero: Int32(0), work: &work)
-            conductance = try storage(count: nonzeros, zero: 0.0, work: &work)
-            capacitance = try storage(count: nonzeros, zero: 0.0, work: &work)
-            values = try storage(count: nonzeros, zero: 0.0, work: &work)
+            rowIndices = try storage(count: nonzeros, zero: Int32(0), payload: &rowIndicesPayload, work: &work)
+            conductance = try storage(count: nonzeros, zero: 0.0, payload: &conductancePayload, work: &work)
+            capacitance = try storage(count: nonzeros, zero: 0.0, payload: &capacitancePayload, work: &work)
+            values = try storage(count: nonzeros, zero: 0.0, payload: &valuesPayload, work: &work)
             try resetGraph(g, c, work: &work)
             for column in 0..<dimension {
                 try numerical.tick(&work, dimension - column)
@@ -182,11 +193,11 @@ internal final class NativeSTAConservativeNativeFactor {
     func close() {
         guard !closed else { return }; closed = true; factored = false
         releaseSymbolic()
-        release(&order, count: dimension); release(&inverse, count: dimension)
-        if columnStarts != nil { release(&columnStarts, count: dimension + 1) }
-        release(&rowIndices, count: nonzeros)
-        release(&conductance, count: nonzeros); release(&capacitance, count: nonzeros)
-        release(&values, count: nonzeros); release(&scratch, count: dimension)
+        release(&order, payload: &orderPayload, count: dimension); release(&inverse, payload: &inversePayload, count: dimension)
+        release(&columnStarts, payload: &columnStartsPayload, count: dimension + 1)
+        release(&rowIndices, payload: &rowIndicesPayload, count: nonzeros)
+        release(&conductance, payload: &conductancePayload, count: nonzeros); release(&capacitance, payload: &capacitancePayload, count: nonzeros)
+        release(&values, payload: &valuesPayload, count: nonzeros); release(&scratch, payload: &scratchPayload, count: dimension)
     }
 
     deinit { close() }
@@ -292,24 +303,26 @@ internal final class NativeSTAConservativeNativeFactor {
     }
 
     /// Raw storage is covered by the lease's one quota-slot reservation, never charged twice.
-    private func storage<T>(count: Int, zero: T, work: inout UInt64) throws -> UnsafeMutablePointer<T> {
+    private func storage<T>(count: Int, zero: T, payload: inout LibertySourceStorageReservation?, work: inout UInt64) throws -> UnsafeMutablePointer<T> {
         let bytes = count.multipliedReportingOverflow(by: MemoryLayout<T>.stride)
         guard count > 0, !bytes.overflow else { throw invalid("native storage byte count overflow") }
         try numerical.tick(&work, count)
+        payload = try numerical.budget.reservePayload(T.self, capacity: count, kind: .temporaryBytes)
         let raw = try A.allocate(bytes.partialValue)
         let pointer = raw.bindMemory(to: T.self, capacity: count)
         pointer.initialize(repeating: zero, count: count)
         return pointer
     }
 
-    private func release<T>(_ pointer: inout UnsafeMutablePointer<T>?, count: Int) {
+    private func release<T>(_ pointer: inout UnsafeMutablePointer<T>?, payload: inout LibertySourceStorageReservation?, count: Int) {
+        defer { payload = nil }
         guard let owned = pointer else { return }
         owned.deinitialize(count: count); A.release(UnsafeMutableRawPointer(owned)); pointer = nil
     }
 
     private func releaseSymbolic() {
-        release(&adjacency, count: adjacencyCount)
-        release(&degrees, count: dimension); release(&neighbors, count: dimension)
+        release(&adjacency, payload: &adjacencyPayload, count: adjacencyCount)
+        release(&degrees, payload: &degreesPayload, count: dimension); release(&neighbors, payload: &neighborsPayload, count: dimension)
     }
 
     private func sum(_ a: Int, _ b: Int) throws -> Int {

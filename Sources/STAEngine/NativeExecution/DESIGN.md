@@ -91,3 +91,48 @@ actual query and certificate bounds separately from observed-grid evidence.
 Prepared replay compares exact receipts, queries, coverage and results. Required
 scope remains caller-owned. Failed numerical certification yields a blocked typed
 inconclusive diagnostic and no completed certificate/report.
+
+## Strict Native Transform Payloads
+
+The optional `PreparedSTAExecution.transformResources` is the SAME caller ledger
+admitted by strict intake. A nil value keeps the existing legacy transform policy.
+Native graph, scenario and output construction use `NativeSTAStateBudget` for two
+separate contracts: `reserve(_:)` still counts cumulative logical state slots;
+`reservePayload(_:capacity:kind:)` admits the checked concrete element stride and
+capacity before a managed buffer is created or grown. It does not spend logical
+slots. Owners separately admit collection headers/keys and retain returned leases
+for their actual buffer lifetimes. Old and new buffers coexist during growth and
+must both remain admitted until the copy ends. No maximum-stride inventory or
+source-byte multiplier substitutes for typed payload admission.
+
+`chargeScheduledWork(_:)` spends actual scheduled work on the original cumulative
+caller ledger with cancellation checks before and after the callback. Neither
+callback runs under the logical-slot mutex. Work is never refunded or reset at a
+scenario boundary. Temporary graph/scenario reservations end after their last use;
+immutable prepared/result copies share the reservations for their retained output
+payloads until the last copy is released. This is logical managed payload, not
+allocator buckets, opaque Foundation workspace or process RSS. The intake guard
+remains closed until all composed strict paths and focused owner tests qualify.
+
+The result-retention seam is component-local: scenario outputs transfer their
+immutable transform anchors to the existing payload and execution result. The
+carrier changes neither semantic Hashable/Equatable nor encoded bytes. Scratch
+storage is not published as result storage. Callers extracting bare tables must
+retain the whole controlled result for the table's claimed admission lifetime.
+
+Controlled saved-result decoding uses the existing public PDK admission context
+carried by the actual Decoder, reversed into the same Liberty accountant. The
+custom payload/result initializers admit their own derived validation collections;
+raw field decoding remains with the bounded decoder owner. Generic JSONDecoder
+without that context preserves legacy semantics and supplies no controlled claim.
+The evidence-regeneration call requires its lower canonical/hash allocation
+contract in addition to field decoding. These owner contracts are composed in
+the selected [Native qualification](../PreparedExecution/DESIGN.md#strict-native-qualification-scope).
+
+Result evidence regeneration uses the dependency-owned public canonicalization
+cost and SHA256 managed-cost contracts. The estimator callback spends planning
+work immediately; returned factory work and SHA work are charged once before the
+factory. Temporary admission sums canonical temporary, SHA temporary and SHA
+retained bytes, because the digest is consumed inside the factory. Canonical
+retained bytes are zero for this qualified profile; input owners remain retained
+by the actual result. Native duplicates no private canonical encoding or hash.

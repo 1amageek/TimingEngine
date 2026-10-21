@@ -9,7 +9,8 @@ internal final class NativeSTAInitialSourceControl: Sendable {
     private let work = Mutex(UInt64(0))
     private let lease: LibertySourceStorageReservation
 
-    init(limits: STAExecutionLimits, resources: any LibertySourceResourceAccounting, contextCount: Int) throws {
+    init(limits: STAExecutionLimits, resources: any LibertySourceResourceAccounting, contextCount: Int,
+         transformResources: (any LibertySourceResourceAccounting)? = nil) throws {
         self.limits = limits; self.resources = resources
         try Task.checkCancellation(); try resources.check()
         let output = contextCount.multipliedReportingOverflow(by: MemoryLayout<STAConservativeSourceContext>.stride)
@@ -20,7 +21,7 @@ internal final class NativeSTAInitialSourceControl: Sendable {
         let total = output.partialValue.addingReportingOverflow(metadata)
         guard !total.overflow else { throw LibertySourceError.arithmeticOverflow }
         lease = try resources.reserveStorage(kind: .liveOwnedBytes, byteCount: UInt64(total.partialValue))
-        stateBudget = NativeSTAStateBudget(maximum: limits.maximumPathStates)
+        stateBudget = NativeSTAStateBudget(maximum: limits.maximumPathStates, transformResources: transformResources)
         try stateBudget.reserve(contextCount)
     }
     // Called only before any context is published; builders already check the same work ceiling.

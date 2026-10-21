@@ -1,5 +1,6 @@
 import TimingCore
-internal struct STAPathAnalysisResult {
+internal struct STAPathAnalysisResult: Sendable {
+    var transformRetention: NativeSTATransformRetention? = nil
     let clockObservations: [STAClockObservation]
     let rcSteps: UInt64
     let wireCoverage: [STAWireCoverage]

@@ -53,7 +53,19 @@ public struct STAEffectiveConfiguration: Sendable, Hashable, Codable {
     private static func calculate(modeIDs: [String], cornerIDs: [String], analysisKinds: [STAAnalysisKind],
         maxPaths: Int, requireStrictSourceEvidence: Bool, operatingSupplyAssumptions: [STAOperatingSupplyAssumption], controlPulseSources: [STAControlPulseSource], maximumPathStates: Int, maximumPathWorkUnits: UInt64, requiresPostLayoutInputs: Bool, variation: STAVariation, inputSlews: [String: Double], inputTransitions: [String: TimingConstraintSet.InputTransition],
         defaultOutputLoads: [String: Double], characterizationPolicy: STACharacterizationPolicy,
-        characterizationBindings: [STACharacterizationBinding], distributedRC: STADistributedRCOptions?, conservativeCoupledRC: STAConservativeCoupledRCOptions?, clockSources: [String: [TimingConstraintSet.Clock]], clockReceiverScope: [STAClockReceiverScope]) throws -> ContentDigest {
+        characterizationBindings: [STACharacterizationBinding], distributedRC: STADistributedRCOptions?, conservativeCoupledRC: STAConservativeCoupledRCOptions?, clockSources: [String: [TimingConstraintSet.Clock]], clockReceiverScope: [STAClockReceiverScope], transformStorage: NativeSTATransformStorage? = nil) throws -> ContentDigest {
+        if let storage = transformStorage {
+            return try controlledDigest(modeIDs: modeIDs, cornerIDs: cornerIDs, analysisKinds: analysisKinds,
+                maxPaths: maxPaths, requireStrictSourceEvidence: requireStrictSourceEvidence,
+                operatingSupplyAssumptions: operatingSupplyAssumptions, controlPulseSources: controlPulseSources,
+                maximumPathStates: maximumPathStates, maximumPathWorkUnits: maximumPathWorkUnits,
+                requiresPostLayoutInputs: requiresPostLayoutInputs, variation: variation,
+                inputSlews: inputSlews, inputTransitions: inputTransitions, defaultOutputLoads: defaultOutputLoads,
+                characterizationPolicy: characterizationPolicy, characterizationBindings: characterizationBindings,
+                distributedRC: distributedRC, conservativeCoupledRC: conservativeCoupledRC,
+                clockSources: clockSources, clockReceiverScope: clockReceiverScope,
+                reduction: reduction(distributedRC: distributedRC, conservative: conservativeCoupledRC), storage: storage)
+        }
         var bytes = Data()
         func frame(_ text: String) { let utf8 = text.utf8; bytes.append(contentsOf: String(utf8.count).utf8); bytes.append(58); bytes.append(contentsOf: utf8) }
         frame(conservativeCoupledRC == nil ? "timing.sta.effective.configuration.v9" : "timing.sta.effective.configuration.v10")
@@ -118,37 +130,89 @@ public struct STAEffectiveConfiguration: Sendable, Hashable, Codable {
         distributedRC = try c.decodeIfPresent(STADistributedRCOptions.self, forKey: .distributedRC)
         conservativeCoupledRC = try c.decodeIfPresent(STAConservativeCoupledRCOptions.self, forKey: .conservativeCoupledRC)
         digest = try c.decode(ContentDigest.self, forKey: .digest)
+        let decodeResources = try NativeSTADecodingResources.resources(decoder)
+        let decodeBudget = NativeSTAStateBudget(maximum: maximumPathStates, transformResources: decodeResources)
+        let temporary = NativeSTATransformStorage(budget: decodeBudget, kind: .temporaryBytes)
+        if decodeResources != nil {
+            try temporary.reserveSet(String.self, capacity: modeIDs.count)
+            try temporary.reserveSet(String.self, capacity: cornerIDs.count)
+            try temporary.reserve([String].self, capacity: operatingSupplyAssumptions.count)
+            try temporary.reserveSet([String].self, capacity: operatingSupplyAssumptions.count)
+            for _ in operatingSupplyAssumptions { try temporary.reserve(String.self, capacity: 3) }
+            try temporary.reserve([String].self, capacity: controlPulseSources.count)
+            try temporary.reserveSet([String].self, capacity: controlPulseSources.count)
+            for _ in controlPulseSources { try temporary.reserve(String.self, capacity: 2) }
+            try temporary.reserveSet(String.self, capacity: clockSources.count)
+            try temporary.reserveSet(String.self, capacity: modeIDs.count)
+            var clockCount = 0
+            for clocks in clockSources.values {
+                try decodeBudget.chargeScheduledWork(1)
+                let sum = clockCount.addingReportingOverflow(clocks.count)
+                guard !sum.overflow else { throw LibertySourceError.arithmeticOverflow }
+                clockCount = sum.partialValue
+            }
+            try temporary.reserveSet(STAClockReceiverScope.self, capacity: clockReceiverScope.count)
+            try temporary.reserveSet(String.self, capacity: inputTransitions.count)
+            try temporary.reserveSet(String.self, capacity: modeIDs.count)
+            try temporary.reserveSet(String.self, capacity: inputSlews.count)
+            try temporary.reserveSet(String.self, capacity: modeIDs.count)
+            try temporary.reserveSet(String.self, capacity: defaultOutputLoads.count)
+            try temporary.reserveSet(String.self, capacity: modeIDs.count)
+            for _ in operatingSupplyAssumptions { try temporary.reserve(String.self, capacity: 4) }
+        }
         guard encodingVersion == (conservativeCoupledRC == nil ? 9 : 10),
               algorithmIdentity == (conservativeCoupledRC == nil ? "timing.sta.3.9.0" : "timing.sta.3.15.0"),
               reductionIdentity == Self.reduction(distributedRC: distributedRC, conservative: conservativeCoupledRC),
               conservativeCoupledRC == nil || (distributedRC == nil && requireStrictSourceEvidence),
               !modeIDs.isEmpty, !cornerIDs.isEmpty, !analysisKinds.isEmpty, maxPaths > 0, maximumPathStates > 0, maximumPathWorkUnits > 0, variation.isValid,
-              Set(modeIDs).count == modeIDs.count, Set(cornerIDs).count == cornerIDs.count,
-              Set(operatingSupplyAssumptions.map { [$0.cornerID, $0.instance, $0.pin] }).count == operatingSupplyAssumptions.count,
-              operatingSupplyAssumptions.allSatisfy({ assumption in
-                  cornerIDs.contains(assumption.cornerID)
-                      && [assumption.instance, assumption.cell, assumption.pin, assumption.sourcePGType].allSatisfy({ !$0.isEmpty })
+              try NativeSTADecodingResources.prepaidSet(modeIDs, resources: decodeResources).count == modeIDs.count, try NativeSTADecodingResources.prepaidSet(cornerIDs, resources: decodeResources).count == cornerIDs.count,
+              try NativeSTADecodingResources.prepaidSet(NativeSTADecodingResources.prepaidMap(operatingSupplyAssumptions, resources: decodeResources) { [$0.cornerID, $0.instance, $0.pin] }, resources: decodeResources).count == operatingSupplyAssumptions.count,
+              try NativeSTADecodingResources.all(operatingSupplyAssumptions, resources: decodeResources, { assumption in
+                  try NativeSTADecodingResources.contains(cornerIDs, resources: decodeResources, { $0 == assumption.cornerID })
+                      && NativeSTADecodingResources.all([assumption.instance, assumption.cell, assumption.pin, assumption.sourcePGType],
+                          resources: decodeResources, { !$0.isEmpty })
               }),
-              Set(controlPulseSources.map { [$0.modeID, $0.sourcePort] }).count == controlPulseSources.count,
-              controlPulseSources.allSatisfy({ source in modeIDs.contains(source.modeID) && clockSources[source.modeID]?.contains(where: { $0.name == source.referenceClock && $0.period == source.period }) == true }),
-              Set(clockSources.keys) == Set(modeIDs),
-              clockSources.values.flatMap({ $0 }).allSatisfy({ !$0.isPropagated || $0.hasValidPropagatedSource }),
-              clockSources.allSatisfy({ mode, clocks in clocks.filter(\.isPropagated).allSatisfy { clock in cornerIDs.allSatisfy { corner in clockReceiverScope.contains { $0.modeID == mode && $0.cornerID == corner && $0.rootClock == clock.name } } } }),
-              Set(clockReceiverScope).count == clockReceiverScope.count,
-              clockReceiverScope.allSatisfy({ scope in modeIDs.contains(scope.modeID) && cornerIDs.contains(scope.cornerID) && !scope.receiver.isEmpty && clockSources[scope.modeID]?.contains(where: { $0.name == scope.rootClock && $0.isPropagated }) == true }),
-              Set(inputTransitions.keys).isSubset(of: Set(modeIDs)),
-              inputTransitions.allSatisfy({ mode, transition in
+              try NativeSTADecodingResources.prepaidSet(NativeSTADecodingResources.prepaidMap(controlPulseSources, resources: decodeResources) { [$0.modeID, $0.sourcePort] }, resources: decodeResources).count == controlPulseSources.count,
+              try NativeSTADecodingResources.all(controlPulseSources, resources: decodeResources, { source in
+                  guard let clocks = clockSources[source.modeID] else { return false }
+                  return try NativeSTADecodingResources.contains(modeIDs, resources: decodeResources, { $0 == source.modeID })
+                      && NativeSTADecodingResources.contains(clocks, resources: decodeResources, { $0.name == source.referenceClock && $0.period == source.period })
+              }),
+              try NativeSTADecodingResources.prepaidSet(clockSources.keys, resources: decodeResources) == NativeSTADecodingResources.prepaidSet(modeIDs, resources: decodeResources),
+              try NativeSTADecodingResources.all(clockSources.values, resources: decodeResources, { clocks in
+                  try NativeSTADecodingResources.all(clocks, resources: decodeResources, { !$0.isPropagated || $0.hasValidPropagatedSource })
+              }),
+              try NativeSTADecodingResources.all(clockSources, resources: decodeResources, { mode, clocks in
+                  try NativeSTADecodingResources.all(clocks, resources: decodeResources, { clock in
+                      if !clock.isPropagated { return true }
+                      return try NativeSTADecodingResources.all(cornerIDs, resources: decodeResources, { corner in
+                          try NativeSTADecodingResources.contains(clockReceiverScope, resources: decodeResources, {
+                              $0.modeID == mode && $0.cornerID == corner && $0.rootClock == clock.name
+                          })
+                      })
+                  })
+              }),
+              try NativeSTADecodingResources.prepaidSet(clockReceiverScope, resources: decodeResources).count == clockReceiverScope.count,
+              try NativeSTADecodingResources.all(clockReceiverScope, resources: decodeResources, { scope in
+                  guard let clocks = clockSources[scope.modeID], !scope.receiver.isEmpty else { return false }
+                  return try NativeSTADecodingResources.contains(modeIDs, resources: decodeResources, { $0 == scope.modeID })
+                      && NativeSTADecodingResources.contains(cornerIDs, resources: decodeResources, { $0 == scope.cornerID })
+                      && NativeSTADecodingResources.contains(clocks, resources: decodeResources, { $0.name == scope.rootClock && $0.isPropagated })
+              }),
+              try NativeSTADecodingResources.prepaidSet(inputTransitions.keys, resources: decodeResources).isSubset(of: NativeSTADecodingResources.prepaidSet(modeIDs, resources: decodeResources)),
+              try NativeSTADecodingResources.all(inputTransitions, resources: decodeResources, { mode, transition in
                   switch transition { case .allInputsBothEdges(let slew): return slew.isFinite && slew > 0 && slew == inputSlews[mode] }
               }),
-              Set(inputSlews.keys) == Set(modeIDs), Set(defaultOutputLoads.keys) == Set(modeIDs),
-              inputSlews.values.allSatisfy({ $0.isFinite && $0 >= 0 }),
-              defaultOutputLoads.values.allSatisfy({ $0.isFinite && $0 >= 0 }),
-              characterizationBindings.allSatisfy({ $0.requiredNumericProcess?.isFinite ?? true }),
+              try NativeSTADecodingResources.prepaidSet(inputSlews.keys, resources: decodeResources) == NativeSTADecodingResources.prepaidSet(modeIDs, resources: decodeResources), try NativeSTADecodingResources.prepaidSet(defaultOutputLoads.keys, resources: decodeResources) == NativeSTADecodingResources.prepaidSet(modeIDs, resources: decodeResources),
+              try NativeSTADecodingResources.all(inputSlews.values, resources: decodeResources, { $0.isFinite && $0 >= 0 }),
+              try NativeSTADecodingResources.all(defaultOutputLoads.values, resources: decodeResources, { $0.isFinite && $0 >= 0 }),
+              try NativeSTADecodingResources.all(characterizationBindings, resources: decodeResources, { $0.requiredNumericProcess?.isFinite ?? true }),
               digest == (try Self.calculate(modeIDs: modeIDs, cornerIDs: cornerIDs, analysisKinds: analysisKinds,
                   maxPaths: maxPaths, requireStrictSourceEvidence: requireStrictSourceEvidence, operatingSupplyAssumptions: operatingSupplyAssumptions, controlPulseSources: controlPulseSources, maximumPathStates: maximumPathStates, maximumPathWorkUnits: maximumPathWorkUnits, requiresPostLayoutInputs: requiresPostLayoutInputs, variation: variation,
                   inputSlews: inputSlews, inputTransitions: inputTransitions, defaultOutputLoads: defaultOutputLoads,
-                  characterizationPolicy: characterizationPolicy, characterizationBindings: characterizationBindings, distributedRC: distributedRC, conservativeCoupledRC: conservativeCoupledRC, clockSources: clockSources, clockReceiverScope: self.clockReceiverScope)) else {
+                  characterizationPolicy: characterizationPolicy, characterizationBindings: characterizationBindings, distributedRC: distributedRC, conservativeCoupledRC: conservativeCoupledRC, clockSources: clockSources, clockReceiverScope: self.clockReceiverScope, transformStorage: decodeResources == nil ? nil : temporary)) else {
             throw DecodingError.dataCorruptedError(forKey: .digest, in: c, debugDescription: "Effective STA configuration is inconsistent")
         }
+        withExtendedLifetime(temporary) {}
     }
 }

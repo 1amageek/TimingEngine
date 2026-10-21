@@ -20,7 +20,7 @@ internal struct NativeSTAConservativeWires {
             self.net = net; self.wave = wave; self.load = load; self.sourceIdentity = sourceIdentity
         }
     }
-    private struct Driver {
+    private struct Driver: Sendable {
         let endpoint: TimingParasitics.Endpoint
         let authorityIndex: Int
         let instance: Int?
@@ -41,19 +41,25 @@ internal struct NativeSTAConservativeWires {
     private var historyGeneration: UInt64 = 0
     private var provedClockPeriods: [Int: Double] = [:]
     private(set) var observations: [STAConservativeWireObservation] = []
+    private let transformStorage: NativeSTATransformStorage
+    private var cachePayload: LibertySourceStorageReservation?
+    private var provedClockPayload: LibertySourceStorageReservation?
 
-    private struct InitialSources {
+    func finishTransformRetention() throws -> NativeSTATransformRetention? { try transformStorage.finish() }
+
+    private struct InitialSources: Sendable {
         let thresholds: TimingCharacterizationThresholds
         let drivers: [String: Driver]
         let sources: [NativeSTAConservativeCoupling.Source]
         let receiverLoads: [TimingParasitics.Endpoint: Double]
         let authorities: [STAConservativeSourceAuthority]
         let roots: [TimingParasitics.Endpoint: STAConservativeSourceContextRecord.Clock]
+        let transformRetention: NativeSTATransformRetention?
     }
 
     private static func cellDomain(index: Int, output: String, load: Double,
         inputDomains: [String: ClosedRange<Double>]?, recordIdentities: Bool,
-        identities: inout [LibertyTimingSourceIdentity], design: TimingDesign, cells: [TimingCell],
+        identities: inout [LibertyTimingSourceIdentity], retaining storage: NativeSTATransformStorage? = nil, discriminator: Int = 0, design: TimingDesign, cells: [TimingCell],
         characterized: CharacterizedTimingLibrary, constants: [String: TimingDesign.Constant],
         limits: STAExecutionLimits, budget: NativeSTAStateBudget,
         resources: (any LibertySourceResourceAccounting)?, work: inout UInt64
@@ -62,6 +68,7 @@ internal struct NativeSTAConservativeWires {
             try NativeSTASequentialExecution.charge(1, work: &work, limits: limits, sourceResources: resources)
         }
         let cell = cells[index]
+        let identitySite = #line
         var riseDomain: ClosedRange<Double>?, fallDomain: ClosedRange<Double>?
         for arc in cell.arcs {
             try charge()
@@ -84,7 +91,10 @@ internal struct NativeSTAConservativeWires {
                     fallDomain = fallDomain.map { Self.covering($0, sample.outputSlew.result) } ?? sample.outputSlew.result
                 }
             }
-            if recordIdentities { try budget.reserve(1); identities.append(identity) }
+            if recordIdentities {
+                try budget.reserve(1)
+                if let storage { try storage.append(identity, to: &identities, site: identitySite, discriminator: discriminator) } else { identities.append(identity) }
+            }
         }
         for arc in try characterized.directionalControlArcs(cell: cell.name) {
             try charge()
@@ -117,10 +127,28 @@ internal struct NativeSTAConservativeWires {
             guard hasDirection else {
                 throw TimingCharacterizationError.missingSourceFact("directional transition slope authority")
             }
-            if recordIdentities { try budget.reserve(1); identities.append(identity) }
+            if recordIdentities {
+                try budget.reserve(1)
+                if let storage { try storage.append(identity, to: &identities, site: identitySite, discriminator: discriminator) } else { identities.append(identity) }
+            }
         }
         guard let riseDomain, let fallDomain else { throw TimingError.unsupportedSemantic(format: "certified coupled RC", semantic: "unknown cell output-edge transition domain") }
         return (riseDomain, fallDomain)
+    }
+
+    private static func joinedPinName(_ instance: String, delimiter: String, pin: String,
+        budget: NativeSTAStateBudget, retaining storage: NativeSTATransformStorage) throws -> String {
+        guard budget.transformResources != nil else { return instance + delimiter + pin }
+        let prefixCount = instance.utf8.count.addingReportingOverflow(delimiter.utf8.count)
+        let fullCount = prefixCount.partialValue.addingReportingOverflow(pin.utf8.count)
+        guard !prefixCount.overflow, !fullCount.overflow else { throw LibertySourceError.arithmeticOverflow }
+        let prefixPayload = try budget.reservePayload(UInt8.self, capacity: prefixCount.partialValue, kind: .temporaryBytes)
+        defer { withExtendedLifetime(prefixPayload) {} }
+        try storage.reserve(UInt8.self, capacity: fullCount.partialValue)
+        try budget.chargeScheduledWork(UInt64(prefixCount.partialValue))
+        let prefix = instance + delimiter
+        try budget.chargeScheduledWork(UInt64(fullCount.partialValue))
+        return prefix + pin
     }
 
     private static func initialSources(options: STAConservativeCoupledRCOptions, design: TimingDesign, cells: [TimingCell],
@@ -130,23 +158,54 @@ internal struct NativeSTAConservativeWires {
          limits: STAExecutionLimits, budget: NativeSTAStateBudget,
          resources: (any LibertySourceResourceAccounting)?, mode: String, corner: String,
          work: inout UInt64, includeRootHistories: Bool = false) throws -> InitialSources {
+        let diagnostics: TimingControlledDiagnostics<(TimingParasitics, OwnedLibertySource)>?
+        if let resources = budget.transformResources { diagnostics = try .init(resources: resources, retaining: (parasitics, source)) }
+        else { diagnostics = nil }
+        func sourceFailure(_ prefix: StaticString, name: String) throws -> any Error {
+            if let diagnostics {
+                let bytes = try TimingDiagnosticTextCapacity.description(literal: prefix, ints: 0, doubles: 0,
+                    booleans: 0, additionalUTF8: UInt64(name.utf8.count))
+                return try diagnostics.sourceFailure(utf8ByteCount: bytes) {
+                    TimingError.unsupportedSemantic(format: "certified coupled RC", semantic: "\(prefix)\(name)")
+                }
+            }
+            return TimingError.unsupportedSemantic(format: "certified coupled RC", semantic: "\(prefix)\(name)")
+        }
         guard let thresholds = source.thresholds, !source.hasPinThresholdOverrides,
               parasitics.hasDistributedTopology else {
             throw TimingError.unsupportedSemantic(format: "certified coupled RC", semantic: "exact topology and common source thresholds required")
         }
+        let retained = NativeSTATransformStorage(budget: budget, kind: .liveOwnedBytes)
+        var receiverCapacity = design.ports.count
+        for cell in cells {
+            try budget.chargeScheduledWork(1)
+            let count = receiverCapacity.addingReportingOverflow(cell.pins.count)
+            guard !count.overflow else { throw LibertySourceError.arithmeticOverflow }
+            receiverCapacity = count.partialValue
+        }
+        try retained.reserveDictionary(String.self, Driver.self, capacity: parasitics.networks.count)
+        try retained.reserveDictionary(TimingParasitics.Endpoint.self, Double.self, capacity: receiverCapacity)
+        try retained.reserveDictionary(TimingParasitics.Endpoint.self, STAConservativeSourceContextRecord.Clock.self, capacity: includeRootHistories ? parasitics.networks.count : 0)
+        try retained.reserve(NativeSTAConservativeCoupling.Source.self, capacity: parasitics.networks.count)
+        try retained.reserve(STAConservativeSourceAuthority.self, capacity: parasitics.networks.count)
         var drivers: [String: Driver] = [:]
         var sources: [NativeSTAConservativeCoupling.Source] = []
         var receiverLoads: [TimingParasitics.Endpoint: Double] = [:]
         var authorities: [STAConservativeSourceAuthority] = []
         var roots: [TimingParasitics.Endpoint: STAConservativeSourceContextRecord.Clock] = [:]
+        if budget.transformResources != nil {
+            drivers.reserveCapacity(parasitics.networks.count); receiverLoads.reserveCapacity(receiverCapacity)
+            sources.reserveCapacity(parasitics.networks.count); authorities.reserveCapacity(parasitics.networks.count)
+            if includeRootHistories { roots.reserveCapacity(parasitics.networks.count) }
+        }
         func charge(_ amount: UInt64 = 1) throws {
             try NativeSTASequentialExecution.charge(amount, work: &work, limits: limits, sourceResources: resources)
         }
         func cellDomain(index: Int, output: String, load: Double,
             inputDomains: [String: ClosedRange<Double>]?, recordIdentities: Bool,
-            identities: inout [LibertyTimingSourceIdentity]) throws -> (rise: ClosedRange<Double>, fall: ClosedRange<Double>)? {
+            identities: inout [LibertyTimingSourceIdentity], discriminator: Int = 0) throws -> (rise: ClosedRange<Double>, fall: ClosedRange<Double>)? {
             try Self.cellDomain(index: index, output: output, load: load, inputDomains: inputDomains,
-                recordIdentities: recordIdentities, identities: &identities, design: design, cells: cells,
+                recordIdentities: recordIdentities, identities: &identities, retaining: retained, discriminator: discriminator, design: design, cells: cells,
                 characterized: characterized, constants: constants, limits: limits, budget: budget,
                 resources: resources, work: &work)
         }
@@ -169,7 +228,7 @@ internal struct NativeSTAConservativeWires {
                 let endpoint = TimingParasitics.Endpoint(name: port.name, ownerNet: network.name)
                 if port.direction != .output {
                     guard candidate == nil else {
-                        throw TimingError.unsupportedSemantic(format: "certified coupled RC", semantic: "unique exact canonical driver required for " + network.name)
+                        throw try sourceFailure("unique exact canonical driver required for ", name: network.name)
                     }
                     candidate = (endpoint, true, nil, port.name)
                 }
@@ -187,10 +246,10 @@ internal struct NativeSTAConservativeWires {
                     try charge(UInt64(design.instances[index].name.utf8.count))
                     try charge(UInt64(parasitics.pinDelimiter.utf8.count))
                     try charge(UInt64(pin.name.utf8.count))
-                    let endpoint = TimingParasitics.Endpoint(name: design.instances[index].name + parasitics.pinDelimiter + pin.name, ownerNet: network.name)
+                    let endpoint = TimingParasitics.Endpoint(name: try joinedPinName(design.instances[index].name, delimiter: parasitics.pinDelimiter, pin: pin.name, budget: budget, retaining: retained), ownerNet: network.name)
                     if pin.direction == .output {
                         guard candidate == nil else {
-                            throw TimingError.unsupportedSemantic(format: "certified coupled RC", semantic: "unique exact canonical driver required for " + network.name)
+                            throw try sourceFailure("unique exact canonical driver required for ", name: network.name)
                         }
                         candidate = (endpoint, false, index, pin.name)
                     } else if pin.direction == .input {
@@ -202,7 +261,7 @@ internal struct NativeSTAConservativeWires {
                 }
             }
             guard let driver = candidate else {
-                throw TimingError.unsupportedSemantic(format: "certified coupled RC", semantic: "unique exact canonical driver required for " + network.name)
+                throw try sourceFailure("unique exact canonical driver required for ", name: network.name)
             }
             var connected = false
             for endpoint in network.connections {
@@ -210,7 +269,7 @@ internal struct NativeSTAConservativeWires {
                 if endpoint == driver.endpoint { connected = true; break }
             }
             guard connected else {
-                throw TimingError.unsupportedSemantic(format: "certified coupled RC", semantic: "exact canonical driver connection required for " + network.name)
+                throw try sourceFailure("exact canonical driver connection required for ", name: network.name)
             }
             // The dictionary entry, source record and authority record are admitted before any grows.
             try budget.reserve(3)
@@ -270,7 +329,7 @@ internal struct NativeSTAConservativeWires {
                     throw TimingError.invalidInput("Missing finite prescribed cell source load")
                 }
                 guard let domain = try cellDomain(index: index, output: driver.pin, load: load,
-                    inputDomains: nil, recordIdentities: true, identities: &identities) else {
+                    inputDomains: nil, recordIdentities: true, identities: &identities, discriminator: sources.count) else {
                     throw TimingError.invariantViolation("Missing initial cell source domain")
                 }
                 rise = domain.rise; fall = domain.fall
@@ -280,7 +339,7 @@ internal struct NativeSTAConservativeWires {
                 riseSlew: rise, fallSlew: fall, sourceArcs: identities, prescribedBoundaryLoad: driver.isPort ? nil : loads[network.name]))
         }
         return InitialSources(thresholds: thresholds, drivers: drivers, sources: sources,
-            receiverLoads: receiverLoads, authorities: authorities, roots: roots)
+            receiverLoads: receiverLoads, authorities: authorities, roots: roots, transformRetention: try retained.finish())
     }
 
     static func initialContext(options: STAConservativeCoupledRCOptions, design: TimingDesign, cells: [TimingCell],
@@ -294,6 +353,7 @@ internal struct NativeSTAConservativeWires {
             constants: constants, loads: loads, parasitics: parasitics, limits: control.limits,
             budget: control.stateBudget, resources: control.resources, mode: mode, corner: corner,
             work: &work, includeRootHistories: true)
+        defer { withExtendedLifetime(initial) {} }
         func tick(_ count: UInt64 = 1) throws {
             try NativeSTASequentialExecution.charge(count, work: &work, limits: control.limits,
                 sourceResources: control.resources)
@@ -355,8 +415,12 @@ internal struct NativeSTAConservativeWires {
             characterized: characterized, constraints: constraints, pulseSources: pulseSources,
             constants: constants, loads: loads, parasitics: parasitics, limits: limits, budget: budget,
             resources: resources, mode: mode, corner: corner, work: &work)
+        let storage = NativeSTATransformStorage(budget: budget, kind: .liveOwnedBytes)
+        try storage.hold(initial)
+        self.transformStorage = storage
         let thresholds = initial.thresholds, drivers = initial.drivers, receiverLoads = initial.receiverLoads
         var sources = initial.sources, authorities = initial.authorities
+        var sourceOwner: NativeSTATransformRetention?
         self.mode = mode; self.corner = corner; self.budget = budget
         self.limits = limits; self.resources = resources; self.thresholds = thresholds
         self.declaredClocks = constraints.clocks
@@ -380,7 +444,12 @@ internal struct NativeSTAConservativeWires {
             // Copy-on-write snapshots keep every query in this round on the previous complete box.
             try budget.reserve(sources.count)
             try budget.reserve(authorities.count)
+            let roundStorage = NativeSTATransformStorage(budget: budget, kind: .liveOwnedBytes)
             var nextSources = sources, nextAuthorities = authorities
+            if budget.transformResources != nil {
+                nextSources = try roundStorage.map(sources) { $0 }
+                nextAuthorities = try roundStorage.map(authorities) { $0 }
+            }
             var changed = false
             for position in sources.indices {
                 try charge()
@@ -388,7 +457,11 @@ internal struct NativeSTAConservativeWires {
                 guard !previous.sourceIsPort, previous.constantVoltage == nil,
                       let driver = drivers[previous.endpoint.ownerNet], driver.authorityIndex == position,
                       let instance = driver.instance else { continue }
+                let positionStorage = NativeSTATransformStorage(budget: budget, kind: .temporaryBytes)
+                defer { withExtendedLifetime(positionStorage) {} }
+                try positionStorage.reserveDictionary(String.self, ClosedRange<Double>.self, capacity: cells[instance].pins.count)
                 var inputs: [String: ClosedRange<Double>] = [:]
+                if budget.transformResources != nil { inputs.reserveCapacity(cells[instance].pins.count) }
                 var complete = true
                 func prove(_ pin: String) throws {
                     try charge(UInt64(pin.utf8.count) + 1)
@@ -404,13 +477,22 @@ internal struct NativeSTAConservativeWires {
                     try budget.reserve(2)
                     try charge(UInt64(design.instances[instance].name.utf8.count))
                     try charge(UInt64(parasitics.pinDelimiter.utf8.count))
-                    let endpoint = TimingParasitics.Endpoint(name: design.instances[instance].name + parasitics.pinDelimiter + pin, ownerNet: net)
+                    let endpoint = TimingParasitics.Endpoint(name: try Self.joinedPinName(design.instances[instance].name, delimiter: parasitics.pinDelimiter, pin: pin, budget: budget, retaining: positionStorage), ownerNet: net)
                     do {
                         let r = try solver.bounds(prepared: current, source: sourceAuthority.endpoint,
                             sink: endpoint, edge: .rise, sourceSlew: rise, work: &work)
                         let f = try solver.bounds(prepared: current, source: sourceAuthority.endpoint,
                             sink: endpoint, edge: .fall, sourceSlew: fall, work: &work)
                         inputs[pin] = Self.covering(r.slew, f.slew)
+                    } catch let failure as TimingControlledTransformFailure {
+                        if let cause = failure.cause as? NativeSTAConservativeCouplingError {
+                            switch cause {
+                            case .unprovedCrossing, .unprovedUniqueTransition: complete = false
+                            default: throw failure
+                            }
+                        } else if failure.cause is NativeSTAConservativeCandidateNotCertified {
+                            complete = false
+                        } else { throw failure }
                     } catch NativeSTAConservativeCouplingError.unprovedCrossing {
                         complete = false
                     } catch NativeSTAConservativeCouplingError.unprovedUniqueTransition {
@@ -450,7 +532,9 @@ internal struct NativeSTAConservativeWires {
             guard changed else { break }
             current = try solver.restrictSources(prepared: current, to: nextSources, work: &work)
             sources = nextSources; authorities = nextAuthorities
+            sourceOwner = try roundStorage.finish()
         }
+        try storage.hold((sources, authorities, sourceOwner))
         self.drivers = drivers
         self.sourceAuthorities = authorities
         self.prepared = current
@@ -461,8 +545,14 @@ internal struct NativeSTAConservativeWires {
     mutating func publishClockHistories(_ publications: [ClockPublication], work: inout UInt64) throws {
         try NativeSTASequentialExecution.charge(UInt64(publications.count) + 1, work: &work, limits: limits, sourceResources: resources)
         try budget.reserve(sourceAuthorities.count)
+        let publicationStorage = NativeSTATransformStorage(budget: budget, kind: .liveOwnedBytes)
+        let scratch = NativeSTATransformStorage(budget: budget, kind: .temporaryBytes)
+        defer { withExtendedLifetime(scratch) {} }
         var nextAuthorities = sourceAuthorities
+        if budget.transformResources != nil { nextAuthorities = try publicationStorage.map(sourceAuthorities) { $0 } }
+        try scratch.reserveDictionary(TimingParasitics.Endpoint.self, NativeSTAConservativeSourceHistory.self, capacity: publications.count)
         var histories: [TimingParasitics.Endpoint: NativeSTAConservativeSourceHistory] = [:]
+        if budget.transformResources != nil { histories.reserveCapacity(publications.count) }
         for publication in publications {
             try NativeSTASequentialExecution.charge(32, work: &work, limits: limits, sourceResources: resources)
             guard let driver = drivers[publication.net] else { continue }
@@ -510,6 +600,7 @@ internal struct NativeSTAConservativeWires {
         }
         guard !histories.isEmpty else { return }
         try budget.reserve(nextAuthorities.count)
+        try publicationStorage.reserve(NativeSTAConservativeCoupling.Source.self, capacity: nextAuthorities.count)
         var sources: [NativeSTAConservativeCoupling.Source] = []
         sources.reserveCapacity(nextAuthorities.count)
         for authority in nextAuthorities {
@@ -522,6 +613,8 @@ internal struct NativeSTAConservativeWires {
         let generation = try nextHistoryGeneration()
         let restricted = try solver.restrictSources(prepared: prepared, to: sources, work: &work)
         let next = try solver.addingSourceHistory(prepared: restricted, histories: histories, work: &work)
+        let retained = try publicationStorage.finish()
+        try transformStorage.hold((sources, nextAuthorities, retained))
         prepared = next; sourceAuthorities = nextAuthorities; historyGeneration = generation
     }
 
@@ -529,7 +622,16 @@ internal struct NativeSTAConservativeWires {
         try NativeSTASequentialExecution.charge(UInt64(receivers.count) + 1, work: &work, limits: limits, sourceResources: resources)
         try budget.reserve(provedClockPeriods.count)
         try budget.reserve(receivers.count)
+        let capacity = provedClockPeriods.count.addingReportingOverflow(receivers.count)
+        guard !capacity.overflow else { throw LibertySourceError.arithmeticOverflow }
+        let nextPayload = try dictionaryPayload(Int.self, Double.self, capacity: capacity.partialValue)
+        let previousPayload = provedClockPayload
+        defer { withExtendedLifetime(previousPayload) {} }
         var next = provedClockPeriods
+        if budget.transformResources != nil {
+            next = [:]; next.reserveCapacity(capacity.partialValue)
+            for (key, value) in provedClockPeriods { try budget.chargeScheduledWork(1); next[key] = value }
+        }
         for receiver in receivers {
             guard receiver.instance >= 0, receiver.period.isFinite, receiver.period > 0,
                   next[receiver.instance] == nil || next[receiver.instance] == receiver.period else {
@@ -538,6 +640,7 @@ internal struct NativeSTAConservativeWires {
             next[receiver.instance] = receiver.period
         }
         provedClockPeriods = next
+        provedClockPayload = nextPayload
     }
 
     mutating func publishSequentialPlateau(net: String, instance: Int, period: Double,
@@ -626,6 +729,15 @@ internal struct NativeSTAConservativeWires {
         }
     }
 
+    private func dictionaryPayload<K, V>(_ key: K.Type, _ value: V.Type, capacity: Int) throws -> LibertySourceStorageReservation? {
+        guard let resources = budget.transformResources else { return nil }
+        let bytes = try TimingTransformCapacity.dictionary(key, value, minimumCapacity: capacity)
+        try resources.check()
+        let payload = try resources.reserveStorage(kind: .temporaryBytes, byteCount: bytes)
+        try resources.check()
+        return payload
+    }
+
     mutating func response(net: String, sink: String, edge: TimingEdge, sourceSlew: ClosedRange<Double>,
                            work: inout UInt64) throws -> (delay: ClosedRange<Double>, slew: ClosedRange<Double>) {
         try NativeSTASequentialExecution.charge(1, work: &work, limits: limits, sourceResources: resources)
@@ -640,12 +752,21 @@ internal struct NativeSTAConservativeWires {
         let result = try solver.bounds(prepared: prepared, source: driver, sink: endpoint, edge: edge,
             sourceSlew: sourceSlew, work: &work)
         try budget.reserve(2)
-        cached[key] = observations.count
-        observations.append(.init(modeID: mode, cornerID: corner, net: net, source: driver, sink: endpoint,
+        if budget.transformResources != nil, cached[key] == nil, cached.count == cached.capacity {
+            let doubled = max(1, cached.capacity).multipliedReportingOverflow(by: 2)
+            guard !doubled.overflow else { throw LibertySourceError.arithmeticOverflow }
+            let payload = try dictionaryPayload(Query.self, Int.self, capacity: doubled.partialValue)
+            var replacement: [Query: Int] = [:]; replacement.reserveCapacity(doubled.partialValue)
+            for (key, value) in cached { try budget.chargeScheduledWork(1); replacement[key] = value }
+            cached = replacement; cachePayload = payload
+        }
+        let observationIndex = observations.count
+        try transformStorage.append(.init(modeID: mode, cornerID: corner, net: net, source: driver, sink: endpoint,
             edge: edge, sourceAuthorities: sourceAuthorities, sourceSlew: sourceSlew, admittedSourceSlew: result.admittedSourceSlew,
             delay: result.delay, slew: result.slew, voltageErrorUpperBound: result.voltageErrorUpperBound,
             minimumCrossingDerivative: result.minimumCrossingDerivative,
-            maximumAbsoluteDerivative: result.maximumAbsoluteDerivative))
+            maximumAbsoluteDerivative: result.maximumAbsoluteDerivative), to: &observations)
+        cached[key] = observationIndex
         return (result.delay, result.slew)
     }
 }

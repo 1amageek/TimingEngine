@@ -1449,3 +1449,77 @@ evidence. Changing source slope authority, normalized waveform/history semantics
 primitive interpretation, algebraic profile, threshold semantics or rounding method
 invalidates the corresponding prepared certificate and requires new evidence.
 Passing fixtures establishes only the exercised model/backend/platform scope.
+
+
+## Strict Transform Payload Ownership
+
+The existing optional `NativeSTAStateBudget.transformResources` is the sole
+strict transform accountant. Logical `reserve` counts stay independent of
+concrete byte reservations. Dense interval matrices retain their own typed value
+reservation; sparse CSR values, columns and offsets retain their separate typed
+reservations, including shared original index owners in derived CSR values.
+A strict writable matrix copy admits and initializes a separate value buffer
+while the original remains alive. Ordinary nil-accountant arithmetic is unchanged.
+
+Local Double/Int/Bool vectors, row dictionaries, sorting scratch and candidate
+workspace use their actual element/count bounds and call-local temporary leases.
+Escaping graph, basis, certificate, response and observation payload carries its
+reservation through its actual owner; source strings and prepared inputs remain
+borrowed from their retained original owners. No maximum-stride slot conversion
+or reservation of unused request-wide capacity substitutes for typed payload.
+
+The existing numerical checkpoints also charge scheduled work to that same
+accountant, with external callbacks outside accounting-state locks. Resource or
+cancellation failures retain their original identity and publish no strict result.
+No matrix arithmetic, outward rounding, candidate/certificate selection or source
+family authority is changed. Native allocator routing remains its existing
+separate ownership boundary; its metadata and actual native buffers require
+pre-admission at the lease entry, not a replacement solver.
+
+`NativeStrictNumericalPayloadTests` verifies typed pre-growth refusal, old/new
+matrix coexistence, copied matrix/CSR final-owner refund, cumulative work and
+cancellation, and unchanged actual numerical results. The selected Native gates
+and finding-limited review passed within the
+[PreparedExecution scope](../../PreparedExecution/DESIGN.md#strict-native-qualification-scope).
+
+### Native allocation serialization permit
+
+The host-only native allocation route uses a `Mutex`-protected optional synchronous
+thread identity as its canonical ownership state. `NSCondition` only coordinates
+blocking wake/wait; its lock is always acquired before the state mutex, and no
+state mutex is held during a wait. The allocation body, caller callbacks, and
+resource/cancellation callbacks execute outside both locks. Independent threads
+retain blocking serialization. Same-thread recursive acquisition refuses with a
+typed native-backend failure rather than deadlocking. A canceled waiter is checked
+after acquisition and releases its permit without entering the numerical body.
+Every acquired permit is released on return or throw. This Foundation condition
+adapter is native-only; it does not create a shared-state Embedded branch.
+
+Strict failures use TimingCore's prepaid `TimingControlledDiagnostics` boundary.
+Source-name concatenations admit their literal and actual UTF-8 fragments before
+construction. Existing numeric diagnostic descriptions use the fixed Swift 6.4
+formatter bounds owned by `TimingDiagnosticTextCapacity`; simultaneously live
+nested descriptions and terminal messages are admitted separately. Existing
+candidate/refinement decisions inspect the exact underlying typed cause, while
+retaining the complete controlled failure for any message that escapes.
+
+| State | Storage and isolation in every compiled target | Entry points | Final owner |
+|---|---|---|---|
+| Native serialization identity | `Mutex<PermitState>` | acquire/release only | synchronous allocation invocation |
+| Native address/quota route | `Mutex<Routing>` | allocate/release/check/finish | active permit; metadata callbacks kept alive outside locks |
+| Source-context cumulative work | existing `Mutex<UInt64>` | existing checkpoint/finishBuilder | checked context/control copies |
+| Matrix/CSR payload | value storage plus immutable reservation anchors | admitted factory/copy before mutation or publication | final immutable value copy |
+| Sparse construction rows | non-Sendable synchronous value owner | checked row replacement/insert | construction scope |
+
+`NSCondition` is the Foundation host wake/wait adapter, not an alternate canonical
+state store. No Embedded/raw-state or Sendable conditional branch is introduced.
+This sprint's planned runtime qualification is the fixed native Swift 6.4 target;
+WASM/Embedded runtime behavior is not inferred from those results.
+
+Strict history publication retains the stable model's construction anchors and a
+separate replaceable history-map anchor. A new map is admitted while its previous
+map/owner remains live, then the replacement owns only its own map. Canonical
+source-history meaning remains in SourceFamilies; neither a stale map lease nor
+a new request budget is accumulated by repeated publication. Construction array
+append sites identify the actual evolving array, including multi-site initial
+and later entries, so replacement reservations return with the replaced buffer.

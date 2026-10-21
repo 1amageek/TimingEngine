@@ -487,3 +487,27 @@ NLDM bounds, not physical current/CCS guarantees or switching policy.
 extrema, independent delay/slew knots, signed checks, pulse/control ranges,
 source-domain refusal and forged sample reevaluation. Existing point tests retain
 compatibility ownership. No new mutable or target-specific state is introduced.
+
+
+### Controlled Owned Threshold Diagnostics
+
+OwnedLibertySource owns the canonical text for its retained threshold issue.
+Its package-scoped withThresholdIssueDescription operation uses the existing
+TimingCharacterizationError.errorDescription implementation, with a capacity plan
+derived from the enum's literal punctuation, source String fields and the fixed
+Swift 6.4 numeric-description contract in
+[SourceTransforms](../SourceTransforms/DESIGN.md#controlled-diagnostic-failure).
+It does not describe an unknown Error or depend on Optional/enum reflection.
+The nil issue has the exact static text nil; a missing formatter for a present
+issue is an invariant failure rather than a successful diagnostic substitute.
+
+Before invoking that formatter, the operation admits description UTF-8 storage,
+the fixed String value fields and any numeric-format intermediate capacities on
+the supplied original accountant, then charges construction work and checks
+cancellation. The callback borrows the description while those temporary leases
+remain alive. Return or throw drops the description before refunding scratch;
+work is cumulative. A caller publishing a copied combined diagnostic must admit
+and retain that separate text through its own prepaid terminal failure boundary.
+This seam changes no threshold validation, source facts, error case or parser
+acceptance. DistributedRC's controlled failure selects this canonical text;
+its legacy unaccounted branch retains its historical reflection description.

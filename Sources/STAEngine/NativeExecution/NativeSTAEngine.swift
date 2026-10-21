@@ -99,22 +99,29 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
 
     public func prepare(_ request: STARequest, resources: STAExecutionResources)
         async throws(STAPreparationError) -> PreparedSTAExecution {
+        var failureBoundary: TimingControlledDiagnostics<LoadedInputs>?
         do {
             try Task.checkCancellation()
-            // FIXME(INCOMPLETE_IMPLEMENTATION): Native prepare has no strict payload/work accountant for
-            // design/SDC/SPEF/graph/scenario transforms. Callers demanding it are refused before intake;
-            // admission must remain blocked until every transform pre-admits its own allocations and work.
-            guard !resources.requiresStrictTransformAccounting else { throw STAPreparationError.unsupportedBoundedTransformAccounting }
             guard request.randomSeed == nil else { throw STAPreparationError.unsupportedRandomSeed }
             guard request.variation.isValid else { throw TimingError.invalidInput("Invalid STA derates") }
             guard request.maxPaths <= resources.limits.maximumPaths else { throw STAPreparationError.capacity("Path limit exceeded") }
+            let transformResources: (any LibertySourceResourceAccounting)? = resources.requiresStrictTransformAccounting ? resources.sourceResources : nil
+            let transformBudget = NativeSTAStateBudget(maximum: resources.limits.maximumPathStates, transformResources: transformResources)
+            let retained = NativeSTATransformStorage(budget: transformBudget, kind: .liveOwnedBytes)
+            let temporary = NativeSTATransformStorage(budget: transformBudget, kind: .temporaryBytes)
             let inputs = try await loadInputs(request, resources: resources)
-            try validateCanonicalInputs(inputs)
+            if let transformResources {
+                failureBoundary = try TimingControlledDiagnostics(resources: transformResources, retaining: inputs)
+            }
+            try validateCanonicalInputs(inputs, transformBudget: transformBudget)
             guard request.controlPulseSources.isEmpty || request.requireStrictSourceEvidence else {
                 throw TimingError.invalidInput("Explicit control pulses require source-qualified execution")
             }
             for pulse in request.controlPulseSources {
-                try resources.sourceResources.check(); try resources.sourceResources.chargeWork(UInt64(inputs.design.ports.count + request.controlPulseSources.count))
+                try resources.sourceResources.check()
+                let pulseWork = inputs.design.ports.count.addingReportingOverflow(request.controlPulseSources.count)
+                guard !pulseWork.overflow else { throw LibertySourceError.arithmeticOverflow }
+                try resources.sourceResources.chargeWork(UInt64(pulseWork.partialValue))
                 guard inputs.modeIDs.contains(pulse.modeID),
                       let port = inputs.design.ports.first(where: { $0.name == pulse.sourcePort }), port.direction == .input,
                       let constraint = inputs.constraints[pulse.modeID],
@@ -131,21 +138,38 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
                     }
                 }
             }
+            // The existing validator appends at most a missing-digest issue plus
+            // one provenance/mismatch issue; it performs no String normalization.
+            try temporary.reserve(LogicDesignProvenanceValidation.Issue.self, capacity: 2)
+            try transformBudget.chargeScheduledWork(UInt64(request.design.digest.hexadecimalValue.utf8.count))
             let issues = LogicDesignProvenanceValidation.issues(for: logicDesignReference(for: request),
                 requireProvenance: request.requiresPostLayoutInputs)
             guard issues.isEmpty else { throw TimingError.invalidInput("STA design provenance is incomplete") }
-            let observations = try characterization(request, inputs: inputs.processInputs)
-            let reduced = try inputs.parasitics.map { try parasiticReducer.reduce($0) }
+            let observations = try characterization(request, inputs: inputs.processInputs, transformStorage: retained)
+            let reduced: TimingLumpedParasitics?
+            if let source = inputs.parasitics, let transformResources {
+                let value = try parasiticReducer.reduce(source, resources: transformResources)
+                try retained.hold(value); reduced = value.value
+            } else { reduced = try inputs.parasitics.map { try parasiticReducer.reduce($0) } }
+            try retained.reserveDictionary(String.self, CharacterizedTimingLibrary.self, capacity: request.requestedCornerIDs.count)
             var clockCharacterization: [String: CharacterizedTimingLibrary] = [:]
+            if transformResources != nil { clockCharacterization.reserveCapacity(request.requestedCornerIDs.count) }
             var receiverScope: [STAClockReceiverScope] = []
             if inputs.constraints.values.contains(where: { $0.clocks.contains(where: \.isPropagated) }) {
                 guard request.distributedRC != nil || request.conservativeCoupledRC != nil else { throw TimingError.unsupportedSemantic(format: "STA", semantic: "propagated clock requires explicit wire timing options") }
-                let clockPlanBudget = NativeSTAStateBudget(maximum: resources.limits.maximumPathStates)
+                let clockPlanBudget = NativeSTAStateBudget(maximum: resources.limits.maximumPathStates, transformResources: transformResources)
                 var clockPlanWork: UInt64 = 0
                 for corner in request.requestedCornerIDs {
                     guard let source = inputs.processInputs.sourcesByCorner[corner] else { throw TimingError.invariantViolation("Missing clock source owner") }
+                    try temporary.reserveSet(String.self, capacity: inputs.design.instances.count)
+                    try temporary.reserveSet(String.self, capacity: inputs.design.instances.count)
+                    try temporary.reserveDictionary(Int.self, NativeSTASequentialExecution.Plan.self, capacity: inputs.design.instances.count)
                     var buffers = Set<String>(), sequential = Set<String>()
                     var plans: [Int: NativeSTASequentialExecution.Plan] = [:]
+                    if transformResources != nil {
+                        buffers.reserveCapacity(inputs.design.instances.count); sequential.reserveCapacity(inputs.design.instances.count)
+                        plans.reserveCapacity(inputs.design.instances.count)
+                    }
                     for (index, instance) in inputs.design.instances.enumerated() {
                         let cell = try source.library.cell(named: instance.cell)
                         guard let model = cell.sequentialModel else { continue }
@@ -156,37 +180,68 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
                         plans[index] = plan
                     }
                     for mode in inputs.modeIDs {
+                        try temporary.reserve(TimingConstraintSet.self, capacity: 1)
                         let selected = try NativeSTAClockPropagation.characterizationCells(design: inputs.design, library: source.library,
                             constraints: [inputs.constraints[mode]!], plans: plans,
-                            resources: resources.sourceResources, delimiter: inputs.parasitics?.pinDelimiter ?? ":")
+                            resources: resources.sourceResources, delimiter: inputs.parasitics?.pinDelimiter ?? ":",
+                            transformResources: transformResources)
+                        try retained.hold(selected)
                         buffers.formUnion(selected.buffers); sequential.formUnion(selected.sequential)
                         for receiver in selected.receivers {
                             guard receiverScope.count < resources.limits.maximumPathStates else { throw STAPreparationError.capacity("Clock receiver scope") }
-                            receiverScope.append(.init(modeID: mode, cornerID: corner, rootClock: receiver.root, receiver: receiver.receiver))
+                            try retained.append(STAClockReceiverScope(modeID: mode, cornerID: corner, rootClock: receiver.root, receiver: receiver.receiver), to: &receiverScope)
                         }
                     }
-                    let all = Array(buffers.union(sequential)).sorted()
+                    let all: [String]
+                    if transformResources != nil {
+                        let count = buffers.count.addingReportingOverflow(sequential.count)
+                        guard !count.overflow else { throw LibertySourceError.arithmeticOverflow }
+                        try temporary.reserveSet(String.self, capacity: count.partialValue)
+                        var union: Set<String> = []; union.reserveCapacity(count.partialValue)
+                        for value in buffers { try transformBudget.chargeScheduledWork(1); union.insert(value) }
+                        for value in sequential { try transformBudget.chargeScheduledWork(1); union.insert(value) }
+                        all = try temporary.sorted(union, by: <)
+                    } else { all = Array(buffers.union(sequential)).sorted() }
                     guard !all.isEmpty else { throw TimingError.unsupportedSemantic(format: "propagated clock STA", semantic: "no actual FF clock characterization scope") }
                     if !request.requireStrictSourceEvidence {
                         clockCharacterization[corner] = try source.withBytes {
-                            try characterizationParser.parseCharacterizedSource($0, cellNames: all, propagationCellNames: buffers.sorted(),
-                                sequentialPropagationCellNames: sequential.sorted(), limits: resources.sourceLimits, resources: resources.sourceResources)
+                            try characterizationParser.parseCharacterizedSource($0, cellNames: all,
+                                propagationCellNames: temporary.sorted(buffers, by: <),
+                                sequentialPropagationCellNames: temporary.sorted(sequential, by: <),
+                                limits: resources.sourceLimits, resources: resources.sourceResources)
                         }
                     }
                 }
             }
             if request.requireStrictSourceEvidence {
-                let selected = Array(Set(inputs.design.instances.map(\.cell))).sorted()
+                let selected: [String]
+                if transformResources != nil {
+                    try temporary.reserveSet(String.self, capacity: inputs.design.instances.count)
+                    var cells: Set<String> = []; cells.reserveCapacity(inputs.design.instances.count)
+                    for instance in inputs.design.instances { try transformBudget.chargeScheduledWork(1); cells.insert(instance.cell) }
+                    selected = try temporary.sorted(cells, by: <)
+                } else { selected = Array(Set(inputs.design.instances.map(\.cell))).sorted() }
                 for corner in request.requestedCornerIDs {
                     guard let source = inputs.processInputs.sourcesByCorner[corner] else {
                         throw TimingError.invariantViolation("Missing exact strict source owner")
                     }
+                    try temporary.reserve(String.self, capacity: selected.count)
+                    try temporary.reserve(String.self, capacity: selected.count)
                     var propagation: [String] = [], sequential: [String] = []
+                    if transformResources != nil { propagation.reserveCapacity(selected.count); sequential.reserveCapacity(selected.count) }
                     for name in selected {
+                        try transformBudget.chargeScheduledWork(1)
                         try resources.sourceResources.check()
                         let cell = try source.library.cell(named: name)
                         if cell.sequentialModel != nil { sequential.append(name) }
-                        else if !cell.inputPins.isEmpty { propagation.append(name) }
+                        else if transformResources != nil {
+                            var hasInput = false
+                            for pin in cell.pins {
+                                try transformBudget.chargeScheduledWork(1)
+                                if pin.direction == .input { hasInput = true; break }
+                            }
+                            if hasInput { propagation.append(name) }
+                        } else if !cell.inputPins.isEmpty { propagation.append(name) }
                     }
                     clockCharacterization[corner] = try source.withBytes {
                         try characterizationParser.parseCharacterizedSource($0, cellNames: selected,
@@ -195,29 +250,55 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
                     }
                 }
             }
-            let configuration = try STAEffectiveConfiguration(request: request, modes: inputs.modeIDs, constraints: inputs.constraints,
-                limits: resources.limits, clockReceiverScope: receiverScope)
+            let configuration: STAEffectiveConfiguration
+            if transformResources != nil {
+                configuration = try STAEffectiveConfiguration(request: request, modes: inputs.modeIDs,
+                    constraints: inputs.constraints, limits: resources.limits, clockReceiverScope: receiverScope, transformStorage: retained)
+            } else {
+                configuration = try STAEffectiveConfiguration(request: request, modes: inputs.modeIDs, constraints: inputs.constraints,
+                    limits: resources.limits, clockReceiverScope: receiverScope)
+            }
             if let expected = request.configurationDigest, expected != configuration.digest { throw STAPreparationError.configurationMismatch }
             try Task.checkCancellation()
-            return try PreparedSTAExecution(request: request, design: inputs.design, processInputs: inputs.processInputs,
+            var prepared = try PreparedSTAExecution(request: request, design: inputs.design, processInputs: inputs.processInputs,
                 constraints: inputs.constraints, parasitics: reduced, parasiticSource: inputs.parasitics, modeIDs: inputs.modeIDs,
-                catalog: resources.inspectedSources, configuration: configuration, characterization: observations, sourceResources: resources.sourceResources, clockCharacterization: clockCharacterization, limits: resources.limits)
-        } catch let error as STAPreparationError { throw error }
-        catch let error as LibertySourceError { throw .liberty(error) }
-        catch let error as TimingError { throw .input(error) }
-        catch is CancellationError { throw .cancelled }
-        catch { throw .underlying(error) }
+                catalog: resources.inspectedSources, configuration: configuration, characterization: observations,
+                sourceResources: resources.sourceResources, clockCharacterization: clockCharacterization, limits: resources.limits,
+                transformResources: transformResources, runtimeIdentityReadBudget: resources.runtimeIdentityReadBudget)
+            if transformResources != nil {
+                try retained.hold(prepared.transformRetention); try retained.hold(inputs.transformRetention)
+                prepared.transformRetention = try retained.finish()
+            }
+            withExtendedLifetime(temporary) {}
+            return prepared
+        } catch {
+            if let failureBoundary { throw .underlying(failureBoundary.failure(error)) }
+            if let error = error as? STAPreparationError { throw error }
+            if let error = error as? LibertySourceError { throw .liberty(error) }
+            if let error = error as? TimingError { throw .input(error) }
+            if error is CancellationError { throw .cancelled }
+            throw .underlying(error)
+        }
     }
 
     public func execute(_ prepared: PreparedSTAExecution) async throws(STAExecutionError) -> STAExecutionResult {
         let request = prepared.request
         let startedAt = Date()
+        var failureBoundary: TimingControlledDiagnostics<PreparedSTAExecution>?
         do {
+            failureBoundary = try prepared.transformResources.map {
+                try TimingControlledDiagnostics(resources: $0, retaining: prepared)
+            }
             try Task.checkCancellation()
             let result = try analyze(request: request, design: prepared.design,
                 librariesByCorner: prepared.processInputs.librariesByCorner, sourcesByCorner: prepared.processInputs.sourcesByCorner, clockCharacterization: prepared.clockCharacterization, sourceResources: prepared.sourceResources, constraints: prepared.constraints,
                 parasitics: prepared.parasitics, parasiticSource: prepared.parasiticSource, cornerIDs: request.requestedCornerIDs,
-                modeIDs: prepared.modeIDs, processSelection: prepared.processSelection, sourceRoles: prepared.sourceRoleInventory, limits: prepared.limits)
+                modeIDs: prepared.modeIDs, processSelection: prepared.processSelection, sourceRoles: prepared.sourceRoleInventory, limits: prepared.limits, transformResources: prepared.transformResources)
+            let budget = NativeSTAStateBudget(maximum: prepared.limits.maximumPathStates,
+                transformResources: prepared.transformResources)
+            let retained = NativeSTATransformStorage(budget: budget, kind: .liveOwnedBytes)
+            try retained.hold(prepared)
+            try retained.hold(result.payload.transformRetention)
             var payload = result.payload
             payload.effectiveConfiguration = prepared.effectiveConfiguration
             payload.characterization = prepared.characterization
@@ -228,25 +309,67 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
                     coverage: result.sourceCoverage, samples: result.sourceSamples, pulseWidthSamples: result.pulseWidthSamples, staticStateSamples: result.staticStateSamples,
                     normalPowerSamples:result.normalPowerSamples,normalPowerOwners:result.normalPowerOwners)
                 try prepared.sourceResources.chargeWork(payload.setupApplicabilityValidationWork())
+                let applicabilityStorage = NativeSTATransformStorage(budget: budget, kind: .temporaryBytes)
+                try applicabilityStorage.reserveDictionary(Int.self, STASourceEvidence.Coverage.Disposition.self,
+                    capacity: result.sourceCoverage.count)
+                var staticCapacity = 0; var notApplicableCapacity = 0
+                for endpoint in payload.endpoints {
+                    try budget.chargeScheduledWork(1)
+                    staticCapacity = max(staticCapacity, endpoint.staticChecks?.count ?? 0)
+                    notApplicableCapacity = max(notApplicableCapacity, endpoint.notApplicableChecks?.count ?? 0)
+                }
+                try applicabilityStorage.reserveSet(STAAnalysisKind.self, capacity: staticCapacity)
+                try applicabilityStorage.reserveSet(STAAnalysisKind.self, capacity: notApplicableCapacity)
                 payload.setupApplicability = try payload.derivedSetupApplicability()
+                withExtendedLifetime(applicabilityStorage) {}
                 try payload.sourceEvidence!.validateStructure(maximumStates: prepared.limits.maximumPathStates,
-                    maximumWork: prepared.limits.maximumPathWorkUnits)
+                    maximumWork: prepared.limits.maximumPathWorkUnits, stateBudget: budget)
             }
             var artifactBindings: [TimingArtifactBinding] = []
             if let artifactStore {
-                let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                let artifact = try await artifactStore.store(encoder.encode(payload), artifactName: "timing-sta-report",
-                    runID: request.runID, kind: .report, format: .json)
-                artifactBindings.append(artifact)
+                let artifact: TimingArtifactBinding
+                if let resources = prepared.transformResources {
+                    let encoded = try TimingJSONEncoding.encode(payload,
+                        formatting: [.prettyPrinted, .sortedKeys], resources: resources)
+                    try resources.check()
+                    artifact = try await artifactStore.store(encoded.value, artifactName: "timing-sta-report",
+                        runID: request.runID, kind: .report, format: .json)
+                    try resources.check(); withExtendedLifetime(encoded) {}
+                } else {
+                    let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                    artifact = try await artifactStore.store(encoder.encode(payload), artifactName: "timing-sta-report",
+                        runID: request.runID, kind: .report, format: .json)
+                }
+                try retained.append(artifact, to: &artifactBindings)
             }
             try Task.checkCancellation()
-            return try STAExecutionResult(runID: request.runID, status: result.status, payload: payload,
-                inputBindings: request.artifactBindings, artifactBindings: artifactBindings, diagnostics: result.diagnostics,
-                provenance: makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: request.inputs),
-                schemaVersion: STARequest.currentSchemaVersion)
+            let inputBindings = try NativeSTARequestTransforms.bindings(request, storage: retained)
+            let inputReferences = try retained.map(inputBindings, \.reference)
+            let executionProvenance: ExecutionProvenance
+            if let resources = prepared.transformResources {
+                let executable = try await TimingRuntimeIdentity.currentExecutableDigest(resources: resources,
+                    readBudget: prepared.runtimeIdentityReadBudget)
+                let environment = try TimingRuntimeIdentity.environmentFingerprint(toolchain: "timing.sta-3.0.0",
+                    resources: resources)
+                try retained.hold(executable); try retained.hold(environment)
+                executionProvenance = try ExecutionProvenance(
+                    producer: ProducerIdentity(kind: .engine, identifier: "timing.sta", version: "3.15.0", build: executable.value),
+                    inputs: inputReferences, invocation: ExecutionInvocation.inProcess(entryPoint: "STAEngine.NativeSTAEngine.execute"),
+                    environment: environment.value, startedAt: startedAt, completedAt: Date())
+            } else {
+                executionProvenance = try makeProvenance(startedAt: startedAt, completedAt: Date(), inputs: inputReferences)
+            }
+            payload.transformRetention = try retained.finish()
+            let output = try STAExecutionResult(runID: request.runID, status: result.status, payload: payload,
+                inputBindings: inputBindings, artifactBindings: artifactBindings, diagnostics: result.diagnostics,
+                provenance: executionProvenance,
+                schemaVersion: STARequest.currentSchemaVersion, transformBudget: budget)
+            return output
         } catch is CancellationError { throw .cancelled }
         catch STAPreparationError.cancelled { throw .cancelled }
         catch let error as NativeSTAConservativeCouplingError {
+            if let failureBoundary { throw .underlying(failureBoundary.failure(error)) }
+            if prepared.transformResources != nil { throw .underlying(error) }
             switch error {
             case .nativeBackendFailure:
                 throw .underlying(error)
@@ -257,18 +380,28 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
             }
         }
         catch let error as TimingCharacterizationError {
+            if let failureBoundary { throw .underlying(failureBoundary.failure(error)) }
+            if prepared.transformResources != nil { throw .underlying(error) }
             throw .underlying(TimingError.unsupportedSemantic(format: "propagated clock STA", semantic: error.localizedDescription))
         }
-        catch { throw .underlying(error) }
+        catch {
+            if let failureBoundary { throw .underlying(failureBoundary.failure(error)) }
+            throw .underlying(error)
+        }
     }
 
     public func validateSourceEvidence(_ result: STAExecutionResult, against prepared: PreparedSTAExecution)
         async throws(STAExecutionError) {
         do {
+            let budget = NativeSTAStateBudget(maximum: prepared.limits.maximumPathStates,
+                transformResources: prepared.transformResources)
+            let temporary = NativeSTATransformStorage(budget: budget, kind: .temporaryBytes)
+            let inputReferences = try temporary.map(result.inputBindings, \.reference)
+            let expectedInputReferences = try NativeSTARequestTransforms.references(prepared.request, storage: temporary)
             try Task.checkCancellation(); try prepared.sourceResources.check()
             guard prepared.request.requireStrictSourceEvidence, result.status == .completed,
                   result.runID == prepared.request.runID,
-                  result.inputBindings.map(\.reference) == prepared.inputReferences,
+                  inputReferences == expectedInputReferences,
                   result.payload.effectiveConfiguration == prepared.effectiveConfiguration,
                   result.payload.processSelection == prepared.processSelection,
                   let observed = result.payload.sourceEvidence,
@@ -278,7 +411,7 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
                 throw TimingError.invalidInput("Strict source evidence does not match the independently prepared inputs")
             }
             try observed.validateStructure(maximumStates: prepared.limits.maximumPathStates,
-                maximumWork: prepared.limits.maximumPathWorkUnits)
+                maximumWork: prepared.limits.maximumPathWorkUnits, stateBudget: budget)
             // A separate finite analysis operation retains the same source accountant/deadline.
             // It publishes no artifacts and does not claim an independent numerical oracle.
             let replay = try analyze(request: prepared.request, design: prepared.design,
@@ -287,7 +420,8 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
                 clockCharacterization: prepared.clockCharacterization, sourceResources: prepared.sourceResources,
                 constraints: prepared.constraints, parasitics: prepared.parasitics, parasiticSource: prepared.parasiticSource,
                 cornerIDs: prepared.request.requestedCornerIDs, modeIDs: prepared.modeIDs,
-                processSelection: prepared.processSelection, sourceRoles: prepared.sourceRoleInventory, limits: prepared.limits)
+                processSelection: prepared.processSelection, sourceRoles: prepared.sourceRoleInventory, limits: prepared.limits,
+                transformResources: prepared.transformResources)
             let actual = STASourceEvidence(executionInputIdentity: prepared.executionInputIdentity,
                 configurationDigest: prepared.configurationDigest, roles: prepared.sourceRoleInventory,
                 coverage: replay.sourceCoverage, samples: replay.sourceSamples, pulseWidthSamples: replay.pulseWidthSamples, staticStateSamples: replay.staticStateSamples,
@@ -295,6 +429,17 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
             var replayPayload = replay.payload
             replayPayload.effectiveConfiguration = prepared.effectiveConfiguration; replayPayload.sourceEvidence = actual
             try prepared.sourceResources.chargeWork(replayPayload.setupApplicabilityValidationWork())
+            let applicabilityStorage = NativeSTATransformStorage(budget: budget, kind: .temporaryBytes)
+            try applicabilityStorage.reserveDictionary(Int.self, STASourceEvidence.Coverage.Disposition.self,
+                capacity: replay.sourceCoverage.count)
+            var staticCapacity = 0; var notApplicableCapacity = 0
+            for endpoint in replayPayload.endpoints {
+                try budget.chargeScheduledWork(1)
+                staticCapacity = max(staticCapacity, endpoint.staticChecks?.count ?? 0)
+                notApplicableCapacity = max(notApplicableCapacity, endpoint.notApplicableChecks?.count ?? 0)
+            }
+            try applicabilityStorage.reserveSet(STAAnalysisKind.self, capacity: staticCapacity)
+            try applicabilityStorage.reserveSet(STAAnalysisKind.self, capacity: notApplicableCapacity)
             let applicability = try replayPayload.derivedSetupApplicability()
             replayPayload.setupApplicability = applicability
             guard actual == observed, applicability == result.payload.setupApplicability,
@@ -308,17 +453,30 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
                   replay.payload.wireCoverage == result.payload.wireCoverage,
                   replay.payload.wireObservations == result.payload.wireObservations,
                   replay.payload.conservativeWireObservations == result.payload.conservativeWireObservations else {
+                if let resources = prepared.transformResources {
+                    let message = try Self.controlledReplayMismatch(observed: result.payload,
+                        actual: replayPayload, resources: resources)
+                    let failure = try TimingControlledDiagnostics(resources: resources, retaining: message)
+                    throw failure.failure(TimingError.invalidInput(message.value))
+                }
                 throw TimingError.invalidInput(try Self.boundedReplayMismatch(observed: result.payload,
                     actual: replayPayload, resources: prepared.sourceResources))
             }
+            withExtendedLifetime((temporary, applicabilityStorage)) {}
             try Task.checkCancellation(); try prepared.sourceResources.check()
         } catch is CancellationError { throw .cancelled }
         catch { throw .underlying(error) }
     }
 
-    private func characterization(_ request: STARequest, inputs: STATimingProcessInputs) throws -> [STACharacterizationObservation] {
+    private func characterization(_ request: STARequest, inputs: STATimingProcessInputs,
+        transformStorage: NativeSTATransformStorage? = nil) throws -> [STACharacterizationObservation] {
         let bindings = request.characterizationBindings
-        guard Set(bindings.map(\.cornerID)).count == bindings.count,
+        try transformStorage?.reserveSet(String.self, capacity: bindings.count)
+        let bindingNames: [String]
+        if let transformStorage { bindingNames = try transformStorage.map(bindings, \.cornerID) }
+        else { bindingNames = bindings.map(\.cornerID) }
+        try transformStorage?.budget.chargeScheduledWork(UInt64(bindings.count))
+        guard Set(bindingNames).count == bindings.count,
               bindings.allSatisfy({ request.requestedCornerIDs.contains($0.cornerID) && !$0.conditionName.isEmpty
                   && ($0.requiredNumericProcess?.isFinite ?? true) }) else {
             throw STAPreparationError.characterization("Invalid or duplicate explicit condition binding")
@@ -326,8 +484,21 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
         if request.characterizationPolicy == .declaredCornerSelection, !bindings.isEmpty {
             throw STAPreparationError.characterization("Declared selection cannot claim observed condition bindings")
         }
+        var total = 0
+        if let transformStorage {
+            for corner in inputs.selection.corners {
+                try transformStorage.budget.chargeScheduledWork(1)
+                let count = inputs.sourcesByCorner[corner.cornerID]?.operatingConditions.count ?? 0
+                let next = total.addingReportingOverflow(count)
+                guard !next.overflow else { throw LibertySourceError.arithmeticOverflow }
+                total = next.partialValue
+            }
+            try transformStorage.reserve(STACharacterizationObservation.self, capacity: total)
+        }
         var observations: [STACharacterizationObservation] = []
+        if transformStorage?.budget.transformResources != nil { observations.reserveCapacity(total) }
         for corner in inputs.selection.corners {
+            try transformStorage?.budget.chargeScheduledWork(1)
             guard let source = inputs.sourcesByCorner[corner.cornerID],
                   let reference = inputs.selection.librariesByCorner[corner.cornerID] else {
                 throw STAPreparationError.characterization("Missing retained source owner")
@@ -341,6 +512,7 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
                 }
             }
             for condition in source.operatingConditions {
+                try transformStorage?.budget.chargeScheduledWork(1)
                 observations.append(.init(cornerID: corner.cornerID, source: reference, conditionName: condition.name,
                     numericProcess: condition.process, voltage: condition.voltage, temperatureCelsius: condition.temperature,
                     selected: request.characterizationPolicy == .requireObservedConditions && condition.name == binding?.conditionName))
@@ -349,16 +521,20 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
         return observations
     }
 
-    private struct LoadedInputs: Sendable {
+    internal struct LoadedInputs: Sendable {
         let design: TimingDesign
         let processInputs: STATimingProcessInputs
         let constraints: [String: TimingConstraintSet]
         let parasitics: TimingParasitics?
         let cornerIDs: [String]
         let modeIDs: [String]
+        var transformRetention: NativeSTATransformRetention? = nil
     }
 
     private func loadInputs(_ request: STARequest, resources: STAExecutionResources) async throws -> LoadedInputs {
+        if resources.requiresStrictTransformAccounting {
+            return try await loadControlledInputs(request, resources: resources)
+        }
         guard !request.libraries.isEmpty else { throw TimingError.missingArtifact(role: "timing-library") }
         let reader = resources.reader
         for binding in request.artifactBindings {
@@ -419,29 +595,51 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
         let normalPowerOwners: [CheckedLibertyNormalPower]
     }
 
-    private func validateCanonicalInputs(_ inputs: LoadedInputs) throws {
+    private func validateCanonicalInputs(_ inputs: LoadedInputs,
+        transformBudget: NativeSTAStateBudget) throws {
+        let transformResources = transformBudget.transformResources
         let validator = TimingCanonicalValidator()
         for modeID in inputs.modeIDs {
+            try transformResources?.check(); try transformResources?.chargeWork(1)
             guard let constraints = inputs.constraints[modeID] else {
                 throw TimingError.invariantViolation(
-                    "The parsed STA mode is missing its canonical constraint set."
-                )
+                    "The parsed STA mode is missing its canonical constraint set.")
             }
             for cornerID in inputs.cornerIDs {
+                try transformResources?.check(); try transformResources?.chargeWork(1)
                 guard let library = inputs.processInputs.librariesByCorner[cornerID] else {
                     throw TimingError.invariantViolation("The admitted STA corner has no library.")
                 }
-                let report = validator.validate(
-                    design: inputs.design,
-                    constraints: constraints,
-                    libraries: [library],
-                    parasitics: inputs.parasitics
-                )
-                guard report.isValid else {
-                    throw TimingError.invalidInput(
-                        "Canonical STA validation failed for corner '\(cornerID)': "
-                            + report.findings.map(\.code).sorted().joined(separator: ", ")
-                    )
+                if let resources = transformResources {
+                    let budget = transformBudget
+                    let scratch = NativeSTATransformStorage(budget: budget, kind: .temporaryBytes)
+                    try scratch.reserve(TimingLibrary.self, capacity: 1)
+                    let report = try validator.validate(design: inputs.design, constraints: constraints,
+                        libraries: [library], parasitics: inputs.parasitics, resources: resources)
+                    guard report.value.isValid else {
+                        let codes = try scratch.map(report.value.findings, \.code)
+                        let ordered = try scratch.sorted(codes, by: <)
+                        let text = try NativeSTAControlledDiagnosticText(resources: resources)
+                        try text.append("Canonical STA validation failed for corner '")
+                        try text.append(cornerID); try text.append("': ")
+                        for (index, code) in ordered.enumerated() {
+                            try budget.chargeScheduledWork(1)
+                            if index > 0 { try text.append(", ") }
+                            try text.append(code)
+                        }
+                        let message = try text.finish()
+                        let failure = try TimingControlledDiagnostics(resources: resources, retaining: (report, message))
+                        throw failure.failure(TimingError.invalidInput(message.value))
+                    }
+                    withExtendedLifetime((scratch, report)) {}
+                } else {
+                    let report = validator.validate(design: inputs.design, constraints: constraints,
+                        libraries: [library], parasitics: inputs.parasitics)
+                    guard report.isValid else {
+                        throw TimingError.invalidInput(
+                            "Canonical STA validation failed for corner '\(cornerID)': "
+                                + report.findings.map(\.code).sorted().joined(separator: ", "))
+                    }
                 }
             }
         }
@@ -460,14 +658,21 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
         modeIDs: [String],
         processSelection: STAProcessSelection,
         sourceRoles: [STASourceEvidence.Role],
-        limits: STAExecutionLimits
+        limits: STAExecutionLimits,
+        transformResources: (any LibertySourceResourceAccounting)? = nil
     ) throws -> AnalysisResult {
         var endpoints: [STAEndpoint] = []
         var unconstrainedEndpoints: [STAEndpoint] = []
         var paths: [STAPath] = []
         var violations: [STAViolation] = []
         var diagnostics: [DesignDiagnostic] = []
-        let stateBudget = NativeSTAStateBudget(maximum: request.distributedRC == nil && !request.requireStrictSourceEvidence ? Int.max : limits.maximumPathStates)
+        let stateBudget = NativeSTAStateBudget(maximum: request.distributedRC == nil && !request.requireStrictSourceEvidence ? Int.max : limits.maximumPathStates,
+            transformResources: transformResources)
+        let temporary = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+        let retained = NativeSTATransformStorage(budget: stateBudget, kind: .liveOwnedBytes)
+        let failureBoundary = try transformResources.map {
+            try TimingControlledDiagnostics(resources: $0, retaining: sourceRoles)
+        }
         var pathWork: UInt64 = 0
         var rcSteps: UInt64 = 0
         var clockObservations: [STAClockObservation] = []
@@ -485,7 +690,8 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
         for modeID in modeIDs {
             try Task.checkCancellation()
             guard let constraint = constraints[modeID] else {
-                throw TimingError.invalidInput("No constraints were parsed for mode '\(modeID)'.")
+                throw try NativeSTATransformStorage.sourceFailure(diagnostics: failureBoundary,
+                    "No constraints were parsed for mode '", modeID, "'.") { TimingError.invalidInput($0) }
             }
             guard constraint.caseAnalyses.isEmpty else {
                 throw TimingError.unsupportedSemantic(
@@ -507,7 +713,8 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
                     throw STAPathAnalysisError.capacity(resource: "source scenario roles", limit: limits.maximumPathWorkUnits)
                 }
                 pathWork = nextWork.partialValue; try stateBudget.reserve(count)
-                let scenarioRoles = Array(sourceRoles[start..<roleOffset])
+                let scenarioStorage = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+                let scenarioRoles = try scenarioStorage.map(sourceRoles[start..<roleOffset]) { $0 }
                 let scenario = try analyzeScenario(
                     request: request,
                     design: design,
@@ -517,6 +724,8 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
                     modeID: modeID,
                     cornerID: cornerID, sourceRoles: scenarioRoles, limits: limits, stateBudget: stateBudget, work: &pathWork, rcSteps: &rcSteps
                 )
+                try retained.hold(scenario)
+                withExtendedLifetime(scenarioStorage) {}
                 let outputSlots = scenario.sourceCoverage.count.addingReportingOverflow(scenario.sourceSamples.count)
                 let pulseSlots = scenario.pulseWidthSamples.count.addingReportingOverflow(scenario.staticStateSamples.count)
                 let powerSlots = scenario.normalPowerSamples.count.addingReportingOverflow(scenario.normalPowerOwners.count)
@@ -529,101 +738,148 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
                 }
                 try stateBudget.reserve(allSlots.partialValue); pathWork = outputWork.partialValue
                 for entry in scenario.sourceCoverage {
-                    sourceCoverage.append(.init(role: entry.role + start, disposition: entry.disposition, witness: entry.witness))
+                    try retained.append(.init(role: entry.role + start, disposition: entry.disposition, witness: entry.witness), to: &sourceCoverage, site: 20001)
                 }
                 for sample in scenario.sourceSamples {
-                    sourceSamples.append(.init(role: sample.role + start, context: sample.context,
+                    try retained.append(.init(role: sample.role + start, context: sample.context,
                         inputEdge: sample.inputEdge, outputEdge: sample.outputEdge, inputPoint: sample.inputPoint,
                         receiver: sample.receiver, observation: sample.observation, appliedScale: sample.appliedScale,
-                        sequentialCoordinate: sample.sequentialCoordinate, rangeObservation: sample.rangeObservation))
+                        sequentialCoordinate: sample.sequentialCoordinate, rangeObservation: sample.rangeObservation), to: &sourceSamples, site: 20002)
                 }
                 for sample in scenario.pulseWidthSamples {
-                    pulseWidthSamples.append(.init(role: sample.role + start, context: sample.context, observation: sample.observation,
+                    try retained.append(.init(role: sample.role + start, context: sample.context, observation: sample.observation,
                         rangeObservation: sample.rangeObservation, rootSource: sample.rootSource, openingSlew: sample.openingSlew,
                         openingSegments: sample.openingSegments, closingSegments: sample.closingSegments,
                         openingArrival: sample.openingArrival, closingArrival: sample.closingArrival,
                         openingRootEdge: sample.openingRootEdge, closingRootEdge: sample.closingRootEdge,
                         openingRootPhase: sample.openingRootPhase, closingRootPhase: sample.closingRootPhase,
-                        closingCycleOffset: sample.closingCycleOffset, period: sample.period, uncertainty: sample.uncertainty))
+                        closingCycleOffset: sample.closingCycleOffset, period: sample.period, uncertainty: sample.uncertainty), to: &pulseWidthSamples, site: 20003)
                 }
                 for sample in scenario.staticStateSamples {
-                    staticStateSamples.append(.init(role: sample.role + start, clear: sample.clear, preset: sample.preset,
+                    try retained.append(.init(role: sample.role + start, clear: sample.clear, preset: sample.preset,
                         effect: sample.effect, inputConstants: sample.inputConstants, powerConstants: sample.powerConstants,
-                        outputConstants: sample.outputConstants))
+                        outputConstants: sample.outputConstants), to: &staticStateSamples, site: 20004)
                 }
                 for sample in scenario.normalPowerSamples {
-                    normalPowerSamples.append(.init(role:sample.role + start,observation:sample.observation))
+                    try retained.append(.init(role:sample.role + start,observation:sample.observation), to: &normalPowerSamples, site: 20005)
                 }
-                normalPowerOwners.append(contentsOf:scenario.normalPowerOwners)
-                clockObservations.append(contentsOf: scenario.clockObservations)
-                wireCoverage.append(contentsOf: scenario.wireCoverage)
-                wireObservations.append(contentsOf: scenario.wireObservations)
-                conservativeWireObservations.append(contentsOf: scenario.conservativeWireObservations)
-                endpoints.append(contentsOf: scenario.endpoints)
-                unconstrainedEndpoints.append(contentsOf: scenario.unconstrainedEndpoints)
-                paths.append(contentsOf: scenario.paths)
-                violations.append(contentsOf: scenario.violations)
+                try retained.append(contentsOf:scenario.normalPowerOwners, to: &normalPowerOwners, site: 20006)
+                try retained.append(contentsOf: scenario.clockObservations, to: &clockObservations, site: 20007)
+                try retained.append(contentsOf: scenario.wireCoverage, to: &wireCoverage, site: 20008)
+                try retained.append(contentsOf: scenario.wireObservations, to: &wireObservations, site: 20009)
+                try retained.append(contentsOf: scenario.conservativeWireObservations, to: &conservativeWireObservations, site: 20010)
+                try retained.append(contentsOf: scenario.endpoints, to: &endpoints, site: 20011)
+                try retained.append(contentsOf: scenario.unconstrainedEndpoints, to: &unconstrainedEndpoints, site: 20012)
+                try temporary.append(contentsOf: scenario.paths, to: &paths, site: 20013)
+                try retained.append(contentsOf: scenario.violations, to: &violations, site: 20014)
             }
         }
 
         if parasitics == nil {
-            diagnostics.append(DesignDiagnostic(
+            try retained.reserve(String.self, capacity: 2)
+            try retained.append(DesignDiagnostic(
                 severity: .warning,
                 code: "timing.sta.post_layout_inputs_missing",
                 message: "STA ran without parasitics, so post-layout timing effects were not analyzed.",
                 suggestedActions: ["provide_spef_artifact", "run_pex_before_signoff"]
-            ))
+            ), to: &diagnostics, site: 20015)
         }
         if let parasitics {
             if request.conservativeCoupledRC != nil {
-                diagnostics.append(.init(severity: .information, code: "timing.sta.certified_coupled_boundary",
+                try retained.reserve(String.self, capacity: 2)
+                try retained.append(.init(severity: .information, code: "timing.sta.certified_coupled_boundary",
                     message: "Conservative bounds cover all admitted normalized bounded-operating source histories in the NLDM prescribed-boundary model under its retained load abstraction; this does not qualify the load approximation, physical current drive or CCS behavior.",
-                    suggestedActions: ["inspect_conservative_wire_observations", "review_retained_load_model"]))
+                    suggestedActions: ["inspect_conservative_wire_observations", "review_retained_load_model"]), to: &diagnostics, site: 20015)
             } else if request.distributedRC == nil {
-                diagnostics.append(contentsOf: parasitics.evidence.diagnostics(prefix: "timing.sta"))
+                // The lower evidence formatter emits at most three records, with
+                // native Array capacities 1 -> 2 -> 4 (old/new peak six records).
+                try temporary.reserve(DesignDiagnostic.self, capacity: 6)
+                try retained.reserve(String.self, capacity: 5)
+                try stateBudget.chargeScheduledWork(UInt64(parasitics.evidence.inventoryComparisons.count))
+                try retained.reserve(UInt8.self, capacity: "timing.sta.equipotential_cap_load_approximation".utf8.count)
+                if !parasitics.evidence.collapsedIntraNetCapacitances.isEmpty {
+                    try retained.reserve(UInt8.self, capacity: "timing.sta.intra_net_dynamic_capacitance_not_evaluated".utf8.count)
+                    let bytes = try TimingDiagnosticTextCapacity.description(literal:
+                        " same-net capacitance operators retain exact endpoints and values but contribute zero under the equipotential projection.",
+                        ints: 1, doubles: 0, booleans: 0)
+                    guard let count = Int(exactly: bytes) else { throw LibertySourceError.arithmeticOverflow }
+                    try retained.reserve(UInt8.self, capacity: count)
+                }
+                if parasitics.evidence.inventoryComparisons.contains(where: { $0.difference != 0 }) {
+                    try retained.reserve(UInt8.self, capacity: "timing.sta.declared_capacitance_inventory_differs".utf8.count)
+                }
+                try retained.append(contentsOf: parasitics.evidence.diagnostics(prefix: "timing.sta"), to: &diagnostics, site: 20015)
             } else {
-                diagnostics.append(.init(severity: .information, code: "timing.sta.prescribed_ramp_distributed_rc",
+                try retained.reserve(String.self, capacity: 2)
+                try retained.append(.init(severity: .information, code: "timing.sta.prescribed_ramp_distributed_rc",
                     message: "Distributed passive RC response uses characterized-slew prescribed linear drivers; crossing differences are observed grid convergence, not physical error certification.",
-                    suggestedActions: ["review_prescribed_driver_assumption", "inspect_wire_observations"]))
+                    suggestedActions: ["review_prescribed_driver_assumption", "inspect_wire_observations"]), to: &diagnostics, site: 20015)
             }
         }
+        try retained.reserve(String.self, capacity: request.libraries.count)
+        try stateBudget.chargeScheduledWork(UInt64(request.libraries.count))
         let provenance = provenance(for: request)
         if !provenance.hasCoreDigests || provenance.libraryDigests.isEmpty {
-            diagnostics.append(DesignDiagnostic(
+            try retained.reserve(String.self, capacity: 4)
+            try retained.append(DesignDiagnostic(
                 severity: .warning,
                 code: "timing.sta.incomplete_timing_provenance",
                 message: "The timing verdict is missing one or more immutable input digests.",
                 suggestedActions: ["record_design_digest", "record_library_digest", "record_constraint_digest", "record_pdk_digest"]
-            ))
+            ), to: &diagnostics, site: 20015)
         }
+        try temporary.reserve(String.self, capacity: 4)
         for violation in violations {
+            let codeBytes = try TimingDiagnosticTextCapacity.description(literal: "timing.sta._violation",
+                ints: 0, doubles: 0, booleans: 0, additionalUTF8: UInt64(violation.kind.rawValue.utf8.count))
+            var fields: UInt64 = 0
+            for field in [violation.kind.rawValue, violation.endpoint, violation.modeID, violation.cornerID] {
+                let next = fields.addingReportingOverflow(UInt64(field.utf8.count))
+                guard !next.overflow else { throw LibertySourceError.arithmeticOverflow }; fields = next.partialValue
+            }
+            let messageBytes = try TimingDiagnosticTextCapacity.description(literal: " slack is  at  in mode , corner .",
+                ints: 0, doubles: 1, booleans: 0, additionalUTF8: fields)
+            guard let codeCount = Int(exactly: codeBytes), let messageCount = Int(exactly: messageBytes) else {
+                throw LibertySourceError.arithmeticOverflow
+            }
+            try retained.reserve(UInt8.self, capacity: codeCount)
+            try retained.reserve(UInt8.self, capacity: messageCount)
+            let numericScratch = try stateBudget.reservePayload(UInt8.self, capacity: 64, kind: .temporaryBytes)
             let code = "timing.sta.\(violation.kind.rawValue)_violation"
-            diagnostics.append(DesignDiagnostic(
+            try retained.append(DesignDiagnostic(
                 severity: .error,
                 code: code,
                 message: "\(violation.kind.rawValue) slack is \(format(violation.slack)) at \(violation.endpoint) in mode \(violation.modeID), corner \(violation.cornerID).",
                 entity: violation.endpoint,
                 suggestedActions: violation.suggestedActions
-            ))
+            ), to: &diagnostics, site: 20015)
+            withExtendedLifetime(numericScratch) {}
         }
-        let worstSetup = endpoints.compactMap(\.setupSlack).min()
-        let worstHold = endpoints.compactMap(\.holdSlack).min()
-        let payload = STAPayload(
+        var worstSetup: Double? = nil; var worstHold: Double? = nil
+        for endpoint in endpoints {
+            try stateBudget.chargeScheduledWork(1)
+            if let value = endpoint.setupSlack { worstSetup = min(worstSetup ?? value, value) }
+            if let value = endpoint.holdSlack { worstHold = min(worstHold ?? value, value) }
+        }
+        let orderedPaths = try temporary.sorted(paths) { $0.slack < $1.slack }
+        let criticalPaths = try retained.map(orderedPaths.prefix(request.maxPaths)) { $0 }
+        var payload = STAPayload(
             worstSetupSlack: worstSetup,
             worstHoldSlack: worstHold,
             analyzedCorners: cornerIDs,
             analyzedModes: modeIDs,
             endpoints: endpoints,
             unconstrainedEndpoints: unconstrainedEndpoints,
-            criticalPaths: Array(paths.sorted { $0.slack < $1.slack }.prefix(request.maxPaths)),
+            criticalPaths: criticalPaths,
             violations: violations,
-            repairCandidates: violations.map { violation in
-                STARepairCandidate(
+            repairCandidates: try retained.map(violations) { violation in
+                let rationale = try retained.joined("The reported ", violation.kind.rawValue, " slack is negative.")
+                return STARepairCandidate(
                     kind: violation.kind == .hold ? .addHoldBuffer : .upsizeCell,
                     endpoint: violation.endpoint,
                     modeID: violation.modeID,
                     cornerID: violation.cornerID,
-                    rationale: "The reported \(violation.kind.rawValue) slack is negative.",
+                    rationale: rationale,
                     expectedImpact: violation.kind == .hold ? "Increase minimum data-path delay." : "Reduce late data-path delay."
                 )
             },
@@ -633,6 +889,11 @@ public struct NativeSTAEngine: STAExecuting, STAExecutionPreparing, STAPreparedE
             processSelection: processSelection
         )
         guard roleOffset == sourceRoles.count else { throw TimingError.invariantViolation("Unconsumed strict source scenario roles") }
+        let base = AnalysisResult(status: .completed, diagnostics: diagnostics, payload: payload,
+            sourceCoverage: sourceCoverage, sourceSamples: sourceSamples, pulseWidthSamples: pulseWidthSamples,
+            staticStateSamples: staticStateSamples, normalPowerSamples: normalPowerSamples, normalPowerOwners: normalPowerOwners)
+        try retained.hold(base)
+        payload.transformRetention = try retained.finish()
         return AnalysisResult(status: .completed, diagnostics: diagnostics, payload: payload,
             sourceCoverage: sourceCoverage, sourceSamples: sourceSamples, pulseWidthSamples: pulseWidthSamples, staticStateSamples: staticStateSamples,
             normalPowerSamples:normalPowerSamples,normalPowerOwners:normalPowerOwners)

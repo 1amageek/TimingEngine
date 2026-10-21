@@ -80,3 +80,58 @@ JSON compatibility. STA owns conservative execution refusal and source-slope joi
 Clock retains optional sourceRiseTransition/sourceFallTransition and isPropagated. Legacy JSON defaults only isPropagated=false; missing transition facts remain nil. set_clock_transition accepts a positive common value or exactly one -rise/-fall flag and exact get_clocks targets. set_propagated_clock accepts exact primary get_clocks targets. Unknown/ambiguous targets and unsupported options fail. create_clock waveform parsing validates every token rather than dropping malformed values. Propagated clocks require explicit two-edge phase and both source transitions; ordinary empty waveform retains its prior ideal convention. Generated clocks and latency commands remain unsupported for propagated execution.
 
 set_clock_uncertainty admits one finite nonnegative scalar and exact primary get_clocks targets. Unsupported per-edge/from/to profiles fail explicitly; unknown targets are never ignored. Propagated source ports must be actual input ports.
+
+## Controlled SDC Construction
+
+The additive `SDCParser.parse(_:modeID:resources:)` consumes the same admitted
+UTF-8 grammar and returns the existing `TimingTransformValue` whole-owner handle.
+The ordinary overload selects no accountant and retains its legacy source errors,
+numeric conversions, command ordering and overwrite behavior. No Tcl evaluation,
+new decoder or source-profile restriction is introduced.
+
+```text
+caller Data + one accountant
+ -> admitted UTF-8 source and borrowed line ranges
+ -> counted token/collection String payloads and typed temporary arrays/sets
+ -> private constraint arrays with admitted capacity replacements
+ -> whole constraint value + retained storage anchor
+```
+
+Tokenization identifies the existing quote/bracket/brace boundaries before
+materializing each token; UTF-8 bytes and slots are admitted before creation.
+Deletion-only Foundation transforms admit their source byte extent. Unicode case
+mapping uses the source-proved fixed-toolchain sizing in SourceTransforms, with
+input, scalar scratch and mapped output coexistence. Typed map/filter/set helpers
+admit concrete element/hash capacity and visit work before population.
+
+The invocation does not copy/publish `TimingConstraintSet` until construction
+finishes. Its array admissions track each current private backing separately;
+growth admits old and replacement capacities before copying, then drops the old
+receipt. Delay removal and clock-field updates operate on this unpublished unique
+backing. Final publication transfers only current array receipts to parse storage.
+All token/derived String owners required by those values are retained by that same
+storage. Temporary line/selector/numeric workspace is released at publication;
+failed construction drops its private arrays without refunding cumulative work.
+
+Source diagnostics use the shared lazy diagnostic seam: literal and actual field
+UTF-8 bytes are admitted before interpolation/concatenation, and the outer typed
+failure retains the original error and parse owner without post-failure callbacks.
+Resource/cancellation causes remain inspectable and are never mistaken for source
+syntax. The caller must retain the complete transform handle (or failure) while
+using copies/extracted values; bare `TimingConstraintSet` copies do not acquire a
+new accounting anchor. Bounds describe logical managed payload, excluding private
+Foundation workspace and allocator buckets, and do not claim a hard RSS ceiling.
+
+`NativeStrictSDCParserTests` owns controlled/legacy value and diagnostic parity,
+Unicode/collection and overwrite behavior, pre-growth refusal, callback cancel,
+copy/final-anchor release and retained failure lifetime. The selected focused
+Native build/runtime and scoped review passed within the
+[PreparedExecution scope](../../STAEngine/PreparedExecution/DESIGN.md#strict-native-qualification-scope).
+
+Generated clock ratio options distinguish absence from invalid source text.
+Absent `-divide_by` and `-multiply_by` each default to one. Present options require
+an actual following integer token; missing/non-integer values produce typed
+source-line parse failure. Parsed nonpositive integers retain the existing
+positive-ratio refusal. Valid integer spellings and resulting ratios are unchanged.
+This closes the former present-invalid-to-one implementation fallback rather than
+adding a generated-clock execution capability.

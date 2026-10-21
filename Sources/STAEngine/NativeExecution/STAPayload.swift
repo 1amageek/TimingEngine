@@ -24,6 +24,8 @@ public struct STAPayload: Sendable, Hashable, Codable {
     public var sourceEvidence: STASourceEvidence?
     public var setupApplicability: STASetupApplicability?
 
+    internal var transformRetention: NativeSTATransformRetention? = nil
+
     public init(
         worstSetupSlack: Double?,
         worstHoldSlack: Double?,
@@ -119,23 +121,59 @@ public struct STAPayload: Sendable, Hashable, Codable {
             sourceEvidence: try container.decodeIfPresent(STASourceEvidence.self, forKey: .sourceEvidence),
             setupApplicability: try container.decodeIfPresent(STASetupApplicability.self, forKey: .setupApplicability)
         )
+        let resources = try NativeSTADecodingResources.resources(decoder)
+        let budget = NativeSTAStateBudget(maximum: Int.max, transformResources: resources)
+        let temporary = NativeSTATransformStorage(budget: budget, kind: .temporaryBytes)
+        try budget.chargeScheduledWork(1)
+        try temporary.reserve(Double.self, capacity: 7)
+        try temporary.reserve(ClosedRange<Double>.self, capacity: 4)
         if effectiveConfiguration?.requireStrictSourceEvidence == true {
+            try temporary.reserveDictionary(Int.self, STASourceEvidence.Coverage.Disposition.self,
+                capacity: sourceEvidence?.coverage.count ?? 0)
+            var staticCapacity = 0; var notApplicableCapacity = 0
+            for endpoint in endpoints {
+                try budget.chargeScheduledWork(1)
+                staticCapacity = max(staticCapacity, endpoint.staticChecks?.count ?? 0)
+                notApplicableCapacity = max(notApplicableCapacity, endpoint.notApplicableChecks?.count ?? 0)
+            }
+            try temporary.reserveSet(STAAnalysisKind.self, capacity: staticCapacity)
+            try temporary.reserveSet(STAAnalysisKind.self, capacity: notApplicableCapacity)
             try validateSetupApplicabilityStructure()
             guard let sourceEvidence, sourceEvidence.configurationDigest == effectiveConfiguration?.digest else {
                 throw DecodingError.dataCorruptedError(forKey: .sourceEvidence, in: container,
                     debugDescription: "Strict STA requires exact complete source evidence")
             }
             try sourceEvidence.validateStructure(maximumStates: effectiveConfiguration!.maximumPathStates,
-                maximumWork: effectiveConfiguration!.maximumPathWorkUnits)
+                maximumWork: effectiveConfiguration!.maximumPathWorkUnits, stateBudget: budget)
         } else if sourceEvidence != nil {
             throw DecodingError.dataCorruptedError(forKey: .sourceEvidence, in: container,
                 debugDescription: "Strict source evidence requires its effective policy")
         }
         if let configuration = effectiveConfiguration {
-            let expected = Set(configuration.clockReceiverScope.flatMap { scope in
-                [TimingEdge.rise, .fall].map { [scope.modeID, scope.cornerID, scope.rootClock, scope.receiver, $0.rawValue] }
-            })
-            let observed = clockObservations.map { [$0.modeID, $0.cornerID, $0.rootClock, $0.receiver, $0.edge.rawValue] }
+            let keyCount = configuration.clockReceiverScope.count.multipliedReportingOverflow(by: 2)
+            let textCount = keyCount.partialValue.multipliedReportingOverflow(by: 5)
+            let observedTextCount = clockObservations.count.multipliedReportingOverflow(by: 5)
+            guard !keyCount.overflow, !textCount.overflow, !observedTextCount.overflow else { throw LibertySourceError.arithmeticOverflow }
+            try temporary.reserve([String].self, capacity: keyCount.partialValue)
+            try temporary.reserve(String.self, capacity: textCount.partialValue)
+            try temporary.reserve(String.self, capacity: observedTextCount.partialValue)
+            try temporary.reserveSet([String].self, capacity: keyCount.partialValue)
+            try temporary.reserveSet([String].self, capacity: clockObservations.count)
+            try temporary.reserveSet([String].self, capacity: clockObservations.count)
+            var expectedKeys: [[String]] = []; expectedKeys.reserveCapacity(keyCount.partialValue)
+            for scope in configuration.clockReceiverScope {
+                try budget.chargeScheduledWork(2)
+                expectedKeys.append([scope.modeID, scope.cornerID, scope.rootClock, scope.receiver, TimingEdge.rise.rawValue])
+                expectedKeys.append([scope.modeID, scope.cornerID, scope.rootClock, scope.receiver, TimingEdge.fall.rawValue])
+            }
+            let expected = Set(expectedKeys)
+            let observed = try temporary.map(clockObservations) { [$0.modeID, $0.cornerID, $0.rootClock, $0.receiver, $0.edge.rawValue] }
+            for observation in clockObservations {
+                try budget.chargeScheduledWork(UInt64(configuration.clockSources[observation.modeID]?.count ?? 0))
+                try budget.chargeScheduledWork(UInt64(observation.segments.count))
+                try budget.chargeScheduledWork(UInt64(observation.segments.count))
+                try budget.chargeScheduledWork(UInt64(observation.segments.count))
+            }
             guard observed.count == Set(observed).count, Set(observed) == expected,
                   clockObservations.allSatisfy({ observation in
                       guard let root = configuration.clockSources[observation.modeID]?.first(where: { $0.name == observation.rootClock && $0.isPropagated }) else { return false }
@@ -157,6 +195,21 @@ public struct STAPayload: Sendable, Hashable, Codable {
             throw DecodingError.dataCorruptedError(forKey: .clockObservations, in: container, debugDescription: "Clock observations require exact configuration")
         }
         if effectiveConfiguration?.conservativeCoupledRC != nil {
+            let keyTextCount = wireCoverage.count.multipliedReportingOverflow(by: 3)
+            guard !keyTextCount.overflow else { throw LibertySourceError.arithmeticOverflow }
+            try temporary.reserve([String].self, capacity: wireCoverage.count)
+            try temporary.reserve(String.self, capacity: keyTextCount.partialValue)
+            try temporary.reserveSet([String].self, capacity: wireCoverage.count)
+            var authorityCapacity = 0
+            for value in conservativeWireObservations {
+                try budget.chargeScheduledWork(UInt64(wireCoverage.count))
+                try budget.chargeScheduledWork(UInt64(value.sourceAuthorities.count))
+                try budget.chargeScheduledWork(UInt64(value.sourceAuthorities.count))
+                try budget.chargeScheduledWork(UInt64(value.sourceAuthorities.count))
+                authorityCapacity = max(authorityCapacity, value.sourceAuthorities.count)
+            }
+            try temporary.reserve(TimingParasitics.Endpoint.self, capacity: authorityCapacity)
+            try temporary.reserveSet(TimingParasitics.Endpoint.self, capacity: authorityCapacity)
             guard wireObservations.isEmpty, !wireCoverage.isEmpty,
                   Set(wireCoverage.map { [$0.modeID, $0.cornerID, $0.net] }).count == wireCoverage.count,
                   !conservativeWireObservations.isEmpty,
@@ -195,6 +248,16 @@ public struct STAPayload: Sendable, Hashable, Codable {
                 debugDescription: "Certified observations require their exact model configuration")
         }
         if let options = effectiveConfiguration?.distributedRC {
+            let keyTextCount = wireCoverage.count.multipliedReportingOverflow(by: 3)
+            guard !keyTextCount.overflow else { throw LibertySourceError.arithmeticOverflow }
+            try temporary.reserve([String].self, capacity: wireCoverage.count)
+            try temporary.reserve(String.self, capacity: keyTextCount.partialValue)
+            try temporary.reserveSet([String].self, capacity: wireCoverage.count)
+            for _ in wireCoverage {
+                try budget.chargeScheduledWork(UInt64(analyzedModes.count))
+                try budget.chargeScheduledWork(UInt64(analyzedCorners.count))
+            }
+            for _ in wireObservations { try budget.chargeScheduledWork(UInt64(wireCoverage.count)) }
             let keys = wireCoverage.map { [$0.modeID, $0.cornerID, $0.net] }
             guard !keys.isEmpty, Set(keys).count == keys.count,
                   wireCoverage.allSatisfy({ analyzedModes.contains($0.modeID) && analyzedCorners.contains($0.cornerID) }),
@@ -207,6 +270,7 @@ public struct STAPayload: Sendable, Hashable, Codable {
                     debugDescription: "Distributed wire scope or observations are missing or inconsistent")
             }
         }
+        withExtendedLifetime(temporary) {}
     }
 
     private static func validWireObservation(_ value: STADistributedRCObservation, options: STADistributedRCOptions) -> Bool {
@@ -258,4 +322,52 @@ public struct STAPayload: Sendable, Hashable, Codable {
         try container.encodeIfPresent(sourceEvidence, forKey: .sourceEvidence)
         try container.encodeIfPresent(setupApplicability, forKey: .setupApplicability)
     }
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.worstSetupSlack == rhs.worstSetupSlack
+            && lhs.worstHoldSlack == rhs.worstHoldSlack
+            && lhs.analyzedCorners == rhs.analyzedCorners
+            && lhs.analyzedModes == rhs.analyzedModes
+            && lhs.endpoints == rhs.endpoints
+            && lhs.unconstrainedEndpoints == rhs.unconstrainedEndpoints
+            && lhs.criticalPaths == rhs.criticalPaths
+            && lhs.violations == rhs.violations
+            && lhs.repairCandidates == rhs.repairCandidates
+            && lhs.parasiticReduction == rhs.parasiticReduction
+            && lhs.clockObservations == rhs.clockObservations
+            && lhs.wireCoverage == rhs.wireCoverage
+            && lhs.wireObservations == rhs.wireObservations
+            && lhs.conservativeWireObservations == rhs.conservativeWireObservations
+            && lhs.provenance == rhs.provenance
+            && lhs.processSelection == rhs.processSelection
+            && lhs.effectiveConfiguration == rhs.effectiveConfiguration
+            && lhs.characterization == rhs.characterization
+            && lhs.libraryConsumption == rhs.libraryConsumption
+            && lhs.sourceEvidence == rhs.sourceEvidence
+            && lhs.setupApplicability == rhs.setupApplicability
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(worstSetupSlack)
+        hasher.combine(worstHoldSlack)
+        hasher.combine(analyzedCorners)
+        hasher.combine(analyzedModes)
+        hasher.combine(endpoints)
+        hasher.combine(unconstrainedEndpoints)
+        hasher.combine(criticalPaths)
+        hasher.combine(violations)
+        hasher.combine(repairCandidates)
+        hasher.combine(parasiticReduction)
+        hasher.combine(clockObservations)
+        hasher.combine(wireCoverage)
+        hasher.combine(wireObservations)
+        hasher.combine(conservativeWireObservations)
+        hasher.combine(provenance)
+        hasher.combine(processSelection)
+        hasher.combine(effectiveConfiguration)
+        hasher.combine(characterization)
+        hasher.combine(libraryConsumption)
+        hasher.combine(sourceEvidence)
+        hasher.combine(setupApplicability)
+    }
+
 }

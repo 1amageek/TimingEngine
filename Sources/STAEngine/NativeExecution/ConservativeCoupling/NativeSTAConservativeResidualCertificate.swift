@@ -13,6 +13,10 @@ internal struct NativeSTAConservativeResidualCertificate {
         let start: Double
         let end: Double
         let bernstein: [N.Matrix]
+        let payload: LibertySourceStorageReservation?
+        init(start: Double, end: Double, bernstein: [N.Matrix], payload: LibertySourceStorageReservation? = nil) {
+            self.start = start; self.end = end; self.bernstein = bernstein; self.payload = payload
+        }
     }
     struct Errors: Sendable {
         let initial: N.Matrix
@@ -26,6 +30,12 @@ internal struct NativeSTAConservativeResidualCertificate {
         let segments: [Segment]
         let errors: Errors
         let direct: N.Matrix
+        let payload: LibertySourceStorageReservation?
+        init(receiverRows: [Int], sourceCount: Int, segments: [Segment], errors: Errors, direct: N.Matrix,
+             payload: LibertySourceStorageReservation? = nil) {
+            self.receiverRows = receiverRows; self.sourceCount = sourceCount; self.segments = segments
+            self.errors = errors; self.direct = direct; self.payload = payload
+        }
     }
 
     func prepare(_ reduced: Graph.Reduced, receiverRows: [Int], times: [Double],
@@ -53,6 +63,7 @@ internal struct NativeSTAConservativeResidualCertificate {
         var interpolationError = try numerical.matrix(receiverRows.count, columns)
         var tailError = try numerical.matrix(receiverRows.count, columns)
         var segments = [Segment](); try numerical.slots(times.count - 1)
+        let segmentPayload = try numerical.budget.reservePayload(Segment.self, capacity: times.count - 1, kind: .liveOwnedBytes)
         segments.reserveCapacity(times.count - 1)
 
         return try Candidate.withSession(reduced: reduced, numerical: numerical, work: &work) { session, sessionWork in
@@ -106,12 +117,13 @@ internal struct NativeSTAConservativeResidualCertificate {
                                 into: &interpolationError, work: &callbackWork)
                     }
                 }
+                let payload = try numerical.budget.reservePayload(N.Matrix.self, capacity: 4, kind: .liveOwnedBytes)
                 var projected = [N.Matrix](); try numerical.slots(4); projected.reserveCapacity(4)
                 for coefficient in proposed.bernstein {
                     projected.append(try project(coefficient, operator: reduced.reconstruction,
                                                  rows: receiverRows, work: &callbackWork))
                 }
-                segments.append(Segment(start: proposed.start, end: proposed.end, bernstein: projected))
+                segments.append(Segment(start: proposed.start, end: proposed.end, bernstein: projected, payload: payload))
                 try numerical.tick(&callbackWork, previous.values.count)
                 for k in previous.values.indices { previous.values[k] = proposed.bernstein[3].values[k] }
                 index += 1
@@ -131,7 +143,7 @@ internal struct NativeSTAConservativeResidualCertificate {
             }
             return Facts(receiverRows: receiverRows, sourceCount: sources, segments: segments,
                 errors: Errors(initial: initialError, solve: solveError,
-                               interpolation: interpolationError, tail: tailError), direct: direct)
+                               interpolation: interpolationError, tail: tailError), direct: direct, payload: segmentPayload)
         }
     }
 
@@ -221,6 +233,9 @@ internal struct NativeSTAConservativeResidualCertificate {
             guard times[i].isFinite, times[i] > times[i - 1] else { throw invalid("residual time grid") }
         }
         try numerical.slots(d)
+        let payload = try numerical.budget.reservePayload(Int.self, capacity: d, kind: .temporaryBytes)
+        defer { withExtendedLifetime(payload) {} }
+        try numerical.budget.chargeScheduledWork(UInt64(d))
         var owner = Array(repeating: -1, count: d), first = -1
         for (blockIndex, block) in reduced.capBlocks.enumerated() {
             guard let head = block.first, head > first else { throw invalid("residual CAP partition ordering") }

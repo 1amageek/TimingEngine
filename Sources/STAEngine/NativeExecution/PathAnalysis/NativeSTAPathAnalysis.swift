@@ -60,6 +60,9 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
     private let constraints: TimingConstraintSet
     private let request: STARequest
     private let limits: STAExecutionLimits
+    private let sourceDiagnostics: TimingControlledDiagnostics<OwnedLibertySource>?
+    private let temporary: NativeSTATransformStorage
+    private let retained: NativeSTATransformStorage
     private let stateBudget: NativeSTAStateBudget
     private let mode: String
     private let corner: String
@@ -89,12 +92,28 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
     init(request: STARequest, design: TimingDesign, library: TimingLibrary, source: OwnedLibertySource, constraints: TimingConstraintSet,
          clockCharacterization: CharacterizedTimingLibrary? = nil, sourceResources: (any LibertySourceResourceAccounting)? = nil, stateBudget: NativeSTAStateBudget? = nil, sourceRoles: [STASourceEvidence.Role] = [], limits: STAExecutionLimits, mode: String, corner: String, initialWork: UInt64 = 0, initialRCSteps: UInt64 = 0) throws {
         let actualBudget = stateBudget ?? NativeSTAStateBudget(maximum: request.distributedRC == nil && !request.requireStrictSourceEvidence ? Int.max : limits.maximumPathStates)
-        let actualCells = try design.instances.map { try library.cell(named: $0.cell) }
-        let actualNets = Array(Set(design.nets.map(\.name) + design.ports.map(\.netName))).sorted()
+        let temporary = NativeSTATransformStorage(budget: actualBudget, kind: .temporaryBytes)
+        let initialization = NativeSTATransformStorage(budget: actualBudget, kind: .temporaryBytes)
+        let retained = NativeSTATransformStorage(budget: actualBudget, kind: .liveOwnedBytes)
+        // Fixed scalar/enum loop literals and directed-sum inputs never coexist
+        // beyond these concrete call-local peak capacities.
+        try temporary.reserve(Double.self, capacity: 7)
+        try temporary.reserve(TimingEdge.self, capacity: 2)
+        try temporary.reserve(STAAnalysisKind.self, capacity: 5)
+        try temporary.reserve((STAAnalysisKind, Double?).self, capacity: 5)
+        try temporary.reserve(TimingConstraintSet.Clock?.self, capacity: 2)
+        try temporary.reserve((STASourceEvidence.Sample.Context, [NativeSTASequentialExecution.SampleRequest]).self, capacity: 2)
+        let actualCells = try temporary.map(design.instances) { try library.cell(named: $0.cell) }
+        var allNets = try initialization.map(design.nets, site: 10010, \.name)
+        try initialization.append(contentsOf: initialization.map(design.ports, \.netName), to: &allNets, site: 10010)
+        try initialization.reserveSet(String.self, capacity: allNets.count)
+        let actualNets = try temporary.sorted(Set(allNets), by: <)
         try actualBudget.reserve(actualNets.count)
         var actualWork = initialWork
         var actualEvidence: NativeSTASourceEvidence? = nil
+        try temporary.reserveDictionary(Int.self, NativeSTASequentialExecution.Plan.self, capacity: actualCells.count)
         var actualPlans: [Int: NativeSTASequentialExecution.Plan] = [:]
+        actualPlans.reserveCapacity(actualCells.count)
         if request.requireStrictSourceEvidence {
             guard clockCharacterization != nil, !sourceRoles.isEmpty else {
                 throw TimingCharacterizationError.missingSourceFact("complete strict scenario role inventory")
@@ -111,6 +130,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             let plan = try NativeSTASequentialExecution.compile(model: model, source: original, work: &actualWork,
                 limits: limits, stateBudget: actualBudget, sourceResources: sourceResources)
             try actualBudget.reserve(1)
+            try temporary.hold(plan.transformRetention)
             actualPlans[index] = plan
             try actualEvidence?.mark(instance: design.instances[index].name, kind: .sequentialDefinition,
                 disposition: .sourceFact, witness: "compiled exact sequential source and physical bindings",
@@ -123,6 +143,16 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
         guard !hasLatch || !hasFF else {
             throw TimingError.unsupportedSemantic(format: "STA", semantic: "mixed FF and latch timing profile")
         }
+        let sourceDiagnostics = try actualBudget.transformResources.map {
+            try TimingControlledDiagnostics(resources: $0, retaining: source)
+        }
+        try temporary.reserveDictionary(String.self, Int.self, capacity: actualNets.count)
+        let netIndices = Dictionary(uniqueKeysWithValues: try temporary.map(actualNets.enumerated()) { ($0.element, $0.offset) })
+        let netPoints = try temporary.repeated([Int](), count: actualNets.count)
+        try temporary.reserveDictionary(Int.self, NativeSTASequentialExecution.StaticControls.self, capacity: actualPlans.count)
+        // Complete fallible admission before transferring noncopyable owners to self.
+        self.sourceDiagnostics = sourceDiagnostics
+        self.temporary = temporary; self.retained = retained
         self.sourceResources = sourceResources
         self.stateBudget = actualBudget
         self.clockCharacterization = clockCharacterization
@@ -132,14 +162,16 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
         self.limits = limits; self.mode = mode; self.corner = corner
         self.cells = actualCells
         self.netNames = actualNets
-        self.netIndices = Dictionary(uniqueKeysWithValues: actualNets.enumerated().map { ($0.element, $0.offset) })
-        self.netPoints = Array(repeating: [], count: actualNets.count)
+        self.netIndices = netIndices
+        self.netPoints = netPoints
         self.work = actualWork
         self.sourceEvidence = consume actualEvidence
         self.sequentialPlans = actualPlans
         self.points = []; self.launches = []; self.rules = []; self.candidates = []
         self.propagatedClocks = nil; self.distributedRC = nil; self.conservativeWires = nil; self.pinDelimiter = ":"
         self.controlPulses = nil; self.staticStates = [:]
+        self.staticStates.reserveCapacity(actualPlans.count)
+        withExtendedLifetime(initialization) {}
     }
 
     private mutating func propagation(instance: Int, arc: TimingArc, edge: TimingEdge, inputEdge: TimingEdge,
@@ -198,7 +230,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             constrainedSlew: slew, relatedSlew: relatedSlew)
         _ = try sourceEvidence!.record(observed, instance: instance, context: context,
             inputEdge: check.constrainedEdge, outputEdge: check.relatedEdge, inputPoint: inputPoint,
-            receiver: instance + pinDelimiter + check.constrainedPin, scale: 1,
+            receiver: try retained.joined(instance, pinDelimiter, check.constrainedPin), scale: 1,
             checkKind: check.kind, relatedEdge: check.relatedEdge, rangeObservation: range,
             stateBudget: stateBudget, limits: limits, work: &work)
         return range?.result.upperBound ?? observed.result
@@ -206,6 +238,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
 
     private mutating func completeTransfer(_ request: NativeSTASequentialExecution.TransferRequest,
                                           instance: Int, seed: Bool) throws -> NativeSTASequentialExecution.TimedOutput {
+        let temporary = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
         guard let characterized = clockCharacterization,
               !request.earlyCandidates.isEmpty, !request.lateCandidates.isEmpty,
               request.earlyCandidates.count <= 2, request.lateCandidates.count <= 2 else {
@@ -249,7 +282,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                 let earlyScale = self.request.conservativeCoupledRC == nil ? self.request.variation.earlyCellDelayScale : min(self.request.variation.earlyCellDelayScale, self.request.variation.lateCellDelayScale)
                 let lateScale = self.request.conservativeCoupledRC == nil ? self.request.variation.lateCellDelayScale : max(self.request.variation.earlyCellDelayScale, self.request.variation.lateCellDelayScale)
                 let scale = context == .early ? earlyScale : lateScale
-                let receiver = design.instances[instance].name + pinDelimiter + wanted.pin
+                let receiver = try retained.joined(design.instances[instance].name, pinDelimiter, wanted.pin)
                 let index = try sourceEvidence!.record(observed.delay, instance: design.instances[instance].name,
                     context: context, inputEdge: wanted.inputEdge, outputEdge: wanted.outputEdge,
                     inputPoint: seed ? nil : wanted.parentRouteIndex, receiver: receiver,
@@ -259,11 +292,11 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                     inputPoint: seed ? nil : wanted.parentRouteIndex, receiver: receiver,
                     scale: 1, sequentialCoordinate: coordinate, rangeObservation: range?.outputSlew, stateBudget: stateBudget, limits: limits, work: &work)
                 if context == .early {
-                    earlySamples.append(observed); earlyIndices.append(index)
-                    if let range { earlyRanges.append(range) }
+                    try temporary.append(observed, to: &earlySamples); try temporary.append(index, to: &earlyIndices, discriminator: 1)
+                    if let range { try temporary.append(range, to: &earlyRanges) }
                 } else {
-                    lateSamples.append(observed); lateIndices.append(index)
-                    if let range { lateRanges.append(range) }
+                    try temporary.append(observed, to: &lateSamples); try temporary.append(index, to: &lateIndices, discriminator: 1)
+                    if let range { try temporary.append(range, to: &lateRanges) }
                 }
             }
         }
@@ -295,6 +328,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
     }
 
     private mutating func transferLatch(instance: Int, plan: NativeSTASequentialExecution.Plan, loads: [Double]) throws {
+        let temporary = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
         guard request.requireStrictSourceEvidence, let closingEdge = plan.closeEdge,
               let clockNet = design.instances[instance].connections[plan.clockPin], let clock = clock(on: clockNet) else {
             throw TimingError.unsupportedSemantic(format: "STA", semantic: "latch requires exact strict source clock/window evidence")
@@ -318,8 +352,8 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                     throw TimingError.unsupportedSemantic(format: "STA", semantic: "latch data has no measured transition")
                 }
                 for parent in netPoints[inputNet] {
-                    let point = try received(parent, sink: name + pinDelimiter + pin)
-                    let dataArcs = cells[instance].arcs(from: pin, to: output.pin).filter { !$0.isConstraint }
+                    let point = try received(parent, sink: try temporary.joined(name, pinDelimiter, pin))
+                    let dataArcs = try temporary.filter(cells[instance].arcs) { $0.fromPin == pin && $0.toPin == output.pin && !$0.isConstraint }
                     guard dataArcs.count == 1 else { throw TimingCharacterizationError.missingSourceFact("unique latch data arc") }
                     for edge in [TimingEdge.rise, .fall] where dataArcs[0].sense.inputEdge(for: edge).map({ $0 == point.edge }) ?? true {
                         let transfer = try NativeSTASequentialExecution.requestLatch(plan: plan, cell: cells[instance],
@@ -349,6 +383,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
     }
     private mutating func charge(_ amount: UInt64 = 1) throws {
         try sourceResources?.check()
+        try stateBudget.chargeScheduledWork(amount)
         let next = work.addingReportingOverflow(amount)
         guard !next.overflow, next.partialValue <= limits.maximumPathWorkUnits else {
             throw STAPathAnalysisError.capacity(resource: "path work", limit: limits.maximumPathWorkUnits)
@@ -361,11 +396,12 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
         guard points.count < limits.maximumPathStates else {
             throw STAPathAnalysisError.capacity(resource: "path states", limit: UInt64(limits.maximumPathStates))
         }
-        guard [point.late, point.early, point.lateSlew, point.earlySlew].allSatisfy(\.isFinite) else {
+        guard point.late.isFinite && point.early.isFinite && point.lateSlew.isFinite && point.earlySlew.isFinite else {
             throw TimingError.invalidInput("Nonfinite path propagation")
         }
         try stateBudget.reserve(2)
-        netPoints[point.net].append(points.count); points.append(point)
+        try temporary.append(points.count, to: &netPoints[point.net], discriminator: point.net)
+        try temporary.append(point, to: &points)
     }
     private mutating func received(_ index: Int, sink: String) throws -> Point {
         let point = points[index]
@@ -434,7 +470,11 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
         return capture.rootPhase > launchPhase ? -capture.clock.period : 0
     }
     private mutating func glob(_ pattern: String, _ name: String) throws -> Bool {
-        let p = Array(pattern); let n = Array(name)
+        let workspace = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+        try stateBudget.chargeScheduledWork(UInt64(pattern.utf8.count))
+        try stateBudget.chargeScheduledWork(UInt64(name.utf8.count))
+        let p = try workspace.map(pattern) { $0 }
+        let n = try workspace.map(name) { $0 }
         var i = 0; var j = 0; var star: Int?; var retry = 0
         while j < n.count {
             try charge()
@@ -447,59 +487,87 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
         return i == p.count
     }
     private mutating func compileRules() throws {
+        let scratch = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
         for port in design.ports {
-            let input = constraints.inputDelays.filter { $0.port == port.name }
-            let output = constraints.outputDelays.filter { $0.port == port.name }
+            let input = try scratch.filter(constraints.inputDelays) { $0.port == port.name }
+            let output = try scratch.filter(constraints.outputDelays) { $0.port == port.name }
             try charge(UInt64(input.count + output.count + 1))
-            guard input.filter(\.isMax).count <= 1, input.filter({ !$0.isMax }).count <= 1,
-                  output.filter(\.isMax).count <= 1, output.filter({ !$0.isMax }).count <= 1,
-                  Set(input.map(\.clock)).count <= 1 else {
-                throw TimingError.unsupportedSemantic(format: "STA", semantic: "multiple I/O clock references for " + port.name)
+            try scratch.reserveSet(String?.self, capacity: input.count)
+            guard input.lazy.filter(\.isMax).count <= 1, input.lazy.filter({ !$0.isMax }).count <= 1,
+                  output.lazy.filter(\.isMax).count <= 1, output.lazy.filter({ !$0.isMax }).count <= 1,
+                  Set(try scratch.map(input, \.clock)).count <= 1 else {
+                throw try NativeSTATransformStorage.sourceFailure(diagnostics: sourceDiagnostics,
+                    "multiple I/O clock references for ", port.name) { TimingError.unsupportedSemantic(format: "STA", semantic: $0) }
             }
         }
-        let ports = design.ports.map { TimingPathObject(kind: .port, pattern: $0.name) }
-        let clocks = (constraints.clocks.map(\.name) + constraints.generatedClocks.map(\.name))
-            .map { TimingPathObject(kind: .clock, pattern: $0) }
-        var sources = ports.filter { object in design.ports.contains { $0.name == object.pattern && $0.direction != .output } } + clocks
-        var sinks = ports.filter { object in design.ports.contains { $0.name == object.pattern && $0.direction != .input } } + clocks
-        var through = netNames.map { TimingPathObject(kind: .net, pattern: $0) }
+        let ports = try scratch.map(design.ports) { TimingPathObject(kind: .port, pattern: $0.name) }
+        var clocks = try scratch.map(constraints.clocks, site: 4) { TimingPathObject(kind: .clock, pattern: $0.name) }
+        try scratch.append(contentsOf: scratch.map(constraints.generatedClocks) {
+            TimingPathObject(kind: .clock, pattern: $0.name)
+        }, to: &clocks, site: 4)
+        var sources = try scratch.filter(ports, site: 1) { object in design.ports.contains { $0.name == object.pattern && $0.direction != .output } }
+        try scratch.append(contentsOf: clocks, to: &sources, site: 1)
+        var sinks = try scratch.filter(ports, site: 2) { object in design.ports.contains { $0.name == object.pattern && $0.direction != .input } }
+        try scratch.append(contentsOf: clocks, to: &sinks, site: 2)
+        var through = try scratch.map(netNames, site: 3) { TimingPathObject(kind: .net, pattern: $0) }
         for i in design.instances.indices {
             let name = design.instances[i].name
             if let plan = sequentialPlans[i] {
-                sources += plan.outputs.map { .init(kind: .pin, pattern: name + "/" + $0.pin) }
-                sources.append(.init(kind: .instance, pattern: name))
-                sinks += plan.dataPins.map { .init(kind: .pin, pattern: name + "/" + $0) }
-                sinks.append(.init(kind: .instance, pattern: name))
+                for output in plan.outputs {
+                    try scratch.append(TimingPathObject(kind: .pin, pattern: scratch.joined(name, "/", output.pin)), to: &sources, site: 1)
+                }
+                try scratch.append(TimingPathObject(kind: .instance, pattern: name), to: &sources, site: 1)
+                for pin in plan.dataPins {
+                    try scratch.append(TimingPathObject(kind: .pin, pattern: scratch.joined(name, "/", pin)), to: &sinks, site: 2)
+                }
+                try scratch.append(TimingPathObject(kind: .instance, pattern: name), to: &sinks, site: 2)
             }
-            through.append(.init(kind: .instance, pattern: name))
-            through += cells[i].pins.map { .init(kind: .pin, pattern: name + "/" + $0.name) }
+            try scratch.append(TimingPathObject(kind: .instance, pattern: name), to: &through, site: 3)
+            for pin in cells[i].pins {
+                try scratch.append(TimingPathObject(kind: .pin, pattern: scratch.joined(name, "/", pin.name)), to: &through, site: 3)
+            }
         }
-        func invalid(_ pattern: TimingPathObject) -> TimingError {
-            .invalidInput("Unmatched or unsupported path selector: " + pattern.kind.rawValue + " " + pattern.pattern)
+        let diagnostics = sourceDiagnostics
+        func invalid(_ pattern: TimingPathObject) throws -> any Error {
+            try NativeSTATransformStorage.sourceFailure(diagnostics: diagnostics,
+                "Unmatched or unsupported path selector: ", pattern.kind.rawValue, " ", pattern.pattern) { TimingError.invalidInput($0) }
         }
         for fact in constraints.exceptions {
+            let ruleStorage = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+            let selectionStorage = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+            var inventories: [([TimingPathObject], [TimingPathObject])] = []
+            try selectionStorage.append((fact.from, sources), to: &inventories, site: 1)
+            try selectionStorage.append((fact.to, sinks), to: &inventories, site: 1)
+            for patterns in fact.through { try selectionStorage.append((patterns, through), to: &inventories, site: 1) }
             var groups: [Set<TimingPathObject>] = []
-            for (patterns, inventory) in [(fact.from, sources), (fact.to, sinks)] + fact.through.map({ ($0, through) }) {
-                var selected = Set<TimingPathObject>()
+            for (patterns, inventory) in inventories {
+                try ruleStorage.reserveSet(TimingPathObject.self, capacity: inventory.count)
+                var selected = Set<TimingPathObject>(); selected.reserveCapacity(inventory.count)
                 for pattern in patterns {
                     try charge()
-                    guard !pattern.pattern.isEmpty else { throw invalid(pattern) }
+                    guard !pattern.pattern.isEmpty else { throw try invalid(pattern) }
+                    let matchStorage = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
                     var matches: [TimingPathObject] = []
                     for object in inventory where pattern.kind == .name || pattern.kind == object.kind {
-                        if try glob(pattern.pattern, object.pattern) { matches.append(object) }
+                        if try glob(pattern.pattern, object.pattern) { try matchStorage.append(object, to: &matches) }
                     }
-                    guard !matches.isEmpty else { throw invalid(pattern) }
-                    if pattern.kind == .name && Set(matches.map(\.kind)).count > 1 {
-                        throw TimingError.invalidInput("Ambiguous untyped path selector: " + pattern.pattern)
+                    guard !matches.isEmpty else { throw try invalid(pattern) }
+                    try matchStorage.reserveSet(TimingPathObject.Kind.self, capacity: matches.count)
+                    if try pattern.kind == .name && Set(try matchStorage.map(matches, \.kind)).count > 1 {
+                        throw try NativeSTATransformStorage.sourceFailure(diagnostics: sourceDiagnostics,
+                            "Ambiguous untyped path selector: ", pattern.pattern) { TimingError.invalidInput($0) }
                     }
-                    selected.formUnion(matches)
+                    try charge(UInt64(matches.count)); selected.formUnion(matches)
                 }
-                groups.append(selected)
+                try ruleStorage.append(selected, to: &groups)
             }
-            rules.append(.init(fact: fact, from: groups[0], to: groups[1], through: Array(groups.dropFirst(2))))
+            let throughGroups = try ruleStorage.map(groups.dropFirst(2)) { $0 }
+            try temporary.hold(ruleStorage.finish())
+            try temporary.append(Rule(fact: fact, from: groups[0], to: groups[1], through: throughGroups), to: &rules, site: 10003)
         }
     }
     private mutating func matches(_ rule: Rule, point: Int, endpoint: Set<TimingPathObject>) throws -> Bool {
+        let temporary = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
         try charge()
         if !rule.from.isEmpty && rule.from.isDisjoint(with: launches[points[point].launch].objects) { return false }
         if !rule.to.isEmpty && rule.to.isDisjoint(with: endpoint) { return false }
@@ -509,7 +577,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
         func visit(_ object: TimingPathObject, also other: TimingPathObject? = nil) {
             if stage >= 0 && (rule.through[stage].contains(object) || other.map({ rule.through[stage].contains($0) }) == true) { stage -= 1 }
         }
-        for object in endpoint.sorted(by: { $0.pattern < $1.pattern }) where object.kind == .pin { visit(object) }
+        for object in try temporary.sorted(endpoint, by: { $0.pattern < $1.pattern }) where object.kind == .pin { visit(object) }
         var cursor: Int? = point
         while let index = cursor, stage >= 0 {
             try charge()
@@ -518,8 +586,8 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             if let step = value.step {
                 let name = design.instances[step.instance].name
                 let instance = TimingPathObject(kind: .instance, pattern: name)
-                visit(.init(kind: .pin, pattern: name + "/" + step.outputPin), also: instance)
-                visit(.init(kind: .pin, pattern: name + "/" + step.inputPin), also: instance)
+                visit(.init(kind: .pin, pattern: try temporary.joined(name, "/", step.outputPin)), also: instance)
+                visit(.init(kind: .pin, pattern: try temporary.joined(name, "/", step.inputPin)), also: instance)
             } else {
                 if let pin = launches[value.launch].objects.first(where: { $0.kind == .pin }) {
                     visit(pin, also: launches[value.launch].objects.first { $0.kind == .instance })
@@ -536,7 +604,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
     }
     private func select(_ matches: [TimingConstraintSet.PathException], kind: TimingConstraintSet.PathException.Kind,
                         check: STAAnalysisKind) throws -> TimingConstraintSet.PathException? {
-        var values = matches.filter { $0.kind == kind && applies($0, check) }
+        var values = try temporary.filter(matches) { $0.kind == kind && applies($0, check) }
         if kind == .multicycle && values.contains(where: { $0.scope != .both }) { values.removeAll { $0.scope == .both } }
         guard let selected = values.first else { return nil }
         guard values.allSatisfy({ $0.cycles == selected.cycles && $0.delay == selected.delay && $0.clockReference == selected.clockReference }) else {
@@ -556,6 +624,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             guard !request.requireStrictSourceEvidence else { throw TimingCharacterizationError.missingSourceFact("source sequential constraint") }
             let value = kind == .setup ? model.setupTime : model.holdTime
             guard value.isFinite else { throw TimingError.invalidInput("Nonfinite scalar sequential constraint") }
+            try temporary.reserve((Double, Double, NativeSTAClockEvent?).self, capacity: 1)
             return [(value, model.clockEdge == .fall ? (capture?.period ?? 0) / 2 : 0, receivingClock(instance: instance, edge: model.clockEdge ?? .rise))]
         }
         var values: [(Double, Double, NativeSTAClockEvent?)] = []
@@ -574,10 +643,13 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                     ?? clock.map { NativeSTATimingBounds.slew($0.earlySlew, $0.lateSlew) },
                 context: kind == .setup ? .late : .early, inputPoint: pointIndex)
             let phase = capture.map { clockBoundary(instance: instance!, clock: $0, edge: check.relatedEdge).early } ?? 0
-            values.append((value, phase, clock))
+            try temporary.append((value, phase, clock), to: &values)
         }
         guard !values.isEmpty else {
-            throw TimingError.unsupportedSemantic(format: "STA", semantic: "missing source-bound " + kind.rawValue + " constraint for " + constrainedPin + " " + point.edge.rawValue)
+            throw try NativeSTATransformStorage.sourceFailure(diagnostics: sourceDiagnostics,
+                "missing source-bound ", kind.rawValue, " constraint for ", constrainedPin, " ", point.edge.rawValue) {
+                    TimingError.unsupportedSemantic(format: "STA", semantic: $0)
+                }
         }
         return values
     }
@@ -596,12 +668,13 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             try charge(); matched = true
             guard let name = cell.connections[check.constrainedPin], let net = netIndices[name],
                   !netPoints[net].isEmpty else {
-                throw TimingError.unsupportedSemantic(format: "STA", semantic: "missing control transition: " + check.constrainedPin)
+                throw try NativeSTATransformStorage.sourceFailure(diagnostics: sourceDiagnostics,
+                    "missing control transition: ", check.constrainedPin) { TimingError.unsupportedSemantic(format: "STA", semantic: $0) }
             }
             var measured = false
             for index in netPoints[net] where points[index].edge == check.constrainedEdge {
                 try charge()
-                let point = try received(index, sink: cell.name + pinDelimiter + check.constrainedPin); let launch = launches[point.launch]
+                let point = try received(index, sink: try temporary.joined(cell.name, pinDelimiter, check.constrainedPin)); let launch = launches[point.launch]
                 guard kind == .recovery ? launch.measuredLate : launch.measuredEarly,
                       let clock = launch.clock, clock.name == capture.name else {
                     throw TimingError.unsupportedSemantic(format: "STA", semantic: "unmeasured or unrelated control arrival")
@@ -633,12 +706,16 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             }
             guard measured else { throw TimingError.unsupportedSemantic(format: "STA", semantic: "missing control edge arrival") }
         }
-        guard matched, let worst else { throw TimingError.unsupportedSemantic(format: "STA", semantic: "missing " + kind.rawValue + " constraint") }
+        guard matched, let worst else { throw try NativeSTATransformStorage.sourceFailure(diagnostics: sourceDiagnostics,
+                    "missing ", kind.rawValue, " constraint") { TimingError.unsupportedSemantic(format: "STA", semantic: $0) } }
         return worst
     }
 
     private mutating func evaluate(name: String, net: Int, capture: TimingConstraintSet.Clock?, model: TimingSequentialModel?,
                                    instance: String?, constant: TimingDesign.Constant?, physicalSink: String? = nil, constrainedPin: String? = nil) throws -> (STAEndpoint, STAEndpoint?) {
+        let outputStorage = NativeSTATransformStorage(budget: stateBudget, kind: .liveOwnedBytes)
+        let temporary = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+        try temporary.reserveSet(TimingPathObject.self, capacity: 3)
         var endpoint = STAEndpoint(modeID: mode, cornerID: corner, endpoint: name, staticValue: constant)
         var unknown: [STAAnalysisKind] = []
         var staticChecks: [STAAnalysisKind] = []; var excluded: [STAAnalysisKind] = []
@@ -648,6 +725,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
         for kind in [STAAnalysisKind.setup, .hold] where request.analysisKinds.contains(kind) {
             let io = kind == .setup ? maxIO : minIO
             let capture = model == nil ? io?.clock.flatMap { constraints.clock(named: $0) } : capture
+            try temporary.reserveSet(TimingPathObject.self, capacity: 3)
             var objects = endpointObjects
             if let capture { objects.insert(.init(kind: .clock, pattern: capture.name)) }
             if let instance { objects.insert(.init(kind: .instance, pattern: instance)) }
@@ -665,9 +743,9 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                 // No launch exists on a binary tie. Endpoint-wide exclusions are distinct from static checks.
                 let excludedTie = rules.contains { $0.fact.kind == .falsePath && applies($0.fact, kind)
                     && $0.from.isEmpty && $0.through.isEmpty && ($0.to.isEmpty || !$0.to.isDisjoint(with: objects)) }
-                if excludedTie { excluded.append(kind) }
-                else if base != nil || rules.contains(where: { ($0.fact.kind == .maxDelay || $0.fact.kind == .minDelay) && applies($0.fact, kind) && $0.from.isEmpty && $0.through.isEmpty && ($0.to.isEmpty || !$0.to.isDisjoint(with: objects)) }) { staticChecks.append(kind) }
-                else { unknown.append(kind) }
+                if excludedTie { try outputStorage.append(kind, to: &excluded, site: 1) }
+                else if base != nil || rules.contains(where: { ($0.fact.kind == .maxDelay || $0.fact.kind == .minDelay) && applies($0.fact, kind) && $0.from.isEmpty && $0.through.isEmpty && ($0.to.isEmpty || !$0.to.isDisjoint(with: objects)) }) { try outputStorage.append(kind, to: &staticChecks, site: 2) }
+                else { try outputStorage.append(kind, to: &unknown, site: 3) }
                 if let instance, let constrainedPin, let sourceKind = TimingCheckArc.Kind(rawValue: kind.rawValue) {
                     if staticChecks.contains(kind) {
                         try sourceEvidence?.mark(instance: instance, kind: .sequentialCheck, pin: constrainedPin,
@@ -681,13 +759,14 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                 }
                 continue
             }
-            guard !netPoints[net].isEmpty else { throw TimingError.unsupportedSemantic(format: "STA", semantic: "endpoint without propagated path: " + name) }
+            guard !netPoints[net].isEmpty else { throw try NativeSTATransformStorage.sourceFailure(diagnostics: sourceDiagnostics,
+                    "endpoint without propagated path: ", name) { TimingError.unsupportedSemantic(format: "STA", semantic: $0) } }
             var best: Candidate?; var eligible = 0; var missing = false
             for index in netPoints[net] {
                 try charge()
                 let point = try received(index, sink: physicalSink ?? name); let launch = launches[point.launch]
                 var matching: [TimingConstraintSet.PathException] = []
-                for rule in rules { if try matches(rule, point: index, endpoint: objects) { matching.append(rule.fact) } }
+                for rule in rules { if try matches(rule, point: index, endpoint: objects) { try temporary.append(rule.fact, to: &matching) } }
                 if matching.contains(where: { $0.kind == .falsePath && applies($0, kind) }) { continue }
                 if let start = launch.clock, let capture {
                     if constraints.clockGroups.contains(where: { group in
@@ -701,6 +780,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                 }
                 eligible += 1
                 if request.requireStrictSourceEvidence && !(kind == .setup ? launch.measuredLate : launch.measuredEarly) { missing = true; continue }
+                if model == nil { try temporary.reserve((Double, Double, NativeSTAClockEvent?).self, capacity: 1) }
                 let measuredChecks = try model.map { try sequentialChecks($0, kind: kind, point: point, instance: instance, constrainedPin: constrainedPin!, pointIndex: index, capture: capture) } ?? [(0, 0, nil)]
                 for measurement in measuredChecks {
                     let setup = kind == .setup ? measurement.0 : 0
@@ -769,28 +849,31 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                 }
             }
             if eligible == 0 {
-                excluded.append(kind)
+                try outputStorage.append(kind, to: &excluded, site: 1)
                 if let instance, let constrainedPin, let sourceKind = TimingCheckArc.Kind(rawValue: kind.rawValue) {
                     try sourceEvidence?.mark(instance: instance, kind: .sequentialCheck, pin: constrainedPin,
                         checkKind: sourceKind, disposition: .excluded, witness: "all exact routes excluded by scenario constraints",
                         limits: limits, work: &work)
                 }
             }
-            else if missing { unknown.append(kind) }
+            else if missing { try outputStorage.append(kind, to: &unknown, site: 3) }
             if let best {
                 if kind == .setup { endpoint.setupSlack = best.slack; endpoint.dataArrival = best.arrival; endpoint.requiredArrival = best.required; endpoint.dataSlew = best.slew }
                 else { endpoint.holdSlack = best.slack }
-                candidates.append(best)
+                try temporary.append(best, to: &candidates, site: 10002)
             }
         }
         endpoint.staticChecks = staticChecks.isEmpty ? nil : staticChecks
         endpoint.excludedChecks = excluded.isEmpty ? nil : excluded
         var unmeasured: STAEndpoint?
         if !unknown.isEmpty { unmeasured = .init(modeID: mode, cornerID: corner, endpoint: name, staticValue: constant, unconstrainedChecks: unknown) }
+        try outputStorage.hold(endpoint)
+        try outputStorage.hold(unmeasured)
+        try retained.hold(outputStorage.finish())
         return (endpoint, unmeasured)
     }
     private mutating func staticSource(for cell: TimingCell) throws -> LibertySourceCell? {
-        guard cell.sequentialModel == nil, cell.inputPins.isEmpty else { return nil }
+        guard cell.sequentialModel == nil, !cell.pins.contains(where: { $0.direction == .input || $0.direction == .bidirectional }) else { return nil }
         for candidate in source.cells {
             try charge()
             guard candidate.name == cell.name else { continue }
@@ -807,6 +890,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
     }
 
     private mutating func staticValue(_ pin: LibertySourcePin) throws -> TimingDesign.Constant? {
+        let temporary = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
         guard pin.direction == .output, pin.threeState == nil, pin.xFunction == nil, pin.stateFunction == nil,
               let function = pin.function, case .normalized(let facts) = function.content,
               facts.symbols.isEmpty else { return nil }
@@ -820,6 +904,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
         if request.distributedRC != nil || request.conservativeCoupledRC != nil { try stateBudget.reserve(facts.operations.count) }
         // This invocation owns admitted temporary slots; they never escape the source traversal.
         var values: [LogicBit] = []
+        try temporary.reserve(LogicBit.self, capacity: facts.operations.count)
         values.reserveCapacity(facts.operations.count)
         func prior(_ index: LogicBooleanNodeIndex) throws -> LogicBit {
             guard values.indices.contains(index.rawValue) else {
@@ -838,7 +923,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             case .or(let a, let b): value = try prior(a).or(prior(b))
             case .xor(let a, let b): value = try prior(a).xor(prior(b))
             }
-            values.append(value)
+            try temporary.append(value, to: &values)
         }
         switch values[facts.output.rawValue] {
         case .zero: return .zero
@@ -857,7 +942,8 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                 guard let original = source.cells.first(where: { $0.name == cells[index].name }),
                       original.unsupportedFunctionalGroups.isEmpty else { continue }
                 try charge(UInt64(original.pins.count)); try stateBudget.reserve(original.pins.count)
-                var inputs: [String: TimingDesign.Constant] = [:]
+                try temporary.reserveDictionary(String.self, TimingDesign.Constant.self, capacity: original.pins.count)
+                var inputs: [String: TimingDesign.Constant] = [:]; inputs.reserveCapacity(original.pins.count)
                 for pin in original.pins where pin.direction == .input {
                     if let net = instance.connections[pin.name], let value = constants[net] { inputs[pin.name] = value }
                 }
@@ -884,12 +970,15 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
     private mutating func evaluateStaticControls(constants: inout [String: TimingDesign.Constant],
                                                  available: inout Set<Int>) throws {
         guard request.requireStrictSourceEvidence else { return }
-        for index in sequentialPlans.keys.sorted() {
+        for index in try temporary.sorted(sequentialPlans.keys, by: <) {
             let plan = sequentialPlans[index], instance = design.instances[index]
             guard let plan else { throw TimingError.invariantViolation("Missing static state plan") }
             try charge(UInt64(plan.inputPinNames.count + request.operatingSupplyAssumptions.count))
             try stateBudget.reserve(plan.inputPinNames.count + plan.powerPinNames.count + 1)
+            try temporary.reserveDictionary(String.self, TimingDesign.Constant.self, capacity: plan.inputPinNames.count)
+            try temporary.reserveDictionary(String.self, TimingDesign.Constant.self, capacity: request.operatingSupplyAssumptions.count)
             var inputs: [String: TimingDesign.Constant] = [:], powers: [String: TimingDesign.Constant] = [:]
+            inputs.reserveCapacity(plan.inputPinNames.count); powers.reserveCapacity(request.operatingSupplyAssumptions.count)
             for pin in plan.inputPinNames {
                 if let net = instance.connections[pin], let value = constants[net] { inputs[pin] = value }
             }
@@ -898,6 +987,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             }
             let state = try NativeSTASequentialExecution.staticControls(plan: plan, inputs: inputs, powerValues: powers,
                 work: &work, limits: limits, stateBudget: stateBudget, sourceResources: sourceResources)
+            try retained.hold(state.transformRetention)
             staticStates[index] = state
             if state.effect == .unknown {
                 // FIXME(INCOMPLETE_IMPLEMENTATION): Dynamic asynchronous Q event propagation is not admitted.
@@ -949,16 +1039,18 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
         guard request.requireStrictSourceEvidence, request.analysisKinds.contains(.pulseWidth) else { return [:] }
         let instance = design.instances[index], plan = sequentialPlans[index]
         guard let characterized = clockCharacterization else { throw TimingCharacterizationError.missingSourceFact("pulse law owner") }
-        var endpoints: [String: STAEndpoint] = [:]
+        try temporary.reserveDictionary(String.self, STAEndpoint.self, capacity: cells[index].pins.count)
+        var endpoints: [String: STAEndpoint] = [:]; endpoints.reserveCapacity(cells[index].pins.count)
         for law in try characterized.pulseWidthConstraints(cell: cells[index].name) {
             try charge()
             guard let identity = law.sourceIdentity, let net = instance.connections[law.pin],
                   law.relatedPin == nil || law.relatedPin == law.pin else {
                 throw TimingError.unsupportedSemantic(format: "strict pulse STA", semantic: "missing pin or unsupported cross-pin pulse reference")
             }
-            var endpoint = endpoints[law.pin] ?? STAEndpoint(modeID: mode, cornerID: corner, endpoint: instance.name + "/" + law.pin)
+            var endpoint = try endpoints[law.pin] ?? STAEndpoint(modeID: mode, cornerID: corner, endpoint: try retained.joined(instance.name, "/", law.pin))
             if let value = constants[net] {
                 endpoint.staticValue = value
+                try retained.reserve(STAAnalysisKind.self, capacity: 1)
                 endpoint.notApplicableChecks = [.pulseWidth]
                 try sourceEvidence?.mark(instance: instance.name, kind: .pulseWidth, pin: law.pin,
                     disposition: .staticControlNotApplicable,
@@ -982,7 +1074,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                     early: close.early, late: close.late, earlySlew: close.earlySlew, lateSlew: close.lateSlew, segments: close.segments)
                 period = clock.period; uncertainty = clock.uncertainty; root = clock.name
             } else {
-                guard let wave = controlPulses?.receiver(net: net, sink: instance.name + pinDelimiter + law.pin),
+                guard let wave = controlPulses?.receiver(net: net, sink: try retained.joined(instance.name, pinDelimiter, law.pin)),
                       let reference = constraints.clock(named: wave.source.referenceClock) else {
                     throw TimingError.unsupportedSemantic(format: "strict pulse STA", semantic: "control pulse requires an explicit propagated primary waveform")
                 }
@@ -1011,16 +1103,23 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             endpoints[law.pin] = endpoint
         }
         if cells[index].pulseWidthConstraints.isEmpty, let plan {
+            try retained.reserve(STAAnalysisKind.self, capacity: 1)
             endpoints[plan.clockPin] = STAEndpoint(modeID: mode, cornerID: corner,
-                endpoint: instance.name + "/" + plan.clockPin, notApplicableChecks: [.pulseWidth])
+                endpoint: try retained.joined(instance.name, "/", plan.clockPin), notApplicableChecks: [.pulseWidth])
         }
         return endpoints
     }
 
     private mutating func initialConstants() throws -> ([String: TimingDesign.Constant], Set<Int>) {
         try Task.checkCancellation(); try compileRules()
-        var constants = Dictionary(uniqueKeysWithValues: design.nets.compactMap { net in net.constant.map { (net.name, $0) } })
-        var available = Set(design.nets.filter { $0.constant != nil }.map { netIndices[$0.name]! })
+        try temporary.reserveDictionary(String.self, TimingDesign.Constant.self, capacity: netNames.count)
+        var constants: [String: TimingDesign.Constant] = [:]; constants.reserveCapacity(netNames.count)
+        try temporary.reserveSet(Int.self, capacity: netNames.count)
+        var available = Set<Int>(); available.reserveCapacity(netNames.count)
+        for net in design.nets {
+            try charge()
+            if let value = net.constant { constants[net.name] = value; available.insert(netIndices[net.name]!) }
+        }
         if request.requireStrictSourceEvidence { try resolveStaticCombinational(constants: &constants, available: &available) }
         if request.requireStrictSourceEvidence || !request.operatingSupplyAssumptions.isEmpty {
             guard let reference = request.libraries.first(where: { $0.cornerIDs.contains(corner) })?.artifact.reference else {
@@ -1030,7 +1129,8 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             let supplySlots = netSlots.partialValue.addingReportingOverflow(request.operatingSupplyAssumptions.count)
             guard !netSlots.overflow, !supplySlots.overflow else { throw TimingError.invalidInput("Normal-power workspace overflow") }
             try charge(UInt64(supplySlots.partialValue)); try stateBudget.reserve(supplySlots.partialValue)
-            var consumed = Set<STAOperatingSupplyAssumption>()
+            try temporary.reserveSet(STAOperatingSupplyAssumption.self, capacity: request.operatingSupplyAssumptions.count)
+            var consumed = Set<STAOperatingSupplyAssumption>(); consumed.reserveCapacity(request.operatingSupplyAssumptions.count)
             for instance in design.instances {
                 try charge()
                 let receipt = try NativeSTASequentialExecution.validateNormalPower(source:source,cell:instance.cell,
@@ -1046,7 +1146,8 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                         limits: limits, work: &work)
                 }
             }
-            guard consumed == Set(request.operatingSupplyAssumptions.filter { $0.cornerID == corner }) else {
+            try temporary.reserveSet(STAOperatingSupplyAssumption.self, capacity: request.operatingSupplyAssumptions.count)
+            guard consumed == Set(try temporary.filter(request.operatingSupplyAssumptions) { $0.cornerID == corner }) else {
                 throw TimingError.invalidInput("Foreign or unconsumed operating supply assumptions")
             }
         }
@@ -1058,16 +1159,22 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
     }
 
     private func initialLoads(parasitics: TimingLumpedParasitics?) throws -> [Double] {
-        var loads = Array(repeating: 0.0, count: netNames.count)
-        var knownLoads = Set<Int>()
+        var loads = try temporary.repeated(0.0, count: netNames.count)
+        try temporary.reserveSet(Int.self, capacity: netNames.count)
+        var knownLoads = Set<Int>(); knownLoads.reserveCapacity(netNames.count)
         for i in design.instances.indices {
-            for pin in cells[i].inputPins { if let net = design.instances[i].connections[pin.name] { loads[netIndices[net]!] += pin.capacitance; knownLoads.insert(netIndices[net]!) } }
+            for pin in cells[i].pins where pin.direction == .input || pin.direction == .bidirectional { if let net = design.instances[i].connections[pin.name] { loads[netIndices[net]!] += pin.capacitance; knownLoads.insert(netIndices[net]!) } }
         }
         for net in design.nets { loads[netIndices[net.name]!] += net.capacitance; knownLoads.insert(netIndices[net.name]!) }
         if let parasitics { for (net, load) in parasitics.effectiveLoads { if let n = netIndices[net] { loads[n] += load; knownLoads.insert(n) } } }
         for n in netNames.indices where !knownLoads.contains(n) { loads[n] = constraints.defaultOutputLoad }
         guard loads.allSatisfy({ $0.isFinite && $0 >= 0 }) else { throw TimingError.invalidInput("Invalid path load") }
         return loads
+    }
+
+    private func loadsByNet(_ loads: [Double]) throws -> [String: Double] {
+        try temporary.reserveDictionary(String.self, Double.self, capacity: netNames.count)
+        return Dictionary(uniqueKeysWithValues: try temporary.map(netNames.indices) { (netNames[$0], loads[$0]) })
     }
 
     mutating func initialSourceContext(parasitics: TimingLumpedParasitics?, parasiticSource: TimingParasitics?,
@@ -1089,7 +1196,8 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
               let characterized = clockCharacterization else {
             throw TimingError.unsupportedSemantic(format: "initial source context", semantic: "exact conservative preparation required")
         }
-        var sourceLoads: [String: Double] = [:]
+        try temporary.reserveDictionary(String.self, Double.self, capacity: netNames.count)
+        var sourceLoads: [String: Double] = [:]; sourceLoads.reserveCapacity(netNames.count)
         try stateBudget.reserve(netNames.count)
         for index in netNames.indices { try charge(); sourceLoads[netNames[index]] = loads[index] }
         let result = try NativeSTAConservativeWires.initialContext(options: options, design: design, cells: cells,
@@ -1114,7 +1222,8 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                 throw TimingError.unsupportedSemantic(format: "certified coupled RC", semantic: "exact parasitic/source owner required")
             }
             pinDelimiter = parasiticSource.pinDelimiter
-            var conservativeLoads: [String: Double] = [:]
+            try temporary.reserveDictionary(String.self, Double.self, capacity: netNames.count)
+            var conservativeLoads: [String: Double] = [:]; conservativeLoads.reserveCapacity(netNames.count)
             for index in netNames.indices {
                 try charge()
                 try stateBudget.reserve(1)
@@ -1131,7 +1240,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                 sequentialPlans: sequentialPlans,
                 normalPowerValidated: request.requireStrictSourceEvidence || !request.operatingSupplyAssumptions.isEmpty,
                 sourceEvidence: &sourceEvidence,
-                loads: Dictionary(uniqueKeysWithValues: netNames.indices.map { (netNames[$0], loads[$0]) }),
+                loads: try loadsByNet(loads),
                 characterized: clockCharacterization, sourceResources: sourceResources, stateBudget: stateBudget, variation: request.variation, limits: limits, delimiter: pinDelimiter, mode: mode, corner: corner,
                 rc: &distributedRC, conservative: &conservativeWires, work: &work)
             for clock in constraints.clocks where !clock.isPropagated {
@@ -1155,7 +1264,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             guard let characterized = clockCharacterization else { throw TimingCharacterizationError.missingSourceFact("control pulse characterization") }
             controlPulses = try NativeSTAControlPulsePropagation(design: design, cells: cells, source: source,
                 plans: sequentialPlans, sources: request.controlPulseSources, constants: constants,
-                loads: Dictionary(uniqueKeysWithValues: netNames.indices.map { (netNames[$0], loads[$0]) }),
+                loads: try loadsByNet(loads),
                 characterized: characterized, variation: request.variation, mode: mode, delimiter: pinDelimiter,
                 resources: sourceResources, limits: limits, budget: stateBudget, evidence: &sourceEvidence,
                 rc: &distributedRC, conservative: &conservativeWires, work: &work)
@@ -1169,10 +1278,11 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                     let phase = edge == .rise ? pulse.risePhase : pulse.fallPhase
                     let slew = edge == .rise ? pulse.riseTransition : pulse.fallTransition
                     try stateBudget.reserve(1)
-                    launches.append(.init(name: port.name, clock: reference,
+                    try temporary.reserveSet(TimingPathObject.self, capacity: 2)
+                    try temporary.append(.init(name: port.name, clock: reference,
                         objects: [.init(kind: .port, pattern: port.name), .init(kind: .clock, pattern: reference.name)],
                         clockEvent: nil, measuredLate: true, measuredEarly: true, rootPhase: phase,
-                        controlPulseSource: port.name, controlRootEdge: edge))
+                        controlPulseSource: port.name, controlRootEdge: edge), to: &launches, site: 10001)
                     try append(.init(net: n, launch: launches.count - 1, parent: nil, step: nil, edge: edge,
                         late: phase, early: phase, lateSlew: slew, earlySlew: slew))
                 }
@@ -1181,10 +1291,11 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             let maxDelay = constraints.inputDelays.first { $0.port == port.name && $0.isMax }
             let minDelay = constraints.inputDelays.first { $0.port == port.name && !$0.isMax }
             let clock = maxDelay?.clock.flatMap { constraints.clock(named: $0) } ?? minDelay?.clock.flatMap { constraints.clock(named: $0) } ?? constraints.clock(for: port.name)
+            try temporary.reserveSet(TimingPathObject.self, capacity: clock == nil ? 1 : 2)
             var objects: Set<TimingPathObject> = [.init(kind: .port, pattern: port.name)]
             if let clock { objects.insert(.init(kind: .clock, pattern: clock.name)) }
-            launches.append(.init(name: port.name, clock: clock, objects: objects, clockEvent: nil, measuredLate: maxDelay != nil, measuredEarly: minDelay != nil,
-                rootPhase: clock.map { sourcePhase($0) } ?? 0))
+            try temporary.append(.init(name: port.name, clock: clock, objects: objects, clockEvent: nil, measuredLate: maxDelay != nil, measuredEarly: minDelay != nil,
+                rootPhase: clock.map { sourcePhase($0) } ?? 0), to: &launches, site: 10001)
             for edge in [TimingEdge.rise, .fall] {
                 let phase = clock.map { sourcePhase($0) } ?? 0
                 let maximum = maxDelay.map { edge == .rise ? $0.rise : $0.fall } ?? 0
@@ -1220,15 +1331,16 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             let boundary = clockBoundary(instance: instance.name, clock: clock, edge: plan.activeEdge)
             for output in plan.outputs {
                 guard let net = instance.connections[output.pin] else { continue }
-                let arcs = cells[i].arcs(from: plan.clockPin, to: output.pin)
+                let arcs = try temporary.filter(cells[i].arcs) { $0.fromPin == plan.clockPin && $0.toPin == output.pin && !$0.isConstraint }
                 guard arcs.count <= 1, let arc = arcs.first ?? (plan.kind == .legacyFlipFlop ? model.clockToQ : nil) else {
                     throw TimingError.unsupportedSemantic(format: "STA", semantic: "missing source clock-to-Q")
                 }
                 let n = netIndices[net]!; available.insert(n)
-                launches.append(.init(name: instance.name + "/" + output.pin, clock: clock,
-                    objects: [.init(kind: .pin, pattern: instance.name + "/" + output.pin), .init(kind: .instance, pattern: instance.name), .init(kind: .clock, pattern: clock.name)],
+                try temporary.reserveSet(TimingPathObject.self, capacity: 3)
+                try temporary.append(.init(name: try retained.joined(instance.name, "/", output.pin), clock: clock,
+                    objects: [.init(kind: .pin, pattern: try retained.joined(instance.name, "/", output.pin)), .init(kind: .instance, pattern: instance.name), .init(kind: .clock, pattern: clock.name)],
                     clockEvent: receiving, measuredLate: true, measuredEarly: true,
-                    rootPhase: receiving?.rootPhase ?? boundary.early))
+                    rootPhase: receiving?.rootPhase ?? boundary.early), to: &launches, site: 10001)
                 var historyRise: (arrival: ClosedRange<Double>, slew: ClosedRange<Double>)?
                 var historyFall: (arrival: ClosedRange<Double>, slew: ClosedRange<Double>)?
                 for edge in [TimingEdge.rise, .fall] {
@@ -1254,10 +1366,10 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                     } else {
                         let lateSample = try propagation(instance: i, arc: arc, edge: edge, inputEdge: plan.activeEdge,
                             slew: boundary.lateSlew, load: loads[n], context: .late, inputPoint: nil,
-                            receiver: instance.name + pinDelimiter + plan.clockPin)
+                            receiver: try retained.joined(instance.name, pinDelimiter, plan.clockPin))
                         let earlySample = try propagation(instance: i, arc: arc, edge: edge, inputEdge: plan.activeEdge,
                             slew: boundary.earlySlew, load: loads[n], context: .early, inputPoint: nil,
-                            receiver: instance.name + pinDelimiter + plan.clockPin)
+                            receiver: try retained.joined(instance.name, pinDelimiter, plan.clockPin))
                         late = boundary.late + lateSample.delay; early = boundary.early + earlySample.delay
                         lateSlew = lateSample.slew; earlySlew = earlySample.slew
                     }
@@ -1284,16 +1396,22 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                 }
             }
         }
-        var remaining = design.instances.indices.filter {
+        var remaining = try temporary.filter(design.instances.indices) {
             (cells[$0].sequentialModel == nil || (sequentialPlans[$0]?.kind == .latch && (staticStates[$0] == nil || staticStates[$0]?.effect == .inactive)))
                 && propagatedClocks?.instances.contains($0) != true
         }
         while !remaining.isEmpty {
+            let temporary = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
             var ready: [Int] = []
             for i in remaining {
-                try charge(UInt64(cells[i].inputPins.count) + 1)
-                let pins = sequentialPlans[i].map { $0.dataPins + [$0.clockPin] } ?? cells[i].inputPins.map(\.name)
-                if pins.allSatisfy({ pin in design.instances[i].connections[pin].map { available.contains(netIndices[$0]!) } ?? false }) { ready.append(i) }
+                let inputPins = try temporary.filter(cells[i].pins) { $0.direction == .input || $0.direction == .bidirectional }
+                try charge(UInt64(inputPins.count) + 1)
+                var pins: [String]
+                if let plan = sequentialPlans[i] {
+                    pins = try temporary.map(plan.dataPins, site: 10020) { $0 }
+                    try temporary.append(plan.clockPin, to: &pins, site: 10020)
+                } else { pins = try temporary.map(inputPins, \.name) }
+                if pins.allSatisfy({ pin in design.instances[i].connections[pin].map { available.contains(netIndices[$0]!) } ?? false }) { try temporary.append(i, to: &ready) }
             }
             guard !ready.isEmpty else { throw TimingError.unsupportedSemantic(format: "STA", semantic: "combinational cycle or missing driver") }
             for i in ready {
@@ -1304,7 +1422,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                     continue
                 }
                 let constantSource = try staticSource(for: cell)
-                for output in cell.outputPins {
+                for output in cell.pins where output.direction == .output || output.direction == .bidirectional {
                     guard let net = instance.connections[output.name] else { continue }
                     let n = netIndices[net]!
                     if request.requireStrictSourceEvidence, constants[net] != nil { available.insert(n); continue }
@@ -1322,24 +1440,24 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                             }
                         }
                     }
-                    for input in cell.inputPins {
+                    for input in cell.pins where input.direction == .input || input.direction == .bidirectional {
                         let inputNet = netIndices[instance.connections[input.name]!]!
-                        for arc in cell.arcs(from: input.name, to: output.name) where !arc.isConstraint {
+                        for arc in cell.arcs where arc.fromPin == input.name && arc.toPin == output.name && !arc.isConstraint {
                             if let value = constants[netNames[inputNet]] {
                                 try sourceEvidence?.mark(instance: instance.name, kind: .propagation, pin: output.name,
                                     relatedPin: input.name, disposition: value == .one ? .staticOne : .staticZero,
                                     witness: "exact static input has no transition on this propagation arc", limits: limits, work: &work)
                             }
                             for parent in netPoints[inputNet] {
-                                let p = try received(parent, sink: instance.name + pinDelimiter + input.name)
+                                let p = try received(parent, sink: try retained.joined(instance.name, pinDelimiter, input.name))
                                 for edge in [TimingEdge.rise, .fall] where arc.sense.inputEdge(for: edge).map({ $0 == p.edge }) ?? true {
                                     try charge()
                                     let lateSample = try propagation(instance: i, arc: arc, edge: edge, inputEdge: p.edge,
                                         slew: p.lateSlew, slewBounds: NativeSTATimingBounds.slew(p.earlySlew, p.lateSlew), load: loads[n], context: .late, inputPoint: parent,
-                                        receiver: instance.name + pinDelimiter + input.name)
+                                        receiver: try retained.joined(instance.name, pinDelimiter, input.name))
                                     let earlySample = try propagation(instance: i, arc: arc, edge: edge, inputEdge: p.edge,
                                         slew: p.earlySlew, slewBounds: NativeSTATimingBounds.slew(p.earlySlew, p.lateSlew), load: loads[n], context: .early, inputPoint: parent,
-                                        receiver: instance.name + pinDelimiter + input.name)
+                                        receiver: try retained.joined(instance.name, pinDelimiter, input.name))
                                     let late = lateSample.delay, early = earlySample.delay
                                     let lateSlew = lateSample.slew, earlySlew = earlySample.slew
                                     try append(.init(net: n, launch: p.launch, parent: parent,
@@ -1356,23 +1474,43 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                     available.insert(n)
                 }
             }
+            try temporary.reserveSet(Int.self, capacity: ready.count)
             let done = Set(ready); remaining.removeAll { done.contains($0) }
         }
         var endpoints: [STAEndpoint] = []; var unknown: [STAEndpoint] = []
         for i in design.instances.indices {
             guard let model = cells[i].sequentialModel, let plan = sequentialPlans[i] else { continue }
+            let temporary = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
             let instance = design.instances[i]
             guard let clockNet = instance.connections[plan.clockPin], let capture = clock(on: clockNet) else {
                 throw TimingError.unsupportedSemantic(format: "STA", semantic: "missing exact sequential clock")
             }
-            var byPin: [String: STAEndpoint] = [:]
+            try temporary.reserveDictionary(String.self, STAEndpoint.self, capacity: cells[i].pins.count)
+            var byPin: [String: STAEndpoint] = [:]; byPin.reserveCapacity(cells[i].pins.count)
+            let endpointBudget = stateBudget
+            try temporary.reserveDictionary(String.self, LibertySourceStorageReservation.self, capacity: cells[i].pins.count)
+            var applicabilityLeases: [String: LibertySourceStorageReservation] = [:]
+            if stateBudget.transformResources != nil { applicabilityLeases.reserveCapacity(cells[i].pins.count) }
+            func addingKind(_ kind: STAAnalysisKind, to prior: [STAAnalysisKind]?) throws
+                -> ([STAAnalysisKind], LibertySourceStorageReservation?) {
+                if endpointBudget.transformResources == nil { return ((prior ?? []) + [kind], nil) }
+                let count = (prior?.count ?? 0).addingReportingOverflow(1)
+                guard !count.overflow else { throw LibertySourceError.arithmeticOverflow }
+                let lease = try endpointBudget.reservePayload(STAAnalysisKind.self, capacity: count.partialValue, kind: .liveOwnedBytes)
+                try endpointBudget.chargeScheduledWork(UInt64(count.partialValue))
+                var values: [STAAnalysisKind] = []; values.reserveCapacity(count.partialValue)
+                if let prior { values.append(contentsOf: prior) }
+                values.append(kind)
+                return (values, lease)
+            }
             for pin in plan.dataPins {
                 guard let data = instance.connections[pin], let net = netIndices[data] else {
                     throw TimingError.unsupportedSemantic(format: "STA", semantic: "missing referenced sequential data input")
                 }
                 if let state = staticStates[i], state.effect == .clear || state.effect == .preset {
+                    try retained.reserve(STAAnalysisKind.self, capacity: 2)
                     let kinds = [STAAnalysisKind.setup, .hold].filter { request.analysisKinds.contains($0) }
-                    byPin[pin] = STAEndpoint(modeID: mode, cornerID: corner, endpoint: instance.name + "/" + pin,
+                    byPin[pin] = STAEndpoint(modeID: mode, cornerID: corner, endpoint: try retained.joined(instance.name, "/", pin),
                         notApplicableChecks: kinds.isEmpty ? nil : kinds)
                     for kind in kinds {
                         try sourceEvidence?.mark(instance: instance.name, kind: .sequentialCheck, pin: pin,
@@ -1381,11 +1519,11 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                     }
                     continue
                 }
-                let (endpoint, missing) = try evaluate(name: instance.name + "/" + pin, net: net, capture: capture,
+                let (endpoint, missing) = try evaluate(name: try retained.joined(instance.name, "/", pin), net: net, capture: capture,
                     model: model, instance: instance.name, constant: constants[data],
-                    physicalSink: instance.name + pinDelimiter + pin, constrainedPin: pin)
+                    physicalSink: try retained.joined(instance.name, pinDelimiter, pin), constrainedPin: pin)
                 byPin[pin] = endpoint
-                if let missing { unknown.append(missing) }
+                if let missing { try retained.append(missing, to: &unknown, site: 10005) }
             }
             for kind in [STAAnalysisKind.recovery, .removal] where request.analysisKinds.contains(kind) {
                 var controlPins = plan.controlPins
@@ -1394,30 +1532,35 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                     for check in model.timingChecks ?? [] where check.kind.rawValue == kind.rawValue {
                         try charge(UInt64(controlPins.count) + 1)
                         if !controlPins.contains(check.constrainedPin) {
-                            try stateBudget.reserve(1); controlPins.append(check.constrainedPin)
+                            try stateBudget.reserve(1); try temporary.append(check.constrainedPin, to: &controlPins)
                         }
                     }
                     guard !controlPins.isEmpty else {
-                        throw TimingError.unsupportedSemantic(format: "STA", semantic: "missing " + kind.rawValue + " constraint")
+                        throw try NativeSTATransformStorage.sourceFailure(diagnostics: sourceDiagnostics,
+                    "missing ", kind.rawValue, " constraint") { TimingError.unsupportedSemantic(format: "STA", semantic: $0) }
                     }
                 }
                 for pin in controlPins {
                     // Ordinary reports retain their historical per-kind worst control summary.
                     let endpointPin = request.requireStrictSourceEvidence ? pin : (model.dataPin ?? pin)
-                    var endpoint = byPin[endpointPin] ?? STAEndpoint(modeID: mode, cornerID: corner,
-                        endpoint: instance.name + "/" + endpointPin)
+                    var endpoint = try byPin[endpointPin] ?? STAEndpoint(modeID: mode, cornerID: corner,
+                        endpoint: try retained.joined(instance.name, "/", endpointPin))
                     if request.requireStrictSourceEvidence {
                         if !(model.timingChecks ?? []).contains(where: { $0.kind.rawValue == kind.rawValue && $0.constrainedPin == pin }) {
-                            endpoint.notApplicableChecks = (endpoint.notApplicableChecks ?? []) + [kind]
+                            let update = try addingKind(kind, to: endpoint.notApplicableChecks)
+                            endpoint.notApplicableChecks = update.0
                             byPin[endpointPin] = endpoint
+                            applicabilityLeases[endpointPin] = update.1
                             continue
                         }
                         if let net = instance.connections[pin], constants[net] != nil {
-                            endpoint.notApplicableChecks = (endpoint.notApplicableChecks ?? []) + [kind]
+                            let update = try addingKind(kind, to: endpoint.notApplicableChecks)
+                            endpoint.notApplicableChecks = update.0
                             try sourceEvidence?.mark(instance: instance.name, kind: .sequentialCheck, pin: pin,
                                 checkKind: TimingCheckArc.Kind(rawValue: kind.rawValue), disposition: .staticControlNotApplicable,
                                 witness: "exact candidate constant control has no recovery/removal transition", limits: limits, work: &work)
                             byPin[endpointPin] = endpoint
+                            applicabilityLeases[endpointPin] = update.1
                             continue
                         }
                     }
@@ -1434,7 +1577,10 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                         endpoint.pulseWidthSlack = pulse.pulseWidthSlack
                         if let kinds = pulse.notApplicableChecks {
                             for kind in kinds where !(endpoint.notApplicableChecks ?? []).contains(kind) {
-                                endpoint.notApplicableChecks = (endpoint.notApplicableChecks ?? []) + [kind]
+                                let update = try addingKind(kind, to: endpoint.notApplicableChecks)
+                                endpoint.notApplicableChecks = update.0
+                                byPin[pin] = endpoint
+                                applicabilityLeases[pin] = update.1
                             }
                         }
                         byPin[pin] = endpoint
@@ -1448,59 +1594,66 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
                 let fall = clockBoundary(instance: instance.name, clock: capture, edge: .fall)
                 let high = fall.early - rise.late + (fall.early <= rise.late ? capture.period : 0)
                 let endpointPin = request.requireStrictSourceEvidence ? plan.clockPin : (model.dataPin ?? plan.clockPin)
-                var endpoint = byPin[endpointPin] ?? STAEndpoint(modeID: mode, cornerID: corner,
-                    endpoint: instance.name + "/" + endpointPin)
+                var endpoint = try byPin[endpointPin] ?? STAEndpoint(modeID: mode, cornerID: corner,
+                    endpoint: try retained.joined(instance.name, "/", endpointPin))
                 endpoint.pulseWidthSlack = high - minimum - capture.uncertainty
                 byPin[endpointPin] = endpoint
             }
-            endpoints.append(contentsOf: byPin.keys.sorted().compactMap { byPin[$0] })
+            for lease in applicabilityLeases.values { try retained.hold(lease) }
+            try retained.append(contentsOf: temporary.map(temporary.sorted(byPin.keys, by: <)) { byPin[$0]! }, to: &endpoints, site: 10004)
         }
         for index in design.instances.indices where cells[index].sequentialModel == nil {
+            let temporary = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
             let pulsed = try pulseEndpoints(instance: index, constants: constants)
-            endpoints.append(contentsOf: pulsed.keys.sorted().compactMap { pulsed[$0] })
+            try retained.append(contentsOf: temporary.map(temporary.sorted(pulsed.keys, by: <)) { pulsed[$0]! }, to: &endpoints, site: 10004)
         }
         for port in design.ports where port.direction != .input {
             let delay = constraints.outputDelays.first { $0.port == port.name }
             let capture = delay?.clock.flatMap { constraints.clock(named: $0) }
             let (endpoint, missing) = try evaluate(name: port.name, net: netIndices[port.netName]!, capture: capture, model: nil, instance: nil, constant: constants[port.netName])
-            if endpoint.setupSlack != nil || endpoint.holdSlack != nil || endpoint.staticChecks != nil || endpoint.excludedChecks != nil { endpoints.append(endpoint) }
-            if let missing { unknown.append(missing) }
+            if endpoint.setupSlack != nil || endpoint.holdSlack != nil || endpoint.staticChecks != nil || endpoint.excludedChecks != nil { try retained.append(endpoint, to: &endpoints, site: 10004) }
+            if let missing { try retained.append(missing, to: &unknown, site: 10005) }
         }
         guard !endpoints.isEmpty else { throw TimingError.unsupportedSemantic(format: "STA", semantic: "no constrained timing endpoints") }
         var violations: [STAViolation] = []
         for endpoint in endpoints {
             for (kind, value) in [(STAAnalysisKind.setup, endpoint.setupSlack), (.hold, endpoint.holdSlack), (.recovery, endpoint.recoverySlack), (.removal, endpoint.removalSlack), (.pulseWidth, endpoint.pulseWidthSlack)] {
-                if let value, value < 0 { violations.append(.init(kind: kind, modeID: mode, cornerID: corner, endpoint: endpoint.endpoint, slack: value)) }
+                if let value, value < 0 { try retained.append(.init(kind: kind, modeID: mode, cornerID: corner, endpoint: endpoint.endpoint, slack: value), to: &violations) }
             }
         }
-        candidates.sort { a, b in
+        candidates = try temporary.sorted(candidates) { a, b in
             if a.slack != b.slack { return a.slack < b.slack }
             if a.endpoint != b.endpoint { return a.endpoint < b.endpoint }
             if a.kind != b.kind { return a.kind.rawValue < b.kind.rawValue }
             return a.point < b.point
         }
+        temporary.releaseArrayBuffer(site: 10002)
         var reports: [STAPath] = []
         for candidate in candidates.prefix(request.maxPaths) {
+            let stageStorage = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
             var stages: [STAPathStage] = []; var cursor = candidate.point
             while let step = points[cursor].step, let parent = points[cursor].parent {
                 try charge()
-                stages.append(.init(instance: design.instances[step.instance].name, cell: cells[step.instance].name,
+                try stageStorage.append(.init(instance: design.instances[step.instance].name, cell: cells[step.instance].name,
                     inputPin: step.inputPin, inputNet: netNames[step.inputNet], outputNet: netNames[points[cursor].net],
                     inputEdge: points[parent].edge, outputEdge: points[cursor].edge,
                     delay: candidate.kind == .setup ? step.lateDelay : step.earlyDelay,
-                    outputSlew: candidate.kind == .setup ? points[cursor].lateSlew : points[cursor].earlySlew, load: step.load, inputWireDelay: candidate.kind == .setup ? step.lateWireDelay : step.earlyWireDelay))
+                    outputSlew: candidate.kind == .setup ? points[cursor].lateSlew : points[cursor].earlySlew, load: step.load, inputWireDelay: candidate.kind == .setup ? step.lateWireDelay : step.earlyWireDelay), to: &stages, discriminator: reports.count)
                 cursor = parent
             }
-            reports.append(.init(modeID: mode, cornerID: corner, startpoint: launches[points[candidate.point].launch].name,
+            try retained.append(.init(modeID: mode, cornerID: corner, startpoint: launches[points[candidate.point].launch].name,
                 endpoint: candidate.endpoint, arrival: candidate.arrival, required: candidate.required, slack: candidate.slack,
-                stages: stages.reversed(), analysisKind: candidate.kind))
+                stages: try retained.map(stages.reversed()) { $0 }, analysisKind: candidate.kind), to: &reports)
         }
         var coverage: [STAWireCoverage] = []
         if let distributedRC {
-            let clocks = Set((constraints.clocks.map(\.source) + constraints.generatedClocks.map(\.source)).map { clock in
+            var clockNames = try temporary.map(constraints.clocks, site: 10030, \.source)
+            try temporary.append(contentsOf: temporary.map(constraints.generatedClocks, \.source), to: &clockNames, site: 10030)
+            try temporary.reserveSet(String.self, capacity: clockNames.count)
+            let clocks = Set(try temporary.map(clockNames) { clock in
                 design.ports.first { $0.name == clock }?.netName ?? clock
             })
-            coverage = netNames.map { net in
+            coverage = try retained.map(netNames) { net in
                 let model: STAWireCoverage.Model = constants[net] != nil ? .staticNoTransition
                     : propagatedClocks?.nets[net] != nil ? .propagatedClock
                     : distributedRC.contains(net) ? .distributedRC : clocks.contains(net) ? .idealClock : .uncovered
@@ -1508,7 +1661,7 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             }
         }
         if let conservativeWires {
-            coverage = netNames.map { net in
+            coverage = try retained.map(netNames) { net in
                 .init(modeID: mode, cornerID: corner, net: net,
                       model: constants[net] != nil ? .staticNoTransition : conservativeWires.contains(net) ? .conservativeCoupledRC : .uncovered)
             }
@@ -1518,12 +1671,23 @@ internal struct NativeSTAPathAnalysis: ~Copyable {
             throw TimingError.unsupportedSemantic(format: "strict source STA", semantic: "unconstrained required execution coverage")
         }
         let sourceCoverage = try sourceEvidence?.finish(stateBudget: stateBudget, limits: limits, work: &work) ?? []
-        return .init(clockObservations: propagatedClocks?.observations ?? [], rcSteps: distributedRC?.steps ?? initialRCSteps,
-            wireCoverage: coverage, wireObservations: distributedRC?.observations ?? [],
-            conservativeWireObservations: conservativeWires?.observations ?? [], workUnits: work,
+        let clockObservations = propagatedClocks?.observations ?? []
+        let wireObservations = distributedRC?.observations ?? []
+        let conservativeObservations = conservativeWires?.observations ?? []
+        try retained.hold(sourceEvidence?.transformRetention)
+        try retained.hold(propagatedClocks?.finishTransformRetention())
+        try retained.hold(controlPulses?.finishTransformRetention())
+        try retained.hold(distributedRC?.transformRetention)
+        try retained.hold(conservativeWires?.finishTransformRetention())
+        var result = STAPathAnalysisResult(clockObservations: clockObservations, rcSteps: distributedRC?.steps ?? initialRCSteps,
+            wireCoverage: coverage, wireObservations: wireObservations,
+            conservativeWireObservations: conservativeObservations, workUnits: work,
             endpoints: endpoints, unconstrainedEndpoints: unknown, paths: reports, violations: violations,
             sourceCoverage: sourceCoverage, sourceSamples: sourceEvidence?.samples ?? [],
             pulseWidthSamples: sourceEvidence?.pulseWidthSamples ?? [], staticStateSamples: sourceEvidence?.staticStateSamples ?? [],
             normalPowerSamples:sourceEvidence?.normalPowerSamples ?? [],normalPowerOwners:sourceEvidence?.normalPowerOwners ?? [])
+        try retained.hold(result)
+        result.transformRetention = try retained.finish()
+        return result
     }
 }

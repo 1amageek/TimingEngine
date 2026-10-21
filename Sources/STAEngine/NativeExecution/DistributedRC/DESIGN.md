@@ -130,3 +130,78 @@ It retains observed cycle-to-cycle convergence separately from grid agreement an
 shares the same cumulative node/storage/step/work limits as the isolated data profile.
 The source waveform is prescribed from characterized timing; no current/drive
 resistance or settled initial periodic state is invented.
+
+
+## Strict Transform Payload Ownership
+
+The original scenario `NativeSTAStateBudget` supplies optional transform
+accounting. Concrete nodal Double matrices/vectors, typed alias/neighbor maps and
+sets, grid/factorization scratch, caches and observations are admitted before
+construction or growth, independently of existing logical slots. Network and
+response owners retain live payload; temporary solve buffers retain lexical
+leases until their final use. Old and replacement buffers coexist in admission.
+No path-state ceiling is converted through a guessed maximum stride.
+
+Every existing numerical work batch also reaches that same cumulative transform
+accountant and its cancellation/deadline checks. Nil-accountant behavior and
+backward-Euler arithmetic, ordering, thresholds and convergence guards remain
+unchanged. Tests extend `NativeStrictNumerical` coverage with actual RC response,
+capacity/cancellation refusal and final-owner cleanup. The selected Native
+qualification and finding-limited recheck passed within the
+[PreparedExecution scope](../../PreparedExecution/DESIGN.md#strict-native-qualification-scope);
+this component grants no additional physical authority.
+
+### Concrete Buffer Lifetimes
+
+| Owner | Payload | Release boundary |
+|---|---|---|
+| Immutable network anchor | G/C, source vectors, exact alias/index tables and generated pin-name bytes | Last network/scenario or published result anchor |
+| Scenario snapshot | Network table, response tables and observation array | Last snapshot/result anchor; replacement admits old and new simultaneously |
+| Per-network construction | Driver/sink tables, quotient and adjacency, sorted node lists, BFS | End of that network construction |
+| Per-solve workspace | Writable operator, factors, voltage pair, thresholds, crossings and periodic events | Last lexical use, including exceptional exit |
+
+Controlled construction reserves concrete element capacities before populating
+arrays, dictionaries and sets. Source incidence counts bound the initial table
+capacities; concrete typed hash-table sizing belongs to TimingTransformCapacity.
+Nested adjacency arrays use an independently counted degree per class. Their
+payloads are admitted before the corresponding array is created. Numerical
+vectors use two independent writable buffers in the controlled path; swapping
+these buffers preserves each step's arithmetic and avoids retaining historical
+COW allocations. The legacy nil path retains its original assignment operations.
+Shortened-step factors and their writable matrices coexist with the full-step
+factor only until that step finishes.
+
+Caches and observations publish a fresh immutable backing after admission. A
+copied scenario keeps the prior lease and prior backing; mutation never replaces
+a lease shared with that copy. Network anchors cover only retained payload, not
+construction scratch. The result composition retains the distributed owner's
+`transformRetention`; extracting a bare observation array does not independently
+transfer accounting ownership. Source Strings borrowed from the prepared inputs
+continue to require the enclosing prepared-source owner. These are logical
+payload bounds, not allocator buckets, Foundation workspace or process RSS.
+
+
+### Source-Name Failure Ownership
+
+The controlled DistributedRC boundary prepays its concrete terminal diagnostic
+metadata through the same state-budget transform accountant. Before constructing
+an unsupported-semantic message from net, endpoint or receiver names, it admits
+the exact UTF-8 sum of the unchanged literal fragments and source fields, then
+constructs the original TimingError lazily. The thrown controlled failure retains
+that cause, the admitted text and original parasitic source owner across copies;
+the final error copy releases the associated live admission. Resource/work/cancel
+refusals propagate unchanged, and unwind returns any already acquired leases.
+Nil-accountant construction and the original semantic text remain unchanged.
+The controlled source-threshold refusal uses the canonical existing
+TimingCharacterizationError.errorDescription through the source-owned scoped
+formatter in [LibertyCodec](../../../TimingCore/LibertyCodec/DESIGN.md). Its
+intermediate description and numeric text are admitted before formatting. The
+controlled semantic text deliberately replaces Optional/enum reflection while
+retaining the same unsupported reason and source facts; the nil-accountant path
+keeps its original String(describing:) bytes. No threshold acceptance changes.
+
+The source-rich CAP-only regression in NativeStrictDistributedPayloadTests uses
+an actual parsed schema-three SPEF with a long canonical net name. It checks the
+original legacy refusal, pre-construction live/work/cancellation refusal, zero
+scratch capacity, retained cause identity and last-error-copy refund. These cases
+qualify failure ownership rather than a new RC topology or numerical profile.

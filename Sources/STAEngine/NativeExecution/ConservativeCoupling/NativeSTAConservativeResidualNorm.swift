@@ -9,12 +9,14 @@ internal struct NativeSTAConservativeResidualNorm {
     let conductance: S.CSR
     let weight: N.Matrix
     private let imageLower: [Double]
+    private let imagePayload: LibertySourceStorageReservation?
 
     init(numerical: N, conductance: S.CSR, weight: N.Matrix, work: inout UInt64) throws {
         guard conductance.rows == conductance.columns, weight.rows == conductance.rows,
               weight.columns == 1, weight.values.count == weight.rows else { throw Self.invalid("norm barrier shape") }
         self.numerical = numerical; self.conductance = conductance; self.weight = weight
         try numerical.slots(conductance.rows)
+        imagePayload = try numerical.budget.reservePayload(Double.self, capacity: conductance.rows, kind: .liveOwnedBytes)
         var lower = [Double](); lower.reserveCapacity(conductance.rows)
         for value in weight.values {
             try numerical.tick(&work)

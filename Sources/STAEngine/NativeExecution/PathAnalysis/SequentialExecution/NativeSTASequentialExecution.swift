@@ -17,6 +17,7 @@ internal enum NativeSTASequentialExecution {
         let inverted: Bool
     }
     struct Plan: Sendable {
+        var transformRetention: NativeSTATransformRetention? = nil
         let kind: Kind
         let clockPin: String
         let activeEdge: TimingEdge
@@ -37,6 +38,7 @@ internal enum NativeSTASequentialExecution {
         let value: Bool
     }
     struct NormalPowerReceipt: Sendable {
+        var transformRetention: NativeSTATransformRetention? = nil
         let instance: String
         let cell: String
         let cornerID: String
@@ -49,15 +51,21 @@ internal enum NativeSTASequentialExecution {
     static func compile(model: TimingSequentialModel, source: LibertySourceCell?,
                         work: inout UInt64, limits: STAExecutionLimits, stateBudget: NativeSTAStateBudget,
                         sourceResources: (any LibertySourceResourceAccounting)? = nil) throws -> Plan {
+        let temporary = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+        let retained = NativeSTATransformStorage(budget: stateBudget, kind: .liveOwnedBytes)
         try charge(1, work: &work, limits: limits, sourceResources: sourceResources)
         switch model.definition {
         case .legacy(let pins):
             try stateBudget.reserve(7)
-            return Plan(kind: .legacyFlipFlop, clockPin: pins.clockPin, activeEdge: model.clockEdge ?? .rise,
+            try retained.reserve(String.self, capacity: 3)
+            try retained.reserve(OutputDefinition.self, capacity: 1)
+            var result = Plan(kind: .legacyFlipFlop, clockPin: pins.clockPin, activeEdge: model.clockEdge ?? .rise,
                         closeEdge: nil, dataPins: [pins.dataPin], controlPins: [],
                         outputs: [.init(pin: pins.outputPin, stateVariable: nil, inverted: false)],
                         bindings: [], checks: model.timingChecks ?? [], declaration: nil,
                         inputPinNames: [pins.dataPin, pins.clockPin], powerPinNames: [])
+            result.transformRetention = try retained.finish()
+            return result
         case .source(let bound):
             guard let source, bound.declarations == source.sequential, bound.pins == source.pins,
                   bound.powerPins == source.powerPins, source.unsupportedFunctionalGroups.isEmpty else {
@@ -66,6 +74,7 @@ internal enum NativeSTASequentialExecution {
             // FIXME(INCOMPLETE_IMPLEMENTATION): Multiple/compound clock groups are outside the initial
             // native profile. Production ClockPropagation/PathAnalysis must refuse them until a
             // complete source execution and behavioral evidence are available.
+            try temporary.reserveSet(String.self, capacity: bound.declarations.first?.variables.count ?? 0)
             guard bound.declarations.count == 1, let declaration = bound.declarations.first,
                   declaration.variables.count == 2, Set(declaration.variables).count == 2,
                   declaration.additionalControl == nil else {
@@ -86,7 +95,8 @@ internal enum NativeSTASequentialExecution {
             guard !square.overflow, !envelope.overflow else { throw Failure.nonfinite("Sequential plan work") }
             try charge(envelope.partialValue, work: &work, limits: limits, sourceResources: sourceResources)
             try stateBudget.reserve(bindings.count + source.pins.count * 4 + source.powerPins.count)
-            guard Set(bindings.map(\.role)).count == bindings.count else {
+            try temporary.reserveSet(TimingSequentialFunctionBinding.Role.self, capacity: bindings.count)
+            guard Set(try temporary.map(bindings, \.role)).count == bindings.count else {
                 throw Failure.inconsistent("Duplicate sequential function role")
             }
             guard let control = bound.function(for: .control), let data = bound.function(for: .data) else {
@@ -100,33 +110,39 @@ internal enum NativeSTASequentialExecution {
                 switch binding.role {
                 case .data:
                     for symbol in binding.symbols {
-                        if case .inputPin(let name) = symbol, !dataPins.contains(name) { dataPins.append(name) }
+                        if case .inputPin(let name) = symbol, !dataPins.contains(name) { try retained.append(name, to: &dataPins, site: 1) }
                     }
                 case .clear, .preset:
                     for symbol in binding.symbols {
-                        if case .inputPin(let name) = symbol, !controlPins.contains(name) { controlPins.append(name) }
+                        if case .inputPin(let name) = symbol, !controlPins.contains(name) { try retained.append(name, to: &controlPins, site: 2) }
                     }
                 case .output(let pin):
                     let output = try unary(binding, state: true)
-                    outputs.append(.init(pin: pin, stateVariable: output.name, inverted: output.inverted))
+                    try retained.append(.init(pin: pin, stateVariable: output.name, inverted: output.inverted), to: &outputs, site: 3)
                 case .additionalControl, .outputState, .threeState, .xFunction:
                     throw Failure.unsupported("Additional sequential output/control semantics")
                 case .control, .powerDown, .outputPowerDown: break
                 }
             }
-            guard !outputs.isEmpty, Set(outputs.map(\.pin)) == Set(source.pins.filter({ $0.direction == .output }).map(\.name)),
+            try temporary.reserveSet(String.self, capacity: outputs.count)
+            try temporary.reserveSet(String.self, capacity: source.pins.count)
+            let originalOutputs = try temporary.filter(source.pins) { $0.direction == .output }
+            guard !outputs.isEmpty, Set(try temporary.map(outputs, \.pin)) == Set(try temporary.map(originalOutputs, \.name)),
                   !dataPins.isEmpty, !dataPins.contains(clock.name), !controlPins.contains(clock.name) else {
                 throw Failure.unsupported("Complete physical data, control and output bindings are required")
             }
             // Validation preserves the full next-state program, including feedback slots.
             _ = data
-            return Plan(kind: declaration.kind == .latch ? .latch : .flipFlop,
+            let inputPins = try temporary.filter(source.pins) { $0.direction == .input }
+            var result = Plan(kind: declaration.kind == .latch ? .latch : .flipFlop,
                         clockPin: clock.name, activeEdge: clock.inverted ? .fall : .rise,
                         closeEdge: declaration.kind == .latch ? (clock.inverted ? .rise : .fall) : nil,
                         dataPins: dataPins, controlPins: controlPins, outputs: outputs,
                         bindings: bindings, checks: model.timingChecks ?? [], declaration: declaration,
-                        inputPinNames: source.pins.filter { $0.direction == .input }.map(\.name),
-                        powerPinNames: source.powerPins.map(\.name))
+                        inputPinNames: try retained.map(inputPins, \.name),
+                        powerPinNames: try retained.map(source.powerPins, \.name))
+            result.transformRetention = try retained.finish()
+            return result
         }
     }
 
@@ -135,13 +151,15 @@ internal enum NativeSTASequentialExecution {
                                     library: ArtifactReference, assumptions: [STAOperatingSupplyAssumption],
                                     work: inout UInt64, limits: STAExecutionLimits, stateBudget: NativeSTAStateBudget,
                                     sourceResources: (any LibertySourceResourceAccounting)? = nil) throws -> NormalPowerReceipt {
+        let retained = NativeSTATransformStorage(budget: stateBudget, kind: .liveOwnedBytes)
+        let temporary = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
         try charge(UInt64(assumptions.count),work:&work,limits:limits,sourceResources:sourceResources)
         try stateBudget.reserve(assumptions.count * 2)
         var consumed: [STAOperatingSupplyAssumption] = [], conditions: [LibertyPGCondition] = []
         for assumption in assumptions where assumption.instance == instance && assumption.cornerID == cornerID {
             guard assumption.cell == cell, assumption.library == library else { throw Failure.inconsistent("Operating supply engine scope join") }
-            consumed.append(assumption)
-            conditions.append(.init(pin:assumption.pin,sourcePGType:assumption.sourcePGType,value:assumption.value == .one))
+            try retained.append(assumption, to: &consumed)
+            try temporary.append(LibertyPGCondition(pin:assumption.pin,sourcePGType:assumption.sourcePGType,value:assumption.value == .one), to: &conditions)
         }
         let checked: CheckedLibertyNormalPower
         do {
@@ -163,10 +181,12 @@ internal enum NativeSTASequentialExecution {
             case .pin(let name): pin = name
             case .declaration: pin = nil
             }
-            functions.append(.init(pin:pin,line:sample.origin.functionLine,byteOffset:sample.origin.functionByteOffset,value:sample.result))
+            try retained.append(PowerFunctionReceipt(pin:pin,line:sample.origin.functionLine,byteOffset:sample.origin.functionByteOffset,value:sample.result), to: &functions)
         }
-        return .init(instance:instance,cell:cell,cornerID:cornerID,library:library,
+        var result = NormalPowerReceipt(instance:instance,cell:cell,cornerID:cornerID,library:library,
             assumptions:consumed,functions:functions,checked:checked)
+        result.transformRetention = try retained.finish()
+        return result
     }
 
     /// Evaluates original next-state logic. The caller supplies every referenced state/input value.
@@ -305,7 +325,16 @@ internal enum NativeSTASequentialExecution {
                                  work: inout UInt64, limits: STAExecutionLimits, stateBudget: NativeSTAStateBudget,
                                  sourceResources: (any LibertySourceResourceAccounting)?) throws -> Bool {
         guard case .normalized(let facts) = function.content else { throw Failure.unsupported("Unnormalized Boolean function") }
-        for symbol in facts.symbols where values[symbol] == nil { throw Failure.missing("Explicit Boolean value for " + symbol) }
+        let diagnostics = try stateBudget.transformResources.map {
+            try TimingControlledDiagnostics(resources: $0, retaining: function)
+        }
+        for symbol in facts.symbols {
+            try stateBudget.chargeScheduledWork(1)
+            if values[symbol] == nil {
+                throw try NativeSTATransformStorage.sourceFailure(diagnostics: diagnostics,
+                    "Explicit Boolean value for ", symbol) { Failure.missing($0) }
+            }
+        }
         let result = try evaluateTruth(function, value: { slot in values[facts.symbols[slot]]! ? .one : .zero },
             work: &work, limits: limits, stateBudget: stateBudget, sourceResources: sourceResources)
         switch result {
@@ -319,10 +348,13 @@ internal enum NativeSTASequentialExecution {
     static func evaluateTruth(_ function: LibertySourceFunction, value: (Int) -> LogicBit,
                               work: inout UInt64, limits: STAExecutionLimits, stateBudget: NativeSTAStateBudget,
                               sourceResources: (any LibertySourceResourceAccounting)?) throws -> LogicBit {
+        var nodesLease: LibertySourceStorageReservation?
+        defer { withExtendedLifetime(nodesLease) {} }
         do {
             return try LibertySourceBooleanEvaluation.evaluate(function,value:value,admit:{ amount,slots in
                 try charge(amount,work:&work,limits:limits,sourceResources:sourceResources)
                 try stateBudget.reserve(slots)
+                nodesLease = try stateBudget.reservePayload(LogicBit.self, capacity: slots, kind: .temporaryBytes)
             },checkpoint:{ try Task.checkCancellation(); try sourceResources?.check() })
         } catch let error as LibertySourceBooleanEvaluation.Failure {
             switch error {

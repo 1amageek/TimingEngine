@@ -8,6 +8,8 @@ import Darwin
 /// Reads an exact content identity from one explicitly bound materialization.
 public protocol TimingArtifactReading: Sendable {
     func read(_ artifact: TimingArtifactBinding) async throws -> Data
+    func read(_ artifact: TimingArtifactBinding, resources: any LibertySourceResourceAccounting)
+        async throws -> TimingArtifactRead
 }
 
 /// Stores immutable artifacts and returns content identity plus its materialization binding.
@@ -24,13 +26,18 @@ public protocol TimingArtifactStoring: Sendable {
 public struct FileSystemTimingArtifactReader: TimingArtifactReading {
     public let workspaceRoot: URL?
     public let readBudget: ArtifactAccessBudget
+    /// Explicit caller grant for controlled local-file-system availability.
+    /// Workspace-relative reads require only the separately supplied workspace root.
+    public let allowControlledLocalFileSystemRoot: Bool
 
     public init(
         workspaceRoot: URL? = nil,
-        readBudget: ArtifactAccessBudget = FileSystemTimingArtifactReader.defaultReadBudget
+        readBudget: ArtifactAccessBudget = FileSystemTimingArtifactReader.defaultReadBudget,
+        allowControlledLocalFileSystemRoot: Bool = false
     ) {
         self.workspaceRoot = workspaceRoot?.standardizedFileURL
         self.readBudget = readBudget
+        self.allowControlledLocalFileSystemRoot = allowControlledLocalFileSystemRoot
     }
 
     public func read(_ artifact: TimingArtifactBinding) async throws -> Data {

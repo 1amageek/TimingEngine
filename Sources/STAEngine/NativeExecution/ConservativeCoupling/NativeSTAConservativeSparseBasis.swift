@@ -21,8 +21,11 @@ internal struct NativeSTAConservativeSparseBasis {
               reduced.capacitance.rows == d, reduced.capacitance.columns == d, reduced.forcing.rows == d,
               reduced.reconstruction.columns == d, reduced.dcIncidence.rows == reduced.reconstruction.rows,
               reduced.dcIncidence.columns == sources else { throw invalid("shape") }
+        let scratch = NativeSTATransformStorage(budget: numerical.budget, kind: .temporaryBytes)
+        defer { withExtendedLifetime(scratch) {} }
         try numerical.slots(d, times: 2)
-        var blockOf = Array(repeating: -1, count: d), localOf = blockOf
+        var blockOf = try scratch.repeated(-1, count: d)
+        var localOf = try scratch.repeated(-1, count: d)
         for (index, block) in reduced.capBlocks.enumerated() {
             guard !block.isEmpty else { throw invalid("empty partition block") }
             var previous = -1
@@ -34,6 +37,7 @@ internal struct NativeSTAConservativeSparseBasis {
         }
         for row in 0..<d { try numerical.tick(&work); guard blockOf[row] >= 0 else { throw invalid("incomplete partition") } }
         try numerical.slots(reduced.capBlocks.count, times: 3)
+        try scratch.reserve(Block.self, capacity: reduced.capBlocks.count)
         var coordinates: [Block] = []; coordinates.reserveCapacity(reduced.capBlocks.count)
         let zero = try I(point: 0)
         for (blockIndex, block) in reduced.capBlocks.enumerated() {
@@ -88,10 +92,15 @@ internal struct NativeSTAConservativeSparseBasis {
             coordinates.append(Block(q: q, transpose: qt, mass: mass))
         }
         try numerical.slots(d, times: 2)
-        var aRows = Array(repeating: [Int: I](), count: d), jRows = aRows
+        var aRows = try NativeSTAConservativeRowStorage(count: d, numerical: numerical)
+        var jRows = try NativeSTAConservativeRowStorage(count: d, numerical: numerical)
         for (blockIndex, block) in reduced.capBlocks.enumerated() {
             let count = block.count, coordinate = coordinates[blockIndex]
+            let blockStorage = NativeSTATransformStorage(budget: numerical.budget, kind: .temporaryBytes)
+            defer { withExtendedLifetime(blockStorage) {} }
+            try blockStorage.reserveSet(Int.self, capacity: reduced.capBlocks.count)
             var neighborSet: Set<Int> = []
+            if numerical.budget.transformResources != nil { neighborSet.reserveCapacity(reduced.capBlocks.count) }
             for row in block {
                 for offset in reduced.conductance.rowOffsets[row]..<reduced.conductance.rowOffsets[row + 1] {
                     try numerical.tick(&work)
@@ -100,10 +109,14 @@ internal struct NativeSTAConservativeSparseBasis {
                 }
             }
             try numerical.slots(neighborSet.count)
+            try blockStorage.reserve(Int.self, capacity: neighborSet.count)
+            try blockStorage.reserve(Int.self, capacity: neighborSet.count)
             let neighbors = try neighborSet.sorted { left, right in try numerical.tick(&work); return left < right }
             var columnCount = 0
             for neighbor in neighbors { try numerical.tick(&work); columnCount = try sum(columnCount, reduced.capBlocks[neighbor].count) }
             try numerical.slots(neighbors.count, times: 2); try numerical.slots(columnCount)
+            try blockStorage.reserveDictionary(Int.self, Int.self, capacity: neighbors.count)
+            try blockStorage.reserve(Int.self, capacity: columnCount)
             var offsets: [Int: Int] = [:]; offsets.reserveCapacity(neighbors.count)
             var columns: [Int] = []; columns.reserveCapacity(columnCount)
             for neighbor in neighbors {
@@ -135,9 +148,9 @@ internal struct NativeSTAConservativeSparseBasis {
             let solved = try candidateProof { try numerical.solve(coordinate.mass, rhs, work: &work) }
             for (i, row) in block.enumerated() {
                 for (j, column) in columns.enumerated() {
-                    try numerical.tick(&work); aRows[row][column] = try solved[i, j].negated()
+                    try numerical.tick(&work); try aRows.set(solved[i, j].negated(), row: row, column: column)
                 }
-                for source in 0..<sources { try numerical.tick(&work); jRows[row][source] = try solved[i, columnCount + source].negated() }
+                for source in 0..<sources { try numerical.tick(&work); try jRows.set(solved[i, columnCount + source].negated(), row: row, column: source) }
             }
         }
         var reconstructionFill = 0
@@ -147,7 +160,7 @@ internal struct NativeSTAConservativeSparseBasis {
         }
         try numerical.slots(reduced.reconstruction.rows)
         try numerical.slots(reconstructionFill, times: 3)
-        var tRows = Array(repeating: [Int: I](), count: reduced.reconstruction.rows)
+        var tRows = try NativeSTAConservativeRowStorage(count: reduced.reconstruction.rows, numerical: numerical)
         for row in 0..<reduced.reconstruction.rows {
             for offset in reduced.reconstruction.rowOffsets[row]..<reduced.reconstruction.rowOffsets[row + 1] {
                 let column = reduced.reconstruction.columnIndices[offset], targetBlock = blockOf[column]
@@ -155,7 +168,7 @@ internal struct NativeSTAConservativeSparseBasis {
                 for (mode, targetColumn) in reduced.capBlocks[targetBlock].enumerated() {
                     try numerical.tick(&work)
                     let value = try reduced.reconstruction.values[offset].multiplied(by: q[localOf[column], mode])
-                    tRows[row][targetColumn] = try (tRows[row][targetColumn] ?? zero).adding(value)
+                    try tRows.set((tRows[row][targetColumn] ?? zero).adding(value), row: row, column: targetColumn)
                 }
             }
         }
@@ -163,7 +176,7 @@ internal struct NativeSTAConservativeSparseBasis {
         return Graph.Operators(dynamicRows: reduced.dynamicRows,
             a: try solver.fromRows(aRows, columns: d, work: &work),
             j: try solver.fromRows(jRows, columns: sources, work: &work),
-            reconstruction: try solver.fromRows(tRows, columns: d, work: &work), dcIncidence: reduced.dcIncidence)
+            reconstruction: try solver.fromRows(tRows, columns: d, work: &work), dcIncidence: reduced.dcIncidence, transformRetention: reduced.transformRetention)
     }
 
     private func candidateProof<Result>(_ operation: () throws -> Result) throws -> Result {

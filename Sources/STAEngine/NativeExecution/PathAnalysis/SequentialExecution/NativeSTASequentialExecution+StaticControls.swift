@@ -16,6 +16,7 @@ extension NativeSTASequentialExecution {
         }
     }
     struct StaticControls {
+        var transformRetention: NativeSTATransformRetention? = nil
         enum Effect { case inactive, clear, preset, unknown }
         let effect: Effect
         let clear: Bool?
@@ -56,7 +57,9 @@ extension NativeSTASequentialExecution {
         else if preset == .one && clear == .zero { effect = .preset; state = true }
         else if clear == .zero && preset == .zero { effect = .inactive; state = nil }
         else { effect = .unknown; state = nil }
-        var outputs: [String: TimingDesign.Constant] = [:]
+        let retained = NativeSTATransformStorage(budget: stateBudget, kind: .liveOwnedBytes)
+        try retained.reserveDictionary(String.self, TimingDesign.Constant.self, capacity: plan.outputs.count)
+        var outputs: [String: TimingDesign.Constant] = [:]; outputs.reserveCapacity(plan.outputs.count)
         if let state {
             for output in plan.outputs {
                 guard let variable = output.stateVariable, let index = declaration.variables.firstIndex(of: variable), index < 2 else {
@@ -66,6 +69,8 @@ extension NativeSTASequentialExecution {
                 outputs[output.pin] = value ? .one : .zero
             }
         }
-        return .init(effect: effect, clear: binary(clear), preset: binary(preset), outputs: outputs)
+        var result = StaticControls(effect: effect, clear: binary(clear), preset: binary(preset), outputs: outputs)
+        result.transformRetention = try retained.finish()
+        return result
     }
 }

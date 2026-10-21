@@ -9,6 +9,11 @@ internal struct NativeSTASourceEvidence: ~Copyable {
         let relatedEdge: TimingEdge?
         let kind: TimingCheckArc.Kind?
     }
+    private let sourceDiagnostics: TimingControlledDiagnostics<[STASourceEvidence.Role]>?
+    private let budget: NativeSTAStateBudget
+    private let temporary: NativeSTATransformStorage
+    private let retained: NativeSTATransformStorage
+    var transformRetention: NativeSTATransformRetention? { get throws { try retained.finish() } }
     let roles: [STASourceEvidence.Role]
     private var lookup: [Key: Int]
     private var dispositions: [STASourceEvidence.Coverage.Disposition]
@@ -21,18 +26,28 @@ internal struct NativeSTASourceEvidence: ~Copyable {
 
     init(roles: [STASourceEvidence.Role], design: TimingDesign, analysisKinds: [STAAnalysisKind],
          stateBudget: NativeSTAStateBudget, limits: STAExecutionLimits, work: inout UInt64) throws {
+        let temporary = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+        let initialization = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+        let retained = NativeSTATransformStorage(budget: stateBudget, kind: .liveOwnedBytes)
+        let budget = stateBudget
+        let sourceDiagnostics = try stateBudget.transformResources.map {
+            try TimingControlledDiagnostics(resources: $0, retaining: roles)
+        }
         let slots = roles.count.multipliedReportingOverflow(by: 4)
         guard !slots.overflow else { throw TimingError.invalidInput("Source evidence workspace overflow") }
-        try Self.charge(UInt64(slots.partialValue), limits: limits, work: &work)
+        try Self.charge(UInt64(slots.partialValue), limits: limits, work: &work, budget: budget)
         try stateBudget.reserve(slots.partialValue)
         let instanceSlots = design.instances.count.multipliedReportingOverflow(by: 2)
         guard !instanceSlots.overflow else { throw TimingError.invalidInput("Source instance workspace overflow") }
-        try Self.charge(UInt64(instanceSlots.partialValue), limits: limits, work: &work)
+        try Self.charge(UInt64(instanceSlots.partialValue), limits: limits, work: &work, budget: budget)
         try stateBudget.reserve(instanceSlots.partialValue)
-        let instances = Dictionary(uniqueKeysWithValues: design.instances.map { ($0.name, $0) })
+        try initialization.reserveDictionary(String.self, TimingDesign.Instance.self, capacity: design.instances.count)
+        let instances = Dictionary(uniqueKeysWithValues: try initialization.map(design.instances) { ($0.name, $0) })
+        try temporary.reserveDictionary(Key.self, Int.self, capacity: roles.count)
         var lookup: [Key: Int] = [:]
-        var dispositions = Array(repeating: STASourceEvidence.Coverage.Disposition.unknown, count: roles.count)
-        var witnesses = Array(repeating: "unmeasured required role", count: roles.count)
+        lookup.reserveCapacity(roles.count)
+        var dispositions = try temporary.repeated(STASourceEvidence.Coverage.Disposition.unknown, count: roles.count)
+        var witnesses = try temporary.repeated("unmeasured required role", count: roles.count)
         for index in roles.indices {
             let role = roles[index]
             guard let instance = instances[role.instance] else {
@@ -69,6 +84,8 @@ internal struct NativeSTASourceEvidence: ~Copyable {
                 }
             }
         }
+        self.sourceDiagnostics = sourceDiagnostics
+        self.budget = stateBudget; self.temporary = temporary; self.retained = retained
         self.roles = roles
         self.lookup = lookup
         self.dispositions = dispositions
@@ -77,6 +94,7 @@ internal struct NativeSTASourceEvidence: ~Copyable {
         self.pulseWidthSamples = []
         self.staticStateSamples = []
         self.normalPowerSamples = []; self.normalPowerOwners = []
+        withExtendedLifetime(initialization) {}
     }
 
     mutating func record(_ observation: TimingSourceEvaluationSample, instance: String,
@@ -86,7 +104,7 @@ internal struct NativeSTASourceEvidence: ~Copyable {
                          checkKind: TimingCheckArc.Kind? = nil, relatedEdge: TimingEdge? = nil,
                          rangeObservation: TimingSourceEvaluationRangeSample? = nil,
                          stateBudget: NativeSTAStateBudget, limits: STAExecutionLimits, work: inout UInt64) throws -> Int {
-        try Self.charge(2, limits: limits, work: &work)
+        try Self.charge(2, limits: limits, work: &work, budget: budget)
         let key = Key(instance: instance, source: observation.source,
             constrainedEdge: checkKind == nil ? nil : inputEdge, relatedEdge: relatedEdge, kind: checkKind)
         guard let role = lookup[key], scale.isFinite, scale > 0,
@@ -95,9 +113,9 @@ internal struct NativeSTASourceEvidence: ~Copyable {
         }
         try stateBudget.reserve(1)
         let index = samples.count
-        samples.append(.init(role: role, context: context, inputEdge: inputEdge, outputEdge: outputEdge,
+        try retained.append(.init(role: role, context: context, inputEdge: inputEdge, outputEdge: outputEdge,
             inputPoint: inputPoint, receiver: receiver, observation: observation, appliedScale: scale,
-            sequentialCoordinate: sequentialCoordinate, rangeObservation: rangeObservation))
+            sequentialCoordinate: sequentialCoordinate, rangeObservation: rangeObservation), to: &samples)
         dispositions[role] = .evaluated; witnesses[role] = "actual source evaluator query"
         return index
     }
@@ -107,7 +125,7 @@ internal struct NativeSTASourceEvidence: ~Copyable {
                        disposition: STASourceEvidence.Coverage.Disposition, witness: String,
                        limits: STAExecutionLimits, work: inout UInt64) throws {
         for index in roles.indices {
-            try Self.charge(1, limits: limits, work: &work)
+            try Self.charge(1, limits: limits, work: &work, budget: budget)
             let role = roles[index]
             guard role.instance == instance, kind == nil || role.kind == kind,
                   pin == nil || role.pin == pin, relatedPin == nil || role.relatedPin == relatedPin,
@@ -124,7 +142,7 @@ internal struct NativeSTASourceEvidence: ~Copyable {
                               closingRootEdge: TimingEdge, openingRootPhase: Double, closingRootPhase: Double,
                               period: Double, uncertainty: Double, rangeObservation: TimingPulseWidthRangeSample? = nil,
                               stateBudget: NativeSTAStateBudget, limits: STAExecutionLimits, work: inout UInt64) throws -> Double {
-        try Self.charge(UInt64(roles.count), limits: limits, work: &work)
+        try Self.charge(UInt64(roles.count), limits: limits, work: &work, budget: budget)
         guard let role = roles.firstIndex(where: { $0.instance == instance && $0.kind == .pulseWidth
             && $0.source == observation.source && $0.constrainedEdge == observation.openingEdge }) else {
             throw TimingError.invariantViolation("Pulse width has no exact required source law")
@@ -138,14 +156,14 @@ internal struct NativeSTASourceEvidence: ~Copyable {
         guard sample.actualWidth.isFinite, sample.actualWidth >= 0, sample.slack.isFinite else {
             throw TimingError.invalidInput("Source pulse receiver edges cross or produce nonfinite width")
         }
-        try stateBudget.reserve(1 + openingSegments.count + closingSegments.count); pulseWidthSamples.append(sample)
+        try stateBudget.reserve(1 + openingSegments.count + closingSegments.count); try retained.append(sample, to: &pulseWidthSamples)
         dispositions[role] = .evaluated; witnesses[role] = "actual paired receiver edges and checked positioned pulse law"
         return sample.slack
     }
 
     mutating func recordNormalPower(instance: String, checked: CheckedLibertyNormalPower,
                                     stateBudget: NativeSTAStateBudget, limits: STAExecutionLimits, work: inout UInt64) throws {
-        try Self.charge(UInt64(roles.count),limits:limits,work:&work)
+        try Self.charge(UInt64(roles.count),limits:limits,work:&work,budget:budget)
         guard let role = roles.firstIndex(where:{ $0.instance == instance && $0.kind == .normalPower }),
               checked.receipt.cell == roles[role].cell else { throw TimingError.invariantViolation("Normal power lost exact instance source role") }
         var slots = checked.receipt.pgValues.count.addingReportingOverflow(checked.receipt.functions.count)
@@ -157,7 +175,8 @@ internal struct NativeSTASourceEvidence: ~Copyable {
         let total = slots.partialValue.addingReportingOverflow(2)
         guard !total.overflow else { throw TimingError.invalidInput("Normal power evidence workspace overflow") }
         try stateBudget.reserve(total.partialValue)
-        normalPowerSamples.append(.init(role:role,observation:checked.receipt)); normalPowerOwners.append(checked)
+        try retained.append(.init(role:role,observation:checked.receipt), to: &normalPowerSamples)
+        try retained.append(checked, to: &normalPowerOwners)
         dispositions[role] = .evaluated; witnesses[role] = "all explicit source PG values and every original power-down function false"
     }
 
@@ -165,31 +184,35 @@ internal struct NativeSTASourceEvidence: ~Copyable {
                                clear: Bool?, preset: Bool?, inputs: [String: TimingDesign.Constant],
                                powers: [String: TimingDesign.Constant], outputs: [String: TimingDesign.Constant],
                                stateBudget: NativeSTAStateBudget, limits: STAExecutionLimits, work: inout UInt64) throws {
-        try Self.charge(UInt64(roles.count + inputs.count + powers.count + outputs.count), limits: limits, work: &work)
+        try Self.charge(UInt64(roles.count + inputs.count + powers.count + outputs.count), limits: limits, work: &work, budget: budget)
         guard let role = roles.firstIndex(where: { $0.instance == instance && $0.kind == .sequentialDefinition }) else {
             throw TimingError.invariantViolation("Static asynchronous state lost its exact declaration role")
         }
         try stateBudget.reserve(1 + inputs.count + powers.count + outputs.count)
-        staticStateSamples.append(.init(role: role, clear: clear, preset: preset, effect: effect,
-            inputConstants: inputs, powerConstants: powers, outputConstants: outputs))
+        try retained.append(.init(role: role, clear: clear, preset: preset, effect: effect,
+            inputConstants: inputs, powerConstants: powers, outputConstants: outputs), to: &staticStateSamples)
     }
 
     func finish(stateBudget: NativeSTAStateBudget, limits: STAExecutionLimits, work: inout UInt64) throws -> [STASourceEvidence.Coverage] {
-        try Self.charge(UInt64(roles.count), limits: limits, work: &work)
+        try Self.charge(UInt64(roles.count), limits: limits, work: &work, budget: budget)
         try stateBudget.reserve(roles.count)
         var result: [STASourceEvidence.Coverage] = []
+        try retained.reserve(STASourceEvidence.Coverage.self, capacity: roles.count)
         result.reserveCapacity(roles.count)
         for index in roles.indices {
             guard dispositions[index] != .unknown else {
-                throw TimingError.unsupportedSemantic(format: "strict source STA",
-                    semantic: "unmeasured required role " + roles[index].instance + "/" + roles[index].pin)
+                throw try NativeSTATransformStorage.sourceFailure(diagnostics: sourceDiagnostics,
+                    "unmeasured required role ", roles[index].instance, "/", roles[index].pin) {
+                        TimingError.unsupportedSemantic(format: "strict source STA", semantic: $0)
+                    }
             }
             result.append(.init(role: index, disposition: dispositions[index], witness: witnesses[index]))
         }
         return result
     }
 
-    private static func charge(_ amount: UInt64, limits: STAExecutionLimits, work: inout UInt64) throws {
+    private static func charge(_ amount: UInt64, limits: STAExecutionLimits, work: inout UInt64, budget: NativeSTAStateBudget) throws {
+        try budget.chargeScheduledWork(amount)
         try Task.checkCancellation()
         let next = work.addingReportingOverflow(amount)
         guard !next.overflow, next.partialValue <= limits.maximumPathWorkUnits else {

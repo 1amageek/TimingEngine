@@ -8,6 +8,10 @@ internal struct NativeSTAConservativeNumerics {
         let rows: Int
         let columns: Int
         var values: [I]
+        let payload: LibertySourceStorageReservation?
+        init(rows: Int, columns: Int, values: [I], payload: LibertySourceStorageReservation? = nil) {
+            self.rows = rows; self.columns = columns; self.values = values; self.payload = payload
+        }
         subscript(_ row: Int, _ column: Int) -> I {
             get { values[row * columns + column] }
             set { values[row * columns + column] = newValue }
@@ -17,6 +21,10 @@ internal struct NativeSTAConservativeNumerics {
     let budget: NativeSTAStateBudget
     let resources: (any LibertySourceResourceAccounting)?
 
+    func diagnostics<Retention: Sendable>(retaining owner: Retention) throws -> TimingControlledDiagnostics<Retention>? {
+        guard let resources = budget.transformResources else { return nil }
+        return try TimingControlledDiagnostics(resources: resources, retaining: owner)
+    }
     func tick(_ work: inout UInt64, _ count: Int = 1) throws {
         try Task.checkCancellation()
         try resources?.check()
@@ -24,6 +32,7 @@ internal struct NativeSTAConservativeNumerics {
         guard !total.overflow, total.partialValue <= limits.maximumPathWorkUnits else {
             throw STAPathAnalysisError.capacity(resource: "conservative RC work", limit: limits.maximumPathWorkUnits)
         }
+        try budget.chargeScheduledWork(UInt64(count))
         work = total.partialValue
     }
     func slots(_ count: Int) throws { try budget.reserve(count) }
@@ -38,11 +47,23 @@ internal struct NativeSTAConservativeNumerics {
             throw NativeSTAConservativeCouplingError.invalidPrimitive("matrix dimensions overflow")
         }
         try slots(count.partialValue)
-        return Matrix(rows: rows, columns: columns, values: Array(repeating: try I(point: 0), count: count.partialValue))
+        let payload = try budget.reservePayload(I.self, capacity: count.partialValue, kind: .liveOwnedBytes)
+        if budget.transformResources != nil { try Task.checkCancellation() }
+        try budget.chargeScheduledWork(UInt64(count.partialValue))
+        return Matrix(rows: rows, columns: columns, values: Array(repeating: try I(point: 0), count: count.partialValue), payload: payload)
     }
     func copy(_ input: Matrix) throws -> Matrix {
         try slots(input.values.count)
-        return input
+        guard budget.transformResources != nil else { return input }
+        let payload = try budget.reservePayload(I.self, capacity: input.values.count, kind: .liveOwnedBytes)
+        var values: [I] = []
+        values.reserveCapacity(input.values.count)
+        for value in input.values {
+            try Task.checkCancellation()
+            try budget.chargeScheduledWork(1)
+            values.append(value)
+        }
+        return Matrix(rows: input.rows, columns: input.columns, values: values, payload: payload)
     }
     func transpose(_ a: Matrix, work: inout UInt64) throws -> Matrix {
         var result = try matrix(a.columns, a.rows)
@@ -99,17 +120,20 @@ internal struct NativeSTAConservativeNumerics {
             } }
         }
     }
-    func midpoint(_ a: Matrix, work: inout UInt64) throws -> [Double] {
+    private func midpoint(_ a: Matrix, work: inout UInt64) throws -> (values: [Double], payload: LibertySourceStorageReservation?) {
         try slots(a.values.count)
+        let payload = try budget.reservePayload(Double.self, capacity: a.values.count, kind: .temporaryBytes)
         var result: [Double] = []
         result.reserveCapacity(a.values.count)
         for value in a.values { try tick(&work); result.append(value.lowerBound / 2 + value.upperBound / 2) }
-        return result
+        return (result, payload)
     }
     /// Ordinary Gauss-Jordan proposes an inverse. Only residual verification below admits it.
     func inverseCandidate(_ a: Matrix, work: inout UInt64) throws -> Matrix {
         let n = a.rows
-        var values = try midpoint(a, work: &work), inverse = try identity(n, work: &work)
+        var (values, midpointPayload) = try midpoint(a, work: &work)
+        defer { withExtendedLifetime(midpointPayload) {} }
+        var inverse = try identity(n, work: &work)
         for k in 0..<n {
             var pivot = k
             for i in k..<n { try tick(&work); if abs(values[i * n + k]) > abs(values[pivot * n + k]) { pivot = i } }
@@ -172,7 +196,9 @@ internal struct NativeSTAConservativeNumerics {
         // The ordinary inverse is used only to propose Q, whose exact entries are verified later.
         let z = try transpose(inverseCandidate(l, work: &work), work: &work)
         let raw = try product(transpose(z, work: &work), product(g, z, work: &work), work: &work)
-        var h = try midpoint(raw, work: &work), v = try identity(n, work: &work)
+        var (h, midpointPayload) = try midpoint(raw, work: &work)
+        defer { withExtendedLifetime(midpointPayload) {} }
+        var v = try identity(n, work: &work)
         if n > 1 { for _ in 0..<sweeps { for p in 0..<(n - 1) { for q in (p + 1)..<n {
             try tick(&work)
             let apq = h[p * n + q]

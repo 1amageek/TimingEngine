@@ -1,6 +1,6 @@
 import TimingCore
 
-internal struct NativeSTAClockWave {
+internal struct NativeSTAClockWave: Sendable {
     let rise: NativeSTAClockEvent
     let fall: NativeSTAClockEvent
     func event(_ edge: TimingEdge) -> NativeSTAClockEvent { edge == .rise ? rise : fall }

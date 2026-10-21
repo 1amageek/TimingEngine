@@ -159,3 +159,12 @@ binds the exact source, build and runtime evidence; `joint-slice-review-r1.json`
 (`fe02b63b6a45ab1edfdea5ddc6899b2ad153864f741ab7cfbdea1e600a88af9f`)
 records the one scoped review closed with no findings. The final document-only
 closure retains that finite behavioral scope.
+
+### Strict producer workspace
+
+When preparation supplies transform accounting, the existing source control passes
+that exact optional accountant to its existing state budget. Source selection,
+history semantics, context schema, and replay equality are unchanged. The shared
+ConservativeWires producer owns its typed construction buffers until their result
+or scratch lifetime ends; context-owned output admission remains this component's
+contract. A missing transform accountant retains the established legacy path.

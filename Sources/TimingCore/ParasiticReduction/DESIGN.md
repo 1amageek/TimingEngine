@@ -109,3 +109,16 @@ PEX canonical-terminal SPEF export exposes exact canonical pin tokens directly.
 Timing consumes actual CONN/CAP/RES tokens and values, not PEX's private identity
 annotation. Encoded-only generated PEX SPEF requires re-export in that explicit
 profile; Timing does not guess a canonical pin from its encoded spelling.
+
+## Controlled Reduction
+
+The additive controlled overload validates the same source inventory and mirrors
+with the same ordering and binary64 addition order. It reserves each concrete
+hash table from a source-proved maximum key count before construction; sparse
+per-key record buffers grow with admitted actual capacities. Output arrays and
+nested source/victim arrays retain their own leases. Temporary grouping buffers
+remain operation-local and are released before publication. Scheduled comparisons,
+visits, initialization and moves use the original cumulative accountant. No fresh
+quota, numerical approximation or missing-record fallback is introduced. Legacy
+reduction remains unchanged. Actual parity/resource tests passed within the
+[selected Native scope](../../STAEngine/PreparedExecution/DESIGN.md#strict-native-qualification-scope).

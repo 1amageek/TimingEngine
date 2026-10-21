@@ -54,15 +54,18 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
         let numerics: N
         let facts: NativeSTAConservativeResidualResponse.Facts
         let sourceHistories: [E: NativeSTAConservativeSourceHistory]
+        let transformRetention: NativeSTATransformRetention?
+        let historyRetention: NativeSTATransformRetention?
         init(parasitics: TimingParasitics, sources: [Source], receiverLoads: [E: Double], endpointRows: [E: Int],
             endpointSource: [E: Int], sourceIndices: [E: Int], sourceSlopes: N.Matrix, dcIncidence: S.CSR,
             thresholds: TimingCharacterizationThresholds, options: STAConservativeCoupledRCOptions,
             numerics: N, facts: NativeSTAConservativeResidualResponse.Facts,
-            sourceHistories: [E: NativeSTAConservativeSourceHistory] = [:]) {
+            sourceHistories: [E: NativeSTAConservativeSourceHistory] = [:],
+            transformRetention: NativeSTATransformRetention? = nil, historyRetention: NativeSTATransformRetention? = nil) {
             self.parasitics = parasitics; self.sources = sources; self.receiverLoads = receiverLoads
             self.endpointRows = endpointRows; self.endpointSource = endpointSource; self.sourceIndices = sourceIndices
             self.sourceSlopes = sourceSlopes; self.dcIncidence = dcIncidence; self.thresholds = thresholds
-            self.options = options; self.numerics = numerics; self.facts = facts; self.sourceHistories = sourceHistories
+            self.options = options; self.numerics = numerics; self.facts = facts; self.sourceHistories = sourceHistories; self.transformRetention = transformRetention; self.historyRetention = historyRetention
         }
     }
     internal struct ComparisonPrepared: Sendable {
@@ -88,19 +91,22 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
         let numerics: N
         let sourceCertificates: SourceCertificates?
         let sourceHistories: [E: NativeSTAConservativeSourceHistory]
+        let transformRetention: NativeSTATransformRetention?
+        let historyRetention: NativeSTATransformRetention?
         fileprivate init(parasitics: TimingParasitics, sources: [Source], receiverLoads: [E: Double], endpointRows: [E: Int], endpointSource: [E: Int],
             sourceIndices: [E: Int], dynamicRows: [Int], reconstruction: S.CSR, operatorA: S.CSR, forcingJ: S.CSR,
             comparison: S.CSR, weight: N.Matrix, alpha: Double, radius: N.Matrix, voltageError: N.Matrix,
             sourceSlopes: N.Matrix, dcIncidence: S.CSR, thresholds: TimingCharacterizationThresholds,
             options: STAConservativeCoupledRCOptions, numerics: N, sourceCertificates: SourceCertificates? = nil,
-            sourceHistories: [E: NativeSTAConservativeSourceHistory] = [:]) {
+            sourceHistories: [E: NativeSTAConservativeSourceHistory] = [:],
+            transformRetention: NativeSTATransformRetention? = nil, historyRetention: NativeSTATransformRetention? = nil) {
             self.parasitics = parasitics; self.sources = sources; self.receiverLoads = receiverLoads; self.endpointRows = endpointRows
             self.endpointSource = endpointSource; self.sourceIndices = sourceIndices; self.dynamicRows = dynamicRows
             self.reconstruction = reconstruction; self.operatorA = operatorA; self.forcingJ = forcingJ
             self.comparison = comparison; self.weight = weight; self.alpha = alpha; self.radius = radius
             self.voltageError = voltageError; self.sourceSlopes = sourceSlopes; self.dcIncidence = dcIncidence
             self.thresholds = thresholds; self.options = options; self.numerics = numerics; self.sourceCertificates = sourceCertificates
-            self.sourceHistories = sourceHistories
+            self.sourceHistories = sourceHistories; self.transformRetention = transformRetention; self.historyRetention = historyRetention
         }
     }
     internal struct SourceCertificates: Sendable {
@@ -123,14 +129,43 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
         limits: STAExecutionLimits, stateBudget: NativeSTAStateBudget,
         sourceResources: (any LibertySourceResourceAccounting)?, work: inout UInt64) throws -> Prepared {
         let numerical = N(limits: limits, budget: stateBudget, resources: sourceResources)
+        let scratch = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+        let retained = NativeSTATransformStorage(budget: stateBudget, kind: .liveOwnedBytes)
+        defer { withExtendedLifetime(scratch) {} }
+        let diagnostics = try numerical.diagnostics(retaining: (parasitics, sources, receiverLoads))
         try numerical.tick(&work); try numerical.slots(8)
         guard parasitics.hasDistributedTopology else { throw NativeSTAConservativeCouplingError.invalidPrimitive("exact resistance topology required") }
         let rise = try thresholdSpan(thresholds, rising: true), fall = try thresholdSpan(thresholds, rising: false)
         for value in [thresholds.inputRise, thresholds.inputFall, thresholds.outputRise, thresholds.outputFall] {
             guard value.isFinite, value > 0, value < 100 else { throw NativeSTAConservativeCouplingError.invalidSourceAuthority("invalid input/output threshold") }
         }
+        var endpointCapacity = sources.count
+        func addEndpointCapacity(_ count: Int, multiplier: Int = 1) throws {
+            let scaled = count.multipliedReportingOverflow(by: multiplier)
+            let total = endpointCapacity.addingReportingOverflow(scaled.partialValue)
+            guard !scaled.overflow, !total.overflow else { throw LibertySourceError.arithmeticOverflow }
+            endpointCapacity = total.partialValue
+        }
+        if stateBudget.transformResources != nil {
+            for network in parasitics.networks {
+                try numerical.tick(&work)
+                try addEndpointCapacity(network.connections.count)
+                try addEndpointCapacity(network.resistances.count, multiplier: 2)
+                try addEndpointCapacity(network.capacitances.count, multiplier: 2)
+            }
+            try scratch.reserve(E.self, capacity: endpointCapacity)
+            try scratch.reserveDictionary(E.self, Int.self, capacity: endpointCapacity)
+            try scratch.reserveDictionary(String.self, String.self, capacity: endpointCapacity)
+            try scratch.reserveSet(String.self, capacity: parasitics.networks.count)
+            try retained.reserveDictionary(E.self, Int.self, capacity: sources.count)
+        }
         var endpoints: [E] = [], index: [E: Int] = [:], netNames: Set<String> = [], sourceIndex: [E: Int] = [:]
         var endpointNames: [String: String] = [:]
+        if stateBudget.transformResources != nil {
+            endpoints.reserveCapacity(endpointCapacity); index.reserveCapacity(endpointCapacity)
+            endpointNames.reserveCapacity(endpointCapacity); netNames.reserveCapacity(parasitics.networks.count)
+            sourceIndex.reserveCapacity(sources.count)
+        }
         func admit(_ endpoint: E) throws {
             try numerical.tick(&work)
             guard !endpoint.name.isEmpty, !endpoint.ownerNet.isEmpty else { throw NativeSTAConservativeCouplingError.invalidPrimitive("empty endpoint") }
@@ -148,7 +183,11 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
                 network.resistanceInventory.isFinite, network.resistanceInventory >= 0 else {
                 throw NativeSTAConservativeCouplingError.invalidPrimitive("invalid network declaration")
             }
+            let connectionStorage = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+            defer { withExtendedLifetime(connectionStorage) {} }
+            try connectionStorage.reserveSet(E.self, capacity: network.connections.count)
             var connectionSet: Set<E> = []
+            if stateBudget.transformResources != nil { connectionSet.reserveCapacity(network.connections.count) }
             for endpoint in network.connections {
                 guard endpoint.ownerNet == network.name, connectionSet.insert(endpoint).inserted else { throw NativeSTAConservativeCouplingError.invalidPrimitive("connection ownership or duplicate") }
                 try numerical.slots(1); try admit(endpoint)
@@ -157,7 +196,16 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
             for cap in network.capacitances { try admit(cap.first); if let second = cap.second { try admit(second) }
                 capacitanceCount += 1; primitiveCount += 1 }
         }
-        for endpoint in endpoints where !netNames.contains(endpoint.ownerNet) { throw NativeSTAConservativeCouplingError.invalidPrimitive("endpoint references absent network: " + endpoint.ownerNet) }
+        for endpoint in endpoints where !netNames.contains(endpoint.ownerNet) {
+            if let diagnostics {
+                let bytes = try TimingDiagnosticTextCapacity.description(literal: "endpoint references absent network: ",
+                    ints: 0, doubles: 0, booleans: 0, additionalUTF8: UInt64(endpoint.ownerNet.utf8.count))
+                throw try diagnostics.sourceFailure(utf8ByteCount: bytes) {
+                    NativeSTAConservativeCouplingError.invalidPrimitive("endpoint references absent network: " + endpoint.ownerNet)
+                }
+            }
+            throw NativeSTAConservativeCouplingError.invalidPrimitive("endpoint references absent network: " + endpoint.ownerNet)
+        }
         var slopes = try numerical.matrix(sources.count, 1)
         for (j, source) in sources.enumerated() {
             try numerical.tick(&work, parasitics.networks.count); try numerical.slots(1)
@@ -177,7 +225,9 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
         }
         guard !sources.isEmpty else { throw NativeSTAConservativeCouplingError.invalidSourceAuthority("no canonical sources") }
         try numerical.slots(endpoints.count, times: 9)
-        var ideal = Array(endpoints.indices), resistive = ideal, coupled = ideal
+        var ideal = try scratch.map(endpoints.indices) { $0 }
+        var resistive = try scratch.map(endpoints.indices) { $0 }
+        var coupled = try scratch.map(endpoints.indices) { $0 }
         func root(_ i: Int, _ parent: [Int]) throws -> Int {
             var node = i
             while parent[node] != node { try numerical.tick(&work); node = parent[node] }
@@ -188,7 +238,11 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
             if a != b { parent[max(a, b)] = min(a, b) }
         }
         for network in parasitics.networks {
+            let networkStorage = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+            defer { withExtendedLifetime(networkStorage) {} }
+            try networkStorage.reserveSet(UInt64.self, capacity: network.resistances.count)
             var resistanceIDs: Set<UInt64> = []
+            if stateBudget.transformResources != nil { resistanceIDs.reserveCapacity(network.resistances.count) }
             for r in network.resistances {
                 try numerical.tick(&work); try numerical.slots(1)
                 guard r.source.declaringNet == network.name, r.source.identifier > 0, r.source.line > 0,
@@ -205,7 +259,9 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
                 if let second = c.second, c.capacitance > 0 { try join(index[c.first]!, index[second]!, &coupled) }
             }
         }
+        try scratch.reserveDictionary(Int.self, Int.self, capacity: endpoints.count)
         var componentCounts: [Int: Int] = [:]
+        if stateBudget.transformResources != nil { componentCounts.reserveCapacity(endpoints.count) }
         for i in endpoints.indices {
             try numerical.tick(&work)
             ideal[i] = try root(i, ideal); resistive[i] = try root(i, resistive); coupled[i] = try root(i, coupled)
@@ -214,7 +270,10 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
                 throw STAPathAnalysisError.capacity(resource: "conservative RC component nodes", limit: UInt64(options.maximumNodes))
             }
         }
+        try scratch.reserveDictionary(Int.self, Int.self, capacity: sources.count)
+        try scratch.reserveDictionary(Int.self, Int.self, capacity: sources.count)
         var componentSource: [Int: Int] = [:], idealSource: [Int: Int] = [:]
+        if stateBudget.transformResources != nil { componentSource.reserveCapacity(sources.count); idealSource.reserveCapacity(sources.count) }
         for (j, source) in sources.enumerated() {
             try numerical.tick(&work)
             let i = index[source.endpoint]!, rc = resistive[i]
@@ -236,15 +295,35 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
         guard !normalizerSlots.overflow else { throw NativeSTAConservativeCouplingError.invalidPrimitive("inventory workspace overflow") }
         try numerical.slots(normalizerSlots.partialValue)
         try numerical.tick(&work, normalizerWork.partialValue)
-        let mirrorGroups = try EquipotentialTimingParasiticReducer().reduce(parasitics).evidence.mirroredSourceGroups
-        try numerical.tick(&work)
         var skipped: Set<TimingParasitics.SourceID> = []
-        for group in mirrorGroups {
+        do {
+            let normalized: TimingTransformValue<TimingLumpedParasitics>?
+            let mirrorGroups: [[TimingParasitics.SourceID]]
+            if let transformResources = stateBudget.transformResources {
+                let value = try EquipotentialTimingParasiticReducer().reduce(parasitics, resources: transformResources)
+                normalized = value
+                mirrorGroups = value.value.evidence.mirroredSourceGroups
+            } else {
+                normalized = nil
+                mirrorGroups = try EquipotentialTimingParasiticReducer().reduce(parasitics).evidence.mirroredSourceGroups
+            }
+            defer { withExtendedLifetime(normalized) {} }
             try numerical.tick(&work)
-            guard group.count == 2 else { throw NativeSTAConservativeCouplingError.invalidPrimitive("invalid canonical mirror group") }
-            try numerical.slots(1); skipped.insert(max(group[0], group[1]))
+            try scratch.reserveSet(TimingParasitics.SourceID.self, capacity: mirrorGroups.count)
+            if stateBudget.transformResources != nil { skipped.reserveCapacity(mirrorGroups.count) }
+            for group in mirrorGroups {
+                try numerical.tick(&work)
+                guard group.count == 2 else { throw NativeSTAConservativeCouplingError.invalidPrimitive("invalid canonical mirror group") }
+                try numerical.slots(1); skipped.insert(max(group[0], group[1]))
+            }
         }
+        try scratch.reserveDictionary(Int.self, Int.self, capacity: endpoints.count)
+        try retained.reserveDictionary(E.self, Int.self, capacity: endpoints.count)
+        try retained.reserveDictionary(E.self, Int.self, capacity: endpoints.count)
         var classRows: [Int: Int] = [:], rows: [E: Int] = [:], endpointSource: [E: Int] = [:]
+        if stateBudget.transformResources != nil {
+            classRows.reserveCapacity(endpoints.count); rows.reserveCapacity(endpoints.count); endpointSource.reserveCapacity(endpoints.count)
+        }
         for i in endpoints.indices where idealSource[ideal[i]] == nil {
             try numerical.tick(&work)
             if classRows[ideal[i]] == nil { try numerical.slots(1); classRows[ideal[i]] = classRows.count }
@@ -271,7 +350,20 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
             try numerical.slots(options.maximumCertificateAttempts >= 4 ? 7 : 6)
             let candidates: [NativeSTAConservativeSparseBasis.Candidate] = nontrivial
                 ? [.localModal, .whitening, .identity] : [.identity]
+            let failureStorage = NativeSTATransformStorage(budget: stateBudget, kind: .temporaryBytes)
+            defer { withExtendedLifetime(failureStorage) {} }
             var failures: [String] = []
+            func recordFailure(_ label: StaticString, rejection: NativeSTAConservativeCandidateNotCertified, retaining error: any Error) throws {
+                try failureStorage.hold(error)
+                let length = rejection.reason.utf8.count.addingReportingOverflow(2)
+                guard !length.overflow else { throw LibertySourceError.arithmeticOverflow }
+                let bytes = try TimingDiagnosticTextCapacity.description(literal: label, ints: 0, doubles: 0,
+                    booleans: 0, additionalUTF8: UInt64(length.partialValue))
+                guard let capacity = Int(exactly: bytes) else { throw LibertySourceError.arithmeticOverflow }
+                try failureStorage.reserve(UInt8.self, capacity: capacity)
+                try stateBudget.chargeScheduledWork(bytes)
+                try failureStorage.append("\(label): \(rejection.reason)", to: &failures)
+            }
             for candidate in candidates.prefix(options.maximumCertificateAttempts) {
                 try numerical.tick(&work)
                 do {
@@ -280,34 +372,54 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
                     return .comparison(try prepareSparse(operators: operators, parasitics: parasitics, sources: sources,
                         receiverLoads: receiverLoads, rows: rows, endpointSource: endpointSource, sourceIndex: sourceIndex,
                         slopes: slopes, thresholds: thresholds, options: options, numerical: numerical,
-                        monotoneWeight: candidate == .whitening, work: &work))
-                } catch let rejected as NativeSTAConservativeCandidateNotCertified {
-                    failures.append("\(candidate): \(rejected.reason)")
+                        monotoneWeight: candidate == .whitening, transformRetention: try retained.finish(), work: &work))
+                } catch {
+                    guard let rejected = candidateRejection(error) else { throw error }
+                    let label: StaticString
+                    switch candidate { case .localModal: label = "localModal"; case .whitening: label = "whitening"; case .identity: label = "identity" }
+                    try recordFailure(label, rejection: rejected, retaining: error)
                 }
             }
             if options.maximumCertificateAttempts >= 4 {
                 try numerical.tick(&work)
                 do {
                     let receiverRows = try residualReceiverRows(receiverLoads: receiverLoads,
-                        endpointRows: rows, numerical: numerical, work: &work)
+                        endpointRows: rows, numerical: numerical, retaining: retained, work: &work)
                     let times = try residualTimes(reduced: reduced, sources: sources, thresholds: thresholds,
-                        numerical: numerical, work: &work)
+                        numerical: numerical, retaining: scratch, work: &work)
                     let certificate = try NativeSTAConservativeResidualCertificate(numerical: numerical)
                         .prepare(reduced, receiverRows: receiverRows, times: times, work: &work)
                     let facts = try NativeSTAConservativeResidualResponse(numerical: numerical).prepare(certificate, work: &work)
                     return .residual(ResidualPrepared(parasitics: parasitics, sources: sources, receiverLoads: receiverLoads,
                         endpointRows: rows, endpointSource: endpointSource, sourceIndices: sourceIndex,
                         sourceSlopes: slopes, dcIncidence: reduced.dcIncidence, thresholds: thresholds,
-                        options: options, numerics: numerical, facts: facts))
-                } catch let rejected as NativeSTAConservativeCandidateNotCertified {
-                    failures.append("residual: \(rejected.reason)")
+                        options: options, numerics: numerical, facts: facts, transformRetention: try retained.finish()))
+                } catch {
+                    guard let rejected = candidateRejection(error) else { throw error }
+                    try recordFailure("residual", rejection: rejected, retaining: error)
+                }
+            }
+            if let diagnostics {
+                var joinedBytes: UInt64 = 0
+                for (index, failure) in failures.enumerated() {
+                    let field = UInt64(failure.utf8.count).addingReportingOverflow(index == 0 ? 0 : 3)
+                    let sum = joinedBytes.addingReportingOverflow(field.partialValue)
+                    guard !field.overflow, !sum.overflow else { throw LibertySourceError.arithmeticOverflow }
+                    joinedBytes = sum.partialValue
+                }
+                let twice = joinedBytes.multipliedReportingOverflow(by: 2)
+                guard !twice.overflow else { throw LibertySourceError.arithmeticOverflow }
+                let bytes = try TimingDiagnosticTextCapacity.description(literal: "sparse coordinate candidates exhausted []",
+                    ints: 0, doubles: 0, booleans: 0, additionalUTF8: twice.partialValue)
+                throw try diagnostics.sourceFailure(utf8ByteCount: bytes) {
+                    NativeSTAConservativeCouplingError.invalidCertificate("sparse coordinate candidates exhausted [\(failures.joined(separator: " | "))]")
                 }
             }
             throw NativeSTAConservativeCouplingError.invalidCertificate("sparse coordinate candidates exhausted [" + failures.joined(separator: " | ") + "]")
         }
         var g = try numerical.matrix(n, n), c = try numerical.matrix(n, n), cs = try numerical.matrix(n, s), gs = try numerical.matrix(n, s)
         try numerical.slots(n)
-        var hasCapacitance = Array(repeating: false, count: n)
+        var hasCapacitance = try scratch.repeated(false, count: n)
         func stamp(_ a: E, _ b: E?, _ value: I, capacitance: Bool) throws {
             try numerical.tick(&work)
             let ai = index[a]!, bi = b.flatMap { index[$0] }
@@ -352,6 +464,7 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
         for i in l.values.indices { try numerical.tick(&work); l.values[i] = try l.values[i].adding(cs.values[i]) }
         try numerical.slots(n, times: 2)
         var dynamic: [Int] = [], algebraic: [Int] = []
+        try retained.reserve(Int.self, capacity: n); try scratch.reserve(Int.self, capacity: n)
         dynamic.reserveCapacity(n); algebraic.reserveCapacity(n)
         for row in 0..<n {
             try numerical.tick(&work)
@@ -381,7 +494,7 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
                 operatorA: try sparse(numerical.matrix(0, 0), numerical: numerical, work: &work), forcingJ: try sparse(numerical.matrix(0, s), numerical: numerical, work: &work), comparison: try sparse(numerical.matrix(0, 0), numerical: numerical, work: &work),
                 weight: try numerical.matrix(0, 1), alpha: 1, radius: try numerical.matrix(0, 1),
                 voltageError: try numerical.matrix(n, 1), sourceSlopes: slopes, dcIncidence: try sparse(p, numerical: numerical, work: &work),
-                thresholds: thresholds, options: options, numerics: numerical))
+                thresholds: thresholds, options: options, numerics: numerical, transformRetention: try retained.finish()))
         }
         try numerical.positiveDefinite(cr, capacitance: true, work: &work); try numerical.positiveDefinite(gr, work: &work)
         var failure = NativeSTAConservativeCouplingError.invalidCertificate("coordinate candidates exhausted")
@@ -424,7 +537,7 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
                 return .comparison(ComparisonPrepared(parasitics: parasitics, sources: sources, receiverLoads: receiverLoads, endpointRows: rows, endpointSource: endpointSource,
                     sourceIndices: sourceIndex, dynamicRows: dynamic, reconstruction: try sparse(t, numerical: numerical, work: &work), operatorA: try sparse(a, numerical: numerical, work: &work), forcingJ: try sparse(j, numerical: numerical, work: &work),
                     comparison: sparseF, weight: w, alpha: alpha, radius: radius, voltageError: error, sourceSlopes: slopes,
-                    dcIncidence: try sparse(p, numerical: numerical, work: &work), thresholds: thresholds, options: options, numerics: numerical))
+                    dcIncidence: try sparse(p, numerical: numerical, work: &work), thresholds: thresholds, options: options, numerics: numerical, transformRetention: try retained.finish()))
             } catch let rejected as NativeSTAConservativeCandidateNotCertified {
                 failure = .invalidCertificate(rejected.reason)
             } catch let error as NativeSTAConservativeCouplingError {
@@ -491,13 +604,13 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
                 operatorA: model.operatorA, forcingJ: model.forcingJ, comparison: model.comparison, weight: model.weight,
                 alpha: model.alpha, radius: model.radius, voltageError: model.voltageError, sourceSlopes: slopes,
                 dcIncidence: model.dcIncidence, thresholds: model.thresholds, options: model.options,
-                numerics: model.numerics, sourceCertificates: model.sourceCertificates, sourceHistories: model.sourceHistories))
+                numerics: model.numerics, sourceCertificates: model.sourceCertificates, sourceHistories: model.sourceHistories, transformRetention: model.transformRetention, historyRetention: model.historyRetention))
         case .residual(let model):
             return .residual(ResidualPrepared(parasitics: model.parasitics, sources: sources,
                 receiverLoads: model.receiverLoads, endpointRows: model.endpointRows, endpointSource: model.endpointSource,
                 sourceIndices: model.sourceIndices, sourceSlopes: slopes, dcIncidence: model.dcIncidence,
                 thresholds: model.thresholds, options: model.options, numerics: model.numerics, facts: model.facts,
-                sourceHistories: model.sourceHistories))
+                sourceHistories: model.sourceHistories, transformRetention: model.transformRetention, historyRetention: model.historyRetention))
         }
     }
 
@@ -518,7 +631,17 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
         let capacity = old.count.addingReportingOverflow(histories.count)
         guard !capacity.overflow else { throw NativeSTAConservativeCouplingError.invalidPrimitive("source history inventory overflow") }
         try numerical.slots(capacity.partialValue, times: 10)
+        let historyStorage = NativeSTATransformStorage(budget: numerical.budget, kind: .liveOwnedBytes)
+        let historyScratch = NativeSTATransformStorage(budget: numerical.budget, kind: .temporaryBytes)
+        defer { withExtendedLifetime(historyScratch) {} }
+        try historyStorage.reserveDictionary(E.self, NativeSTAConservativeSourceHistory.self, capacity: capacity.partialValue)
+        try historyScratch.reserveDictionary(String.self, Double.self, capacity: capacity.partialValue)
         var merged = old, periods: [String: Double] = [:]
+        if numerical.budget.transformResources != nil {
+            merged = [:]; merged.reserveCapacity(capacity.partialValue)
+            for (key, value) in old { try numerical.budget.chargeScheduledWork(1); merged[key] = value }
+            periods.reserveCapacity(capacity.partialValue)
+        }
         for value in old.values {
             try numerical.tick(&work)
             if case .clock(let clock) = value { periods[clock.rootIdentity] = clock.period }
@@ -578,19 +701,26 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
                 operatorA: model.operatorA, forcingJ: model.forcingJ, comparison: model.comparison, weight: model.weight,
                 alpha: model.alpha, radius: model.radius, voltageError: model.voltageError, sourceSlopes: model.sourceSlopes,
                 dcIncidence: model.dcIncidence, thresholds: model.thresholds, options: model.options,
-                numerics: model.numerics, sourceCertificates: model.sourceCertificates, sourceHistories: merged))
+                numerics: model.numerics, sourceCertificates: model.sourceCertificates, sourceHistories: merged, transformRetention: model.transformRetention, historyRetention: try historyStorage.finish()))
         case .residual(let model):
             return .residual(ResidualPrepared(parasitics: model.parasitics, sources: model.sources,
                 receiverLoads: model.receiverLoads, endpointRows: model.endpointRows, endpointSource: model.endpointSource,
                 sourceIndices: model.sourceIndices, sourceSlopes: model.sourceSlopes, dcIncidence: model.dcIncidence,
                 thresholds: model.thresholds, options: model.options, numerics: model.numerics, facts: model.facts,
-                sourceHistories: merged))
+                sourceHistories: merged, transformRetention: model.transformRetention, historyRetention: try historyStorage.finish()))
         }
     }
 
     func residualReceiverRows(receiverLoads: [E: Double],
-        endpointRows: [E: Int], numerical: N, work: inout UInt64) throws -> [Int] {
+        endpointRows: [E: Int], numerical: N, retaining output: NativeSTATransformStorage? = nil, work: inout UInt64) throws -> [Int] {
+        guard numerical.budget.transformResources == nil || output != nil else {
+            throw NativeSTAConservativeCouplingError.invalidPrimitive("strict receiver rows require their output owner")
+        }
+        let scratch = NativeSTATransformStorage(budget: numerical.budget, kind: .temporaryBytes)
+        defer { withExtendedLifetime(scratch) {} }
+        try scratch.reserveSet(Int.self, capacity: receiverLoads.count)
         var selected: Set<Int> = []
+        if numerical.budget.transformResources != nil { selected.reserveCapacity(receiverLoads.count) }
         func select(_ endpoint: E) throws {
             try numerical.tick(&work)
             // Prescribed terminals and their exact ideal aliases need no trajectory certificate.
@@ -600,11 +730,13 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
         // The host includes every queried terminal, including zero-load outputs; SPEF connections also contain internal nodes.
         for endpoint in receiverLoads.keys { try select(endpoint) }
         try numerical.slots(selected.count)
+        try output?.reserve(Int.self, capacity: selected.count)
+        try scratch.reserve(Int.self, capacity: selected.count)
         return try selected.sorted { left, right in try numerical.tick(&work); return left < right }
     }
 
     private func residualTimes(reduced: NativeSTAConservativeSparseGraph.Reduced, sources: [Source],
-        thresholds: TimingCharacterizationThresholds, numerical: N, work: inout UInt64) throws -> [Double] {
+        thresholds: TimingCharacterizationThresholds, numerical: N, retaining output: NativeSTATransformStorage, work: inout UInt64) throws -> [Double] {
         let rise = try thresholdSpan(thresholds, rising: true), fall = try thresholdSpan(thresholds, rising: false)
         let riseSpan = rise.lowerBound / 2 + rise.upperBound / 2
         let fallSpan = fall.lowerBound / 2 + fall.upperBound / 2
@@ -642,14 +774,17 @@ internal struct NativeSTAConservativeCoupling: NativeSTAConservativeCouplingSolv
             throw NativeSTAConservativeCandidateNotCertified(reason: "residual proposal grid scale is not finite and positive")
         }
         try numerical.tick(&work, 2); try numerical.slots(2)
-        var times = [0.0, min(seed, horizon)]
+        var times: [Double] = []
+        let timeSite = #line
+        try output.append(0.0, to: &times, site: timeSite)
+        try output.append(min(seed, horizon), to: &times, site: timeSite)
         while times[times.count - 1] < horizon {
             try numerical.tick(&work)
             let previous = times[times.count - 1], next = min(previous * (6.0 / 5.0).squareRoot().squareRoot(), horizon)
             guard next.isFinite, next > previous else {
                 throw NativeSTAConservativeCandidateNotCertified(reason: "residual proposal grid cannot make finite progress")
             }
-            try numerical.slots(1); times.append(next)
+            try numerical.slots(1); try output.append(next, to: &times, site: timeSite)
         }
         return times
     }
@@ -845,11 +980,11 @@ extension NativeSTAConservativeCoupling {
 
     private func sparse(_ matrix: N.Matrix, numerical: N, work: inout UInt64) throws -> S.CSR {
         try numerical.slots(matrix.rows)
-        var rows = Array(repeating: [Int: I](), count: matrix.rows)
+        var rows = try NativeSTAConservativeRowStorage(count: matrix.rows, numerical: numerical)
         for i in 0..<matrix.rows { for j in 0..<matrix.columns {
             try numerical.tick(&work)
             let value = matrix[i, j]
-            if value.lowerBound != 0 || value.upperBound != 0 { try numerical.slots(3); rows[i][j] = value }
+            if value.lowerBound != 0 || value.upperBound != 0 { try numerical.slots(3); try rows.set(value, row: i, column: j) }
         } }
         return try S(numerical: numerical).fromRows(rows, columns: matrix.columns, work: &work)
     }
@@ -872,14 +1007,16 @@ extension NativeSTAConservativeCoupling {
         parasitics: TimingParasitics, sources: [Source], receiverLoads: [E: Double], rows: [E: Int],
         endpointSource: [E: Int], sourceIndex: [E: Int], slopes: N.Matrix,
         thresholds: TimingCharacterizationThresholds, options: STAConservativeCoupledRCOptions,
-        numerical: N, monotoneWeight: Bool, work: inout UInt64) throws -> ComparisonPrepared {
+        numerical: N, monotoneWeight: Bool, transformRetention: NativeSTATransformRetention? = nil, work: inout UInt64) throws -> ComparisonPrepared {
+        let retained = NativeSTATransformStorage(budget: numerical.budget, kind: .liveOwnedBytes)
+        try retained.hold(transformRetention); try retained.hold(operators.transformRetention)
         let solver = S(numerical: numerical), d = operators.a.rows
         try numerical.slots(d)
-        var comparisonRows = Array(repeating: [Int: I](), count: d)
+        var comparisonRows = try NativeSTAConservativeRowStorage(count: d, numerical: numerical)
         for i in 0..<d { for offset in operators.a.rowOffsets[i]..<operators.a.rowOffsets[i + 1] {
             try numerical.tick(&work); try numerical.slots(3)
             let j = operators.a.columnIndices[offset], value = operators.a.values[offset]
-            comparisonRows[i][j] = try I(point: i == j ? value.upperBound : value.absolute().upperBound)
+            try comparisonRows.set(I(point: i == j ? value.upperBound : value.absolute().upperBound), row: i, column: j)
         } }
         let f = try solver.fromRows(comparisonRows, columns: d, work: &work)
         if d == 0 {
@@ -888,7 +1025,7 @@ extension NativeSTAConservativeCoupling {
                 reconstruction: operators.reconstruction, operatorA: operators.a, forcingJ: operators.j,
                 comparison: f, weight: try numerical.matrix(0, 1), alpha: 1, radius: try numerical.matrix(0, 1),
                 voltageError: try numerical.matrix(operators.reconstruction.rows, 1), sourceSlopes: slopes,
-                dcIncidence: operators.dcIncidence, thresholds: thresholds, options: options, numerics: numerical)
+                dcIncidence: operators.dcIncidence, thresholds: thresholds, options: options, numerics: numerical, transformRetention: try retained.finish())
         }
         var ones = try numerical.matrix(d, 1)
         for i in 0..<d { try numerical.tick(&work); ones[i, 0] = try I(point: 1) }
@@ -907,16 +1044,34 @@ extension NativeSTAConservativeCoupling {
             reconstruction: operators.reconstruction, operatorA: operators.a, forcingJ: operators.j,
             comparison: f, weight: w, alpha: alpha, radius: radius, voltageError: error, sourceSlopes: slopes,
             dcIncidence: operators.dcIncidence, thresholds: thresholds, options: options, numerics: numerical,
-            sourceCertificates: certificates)
+            sourceCertificates: certificates, transformRetention: try retained.finish())
+    }
+
+    private func candidateRejection(_ error: any Error) -> NativeSTAConservativeCandidateNotCertified? {
+        if let failure = error as? TimingControlledTransformFailure {
+            return failure.cause as? NativeSTAConservativeCandidateNotCertified
+        }
+        return error as? NativeSTAConservativeCandidateNotCertified
     }
 
     /// The whitening portfolio retains both finite proposals under one unchanged outward gate.
     func certifiedSparseWeight(comparison f: S.CSR, ones: N.Matrix, monotoneWeight: Bool,
         maximumIterations: Int, numerical: N, work: inout UInt64) throws -> (weight: N.Matrix, alpha: Double) {
         let solver = S(numerical: numerical)
+        let diagnostics = try numerical.diagnostics(retaining: (f, ones))
         if monotoneWeight {
             if let witness = try NativeSTAConservativeWeightDiagnostic.principalWitness(
                 comparison: f, numerical: numerical, work: &work) {
+                if let diagnostics {
+                    let nested = try witness.descriptionByteCountUpperBound
+                    let twice = nested.multipliedReportingOverflow(by: 2)
+                    guard !twice.overflow else { throw LibertySourceError.arithmeticOverflow }
+                    let total = try TimingDiagnosticTextCapacity.description(literal: "principal comparison proved non-Hurwitz []",
+                        ints: 0, doubles: 0, booleans: 0, additionalUTF8: twice.partialValue)
+                    throw try diagnostics.sourceFailure(utf8ByteCount: total) {
+                        NativeSTAConservativeCandidateNotCertified(reason: "principal comparison proved non-Hurwitz [\(witness)]")
+                    }
+                }
                 throw NativeSTAConservativeCandidateNotCertified(reason: "principal comparison proved non-Hurwitz [\(witness)]")
             }
         }
@@ -924,13 +1079,27 @@ extension NativeSTAConservativeCoupling {
             let proposed = try solver.approximateSolve(solver.negated(f, work: &work), ones,
                 maximumIterations: maximumIterations, work: &work)
             return try admitSparseWeight(proposed, comparison: f, numerical: numerical, work: &work)
-        } catch let first as NativeSTAConservativeCandidateNotCertified {
-            guard monotoneWeight else { throw first }
+        } catch {
+            let firstFailure = error
+            defer { withExtendedLifetime(firstFailure) {} }
+            guard let first = candidateRejection(firstFailure), monotoneWeight else { throw firstFailure }
             try numerical.slots(2)
             do {
                 let proposed = try solver.comparisonWeightCandidate(f, maximumIterations: maximumIterations, work: &work)
                 return try admitSparseWeight(proposed, comparison: f, numerical: numerical, work: &work)
-            } catch let second as NativeSTAConservativeCandidateNotCertified {
+            } catch {
+                defer { withExtendedLifetime(error) {} }
+                guard let second = candidateRejection(error) else { throw error }
+                if let diagnostics {
+                    let sum = first.reason.utf8.count.addingReportingOverflow(second.reason.utf8.count)
+                    guard !sum.overflow else { throw LibertySourceError.arithmeticOverflow }
+                    let bytes = try TimingDiagnosticTextCapacity.description(literal: "whitening weight candidates exhausted [BiCG:  | GS: ]",
+                        ints: 0, doubles: 0, booleans: 0, additionalUTF8: UInt64(sum.partialValue))
+                    throw try diagnostics.sourceFailure(utf8ByteCount: bytes) {
+                        NativeSTAConservativeCandidateNotCertified(reason:
+                            "whitening weight candidates exhausted [BiCG: \(first.reason) | GS: \(second.reason)]")
+                    }
+                }
                 throw NativeSTAConservativeCandidateNotCertified(reason:
                     "whitening weight candidates exhausted [BiCG: \(first.reason) | GS: \(second.reason)]")
             }
@@ -940,11 +1109,22 @@ extension NativeSTAConservativeCoupling {
     private func admitSparseWeight(_ w: N.Matrix, comparison f: S.CSR,
         numerical: N, work: inout UInt64) throws -> (weight: N.Matrix, alpha: Double) {
         let solver = S(numerical: numerical)
+        let diagnostics = try numerical.diagnostics(retaining: (f, w))
         for i in 0..<f.rows {
             try numerical.tick(&work)
             guard w[i, 0].lowerBound > 0, w[i, 0].lowerBound == w[i, 0].upperBound else {
                 let diagnostic = try NativeSTAConservativeWeightDiagnostic.evaluate(comparison: f, candidate: w,
                     numerical: numerical, work: &work)
+                if let diagnostics {
+                    let nested = try diagnostic.descriptionByteCountUpperBound
+                    let twice = nested.multipliedReportingOverflow(by: 2)
+                    guard !twice.overflow else { throw LibertySourceError.arithmeticOverflow }
+                    let total = try TimingDiagnosticTextCapacity.description(literal: "sparse comparison weight not positive [ transformedCoordinateRow=]",
+                        ints: 1, doubles: 0, booleans: 0, additionalUTF8: twice.partialValue)
+                    throw try diagnostics.sourceFailure(utf8ByteCount: total) {
+                        NativeSTAConservativeCandidateNotCertified(reason: "sparse comparison weight not positive [\(diagnostic) transformedCoordinateRow=\(diagnostic.minimumWeightRow)]")
+                    }
+                }
                 throw NativeSTAConservativeCandidateNotCertified(reason: "sparse comparison weight not positive [\(diagnostic) transformedCoordinateRow=\(diagnostic.minimumWeightRow)]")
             }
         }

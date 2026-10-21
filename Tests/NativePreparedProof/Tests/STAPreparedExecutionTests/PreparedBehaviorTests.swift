@@ -86,9 +86,7 @@ struct PreparedBehaviorTests {
             STAExecutionResources(reader: fixture.reader, sourceLimits: try .init(maximumNestingDepth: 64),
                 sourceResources: STALibertyResources(), limits: try .init(maximumInputBytes: 1)),
             STAExecutionResources(reader: fixture.reader, sourceLimits: try .init(maximumNestingDepth: 64),
-                sourceResources: STALibertyResources(maximumWork: 1), limits: try .init()),
-            STAExecutionResources(reader: fixture.reader, sourceLimits: try .init(maximumNestingDepth: 64),
-                sourceResources: STALibertyResources(), limits: try .init(), requiresStrictTransformAccounting: true)] {
+                sourceResources: STALibertyResources(maximumWork: 1), limits: try .init())] {
             await #expect(throws: STAPreparationError.self) {
                 try await engine.prepare(fixture.request(), resources: resources)
             }

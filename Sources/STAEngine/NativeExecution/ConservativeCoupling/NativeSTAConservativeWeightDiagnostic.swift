@@ -7,6 +7,17 @@ internal struct NativeSTAConservativeWeightDiagnostic: Sendable, Equatable, Cust
         case reciprocalPair(first: Int, second: Int, firstDiagonal: Double, secondDiagonal: Double,
                             forward: Double, reverse: Double, determinantUpper: Double)
 
+        var descriptionByteCountUpperBound: UInt64 {
+            get throws {
+                switch self {
+                case .diagonal:
+                    return try TimingDiagnosticTextCapacity.description(literal: "diagonal transformedCoordinateRow= coefficient=", ints: 1, doubles: 1, booleans: 0)
+                case .reciprocalPair:
+                    return try TimingDiagnosticTextCapacity.description(literal: "reciprocalPair transformedCoordinateRows=, Fii= Fjj= Fij= Fji= determinantUpper=", ints: 2, doubles: 5, booleans: 0)
+                }
+            }
+        }
+
         var description: String {
             switch self {
             case .diagonal(let row, let coefficient):
@@ -32,6 +43,13 @@ internal struct NativeSTAConservativeWeightDiagnostic: Sendable, Equatable, Cust
     let minimumCertifiedSupportedLower: Double?
     let comparisonIsMetzler: Bool
     let comparisonNonHurwitzProved: Bool
+
+    var descriptionByteCountUpperBound: UInt64 {
+        get throws {
+            let witness = try principalNonHurwitzWitness?.descriptionByteCountUpperBound ?? 4
+            return try TimingDiagnosticTextCapacity.description(literal: "rows= nnz= minimumWeight= maximumWeight= minimumWeightRow= negativeWeights= zeroWeights= trueResidualMaximumAbsoluteUpper= minimumDirectSupportedLower= minimumResidualDerivedSupportedLower= minimumCertifiedSupportedLower= comparisonIsMetzler= comparisonNonHurwitzProved= principalNonHurwitzWitness=", ints: 5, doubles: 6, booleans: 2, additionalUTF8: witness)
+        }
+    }
 
     var description: String {
         "rows=\(dimension) nnz=\(nonzeros) minimumWeight=\(minimumWeight) maximumWeight=\(maximumWeight) minimumWeightRow=\(minimumWeightRow) negativeWeights=\(negativeWeights) zeroWeights=\(zeroWeights) trueResidualMaximumAbsoluteUpper=\(trueResidualMaximumAbsoluteUpper) minimumDirectSupportedLower=\(text(minimumDirectSupportedLower)) minimumResidualDerivedSupportedLower=\(text(minimumResidualDerivedSupportedLower)) minimumCertifiedSupportedLower=\(text(minimumCertifiedSupportedLower)) comparisonIsMetzler=\(comparisonIsMetzler) comparisonNonHurwitzProved=\(comparisonNonHurwitzProved) principalNonHurwitzWitness=\(principalNonHurwitzWitness.map { $0.description } ?? "none")"
@@ -106,6 +124,9 @@ internal struct NativeSTAConservativeWeightDiagnostic: Sendable, Equatable, Cust
             throw NativeSTAConservativeCouplingError.invalidCertificate("principal diagnostic CSR shape")
         }
         try numerical.slots(n); try numerical.slots(8)
+        let payload = try numerical.budget.reservePayload(Double.self, capacity: n, kind: .temporaryBytes)
+        defer { withExtendedLifetime(payload) {} }
+        try numerical.budget.chargeScheduledWork(UInt64(n))
         var diagonal = Array(repeating: 0.0, count: n)
         var metzler = true
         for row in 0..<n {

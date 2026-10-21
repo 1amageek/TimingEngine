@@ -217,3 +217,16 @@ The [current dependency contract](DESIGN.md#current-simulation-parameter-depende
 selects PDKKit `1bd686f8a4b47a90ef136b5f7dbcca7390971b8e`.
 Its CoreSpice source is `82eb35e8bc57402880db3529c8a1dc2045349d87`; CF `5f132c58` and SDK `1.2.0` remain fixed.
 Source behavior is retained; final Physical integration owns new consumer execution.
+
+
+## Controlled Native public dependency floor
+
+The [selected public dependency contract](DESIGN.md#stable-public-floor-and-controlled-native-integration)
+uses CF and ToolQualification `26.1021.1`, LogicDesign `9fbffcb1`, and PDKKit
+`82fddd54`. CoreSpice `2b22cd47` and SDK `1.2.2` are transitive dependencies.
+Earlier receipts retain their original graph. The selected strict Native host
+gates passed on this resolved public graph; their actual product composition and
+finite logical-payload scope are recorded in the
+[owning qualification contract](Sources/STAEngine/PreparedExecution/DESIGN.md#strict-native-qualification-scope).
+This does not establish a hard RSS bound, WASM behavior, complete history/corner
+coverage, physical qualification or the separate genuine whole-flow CLI.

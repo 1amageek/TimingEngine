@@ -319,3 +319,16 @@ output-slew extrema are independent across every possible branch. Epoch/window
 arithmetic is directed; an unproved integer epoch boundary is inconclusive rather
 than selecting a favorable phase. Existing observed/point transfer behavior is
 preserved when no range receipts are supplied.
+
+## Strict Transform Admission
+
+The parent Native state budget supplies the same optional caller transform ledger.
+New plan arrays and symbol-compartment maps have concrete typed pre-growth leases;
+shared original source binding arrays retain their existing owners instead of
+being charged as copies. A plan or static-control result carries its immutable
+anchors into the PathAnalysis owner. The mechanical Boolean evaluator's one
+LogicBit buffer is admitted by its existing pre-allocation callback and released
+after evaluation. Transfer candidate buffers are retained through completion.
+Logical source-work charges already made to the original source accountant are
+not duplicated by an additional ledger. Nil transform admission preserves legacy
+behavior. No sequential or Boolean semantics are added by this accounting path.

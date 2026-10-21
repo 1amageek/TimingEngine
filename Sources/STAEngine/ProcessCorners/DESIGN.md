@@ -98,3 +98,19 @@ Profile mode consumes the checked retained catalog; ordinary mode verifies sourc
 identity through the reader and owned codec. Execution retains distinct source
 owners and never reopens source paths. [PreparedExecution](../PreparedExecution/DESIGN.md)
 owns effective settings, explicit characterization policies and handoff lifetime.
+
+## Strict Input Join
+
+The strict lane reads the exact manifest through the controlled reader and uses
+PDKDiscovery's audited raw-span decode/validation. The original artifact reference
+remains request authority; the raw decoder's nil sourceReference grants none.
+The complete manifest/report handle is retained by the selected process inputs,
+including every copy, so selected corner subvalues never shed their leases.
+Concrete corner/asset/reference/source tables are admitted before construction on
+the same Native transform budget. Whitespace/digest comparisons borrow the actual
+strings; no unaccounted trimming/lowercase result is synthesized. Liberty reads
+retain their read anchor through actual byte comparison/parse, and the parser's
+owned source thereafter owns the bytes. Failures preserve whole PDK controlled
+failure anchors, including source-derived diagnostic strings. Legacy load is
+unchanged. Actual strict join tests passed within the selected
+[Native qualification](../PreparedExecution/DESIGN.md#strict-native-qualification-scope).

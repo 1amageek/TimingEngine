@@ -10,14 +10,21 @@ internal struct NativeSTAConservativeSparseNumerics {
         let rowOffsets: [Int]
         let columnIndices: [Int]
         let values: [I]
-        fileprivate init(rows: Int, columns: Int, rowOffsets: [Int], columnIndices: [Int], values: [I]) {
+        fileprivate let offsetPayload: LibertySourceStorageReservation?
+        fileprivate let indexPayload: LibertySourceStorageReservation?
+        fileprivate let valuePayload: LibertySourceStorageReservation?
+        fileprivate init(rows: Int, columns: Int, rowOffsets: [Int], columnIndices: [Int], values: [I],
+                         offsetPayload: LibertySourceStorageReservation? = nil,
+                         indexPayload: LibertySourceStorageReservation? = nil,
+                         valuePayload: LibertySourceStorageReservation? = nil) {
             self.rows = rows; self.columns = columns; self.rowOffsets = rowOffsets
             self.columnIndices = columnIndices; self.values = values
+            self.offsetPayload = offsetPayload; self.indexPayload = indexPayload; self.valuePayload = valuePayload
         }
     }
     let numerical: N
 
-    func fromRows(_ rows: [[Int: I]], columns: Int, work: inout UInt64) throws -> CSR {
+    func fromRows<Rows: Collection>(_ rows: Rows, columns: Int, work: inout UInt64) throws -> CSR where Rows.Element == [Int: I] {
         guard columns >= 0 else { throw invalid("negative sparse dimension") }
         var count = 0
         for row in rows {
@@ -32,11 +39,19 @@ internal struct NativeSTAConservativeSparseNumerics {
             }
         }
         try numerical.slots(rows.count + 1); try numerical.slots(count, times: 2)
+        let offsetPayload = try numerical.budget.reservePayload(Int.self, capacity: rows.count + 1, kind: .liveOwnedBytes)
+        let indexPayload = try numerical.budget.reservePayload(Int.self, capacity: count, kind: .liveOwnedBytes)
+        let valuePayload = try numerical.budget.reservePayload(I.self, capacity: count, kind: .liveOwnedBytes)
         var offsets = [Int](); offsets.reserveCapacity(rows.count + 1); offsets.append(0)
         var indices = [Int](); indices.reserveCapacity(count)
         var values = [I](); values.reserveCapacity(count)
         for row in rows {
             try numerical.slots(row.count)
+            let keyPayload = try numerical.budget.reservePayload(Int.self, capacity: row.count, kind: .temporaryBytes)
+            // Sorting may hold its input and merge scratch simultaneously.
+            let sortPayload = try numerical.budget.reservePayload(Int.self, capacity: row.count, kind: .temporaryBytes)
+            defer { withExtendedLifetime((keyPayload, sortPayload)) {} }
+            try numerical.budget.chargeScheduledWork(UInt64(row.count))
             let keys = try row.keys.sorted { left, right in
                 try numerical.tick(&work)
                 return left < right
@@ -48,7 +63,8 @@ internal struct NativeSTAConservativeSparseNumerics {
             }
             offsets.append(values.count)
         }
-        return CSR(rows: rows.count, columns: columns, rowOffsets: offsets, columnIndices: indices, values: values)
+        return CSR(rows: rows.count, columns: columns, rowOffsets: offsets, columnIndices: indices, values: values,
+                   offsetPayload: offsetPayload, indexPayload: indexPayload, valuePayload: valuePayload)
     }
 
     func product(_ a: CSR, _ rhs: N.Matrix, work: inout UInt64) throws -> N.Matrix {
@@ -69,16 +85,20 @@ internal struct NativeSTAConservativeSparseNumerics {
 
     func negated(_ a: CSR, work: inout UInt64) throws -> CSR {
         try numerical.slots(a.values.count)
+        let payload = try numerical.budget.reservePayload(I.self, capacity: a.values.count, kind: .liveOwnedBytes)
         var values = [I](); values.reserveCapacity(a.values.count)
         for value in a.values { try numerical.tick(&work); values.append(try value.negated()) }
-        return CSR(rows: a.rows, columns: a.columns, rowOffsets: a.rowOffsets, columnIndices: a.columnIndices, values: values)
+        return CSR(rows: a.rows, columns: a.columns, rowOffsets: a.rowOffsets, columnIndices: a.columnIndices, values: values,
+                   offsetPayload: a.offsetPayload, indexPayload: a.indexPayload, valuePayload: payload)
     }
 
     func magnitude(_ a: CSR, work: inout UInt64) throws -> CSR {
         try numerical.slots(a.values.count)
+        let payload = try numerical.budget.reservePayload(I.self, capacity: a.values.count, kind: .liveOwnedBytes)
         var values = [I](); values.reserveCapacity(a.values.count)
         for value in a.values { try numerical.tick(&work); values.append(try I(point: value.absolute().upperBound)) }
-        return CSR(rows: a.rows, columns: a.columns, rowOffsets: a.rowOffsets, columnIndices: a.columnIndices, values: values)
+        return CSR(rows: a.rows, columns: a.columns, rowOffsets: a.rowOffsets, columnIndices: a.columnIndices, values: values,
+                   offsetPayload: a.offsetPayload, indexPayload: a.indexPayload, valuePayload: payload)
     }
 
     /// Left-Jacobi BiCGStab proposes finite binary point values; convergence is not proof.
@@ -89,6 +109,13 @@ internal struct NativeSTAConservativeSparseNumerics {
         var result = try numerical.matrix(n, rhs.columns)
         if n == 0 { return result }
         try numerical.slots(n, times: 9); try numerical.slots(a.values.count)
+        let vectorCount = n.multipliedReportingOverflow(by: 9)
+        guard !vectorCount.overflow else { throw invalid("sparse scratch count overflow") }
+        let vectorPayload = try numerical.budget.reservePayload(Double.self, capacity: vectorCount.partialValue, kind: .temporaryBytes)
+        let valuesPayload = try numerical.budget.reservePayload(Double.self, capacity: a.values.count, kind: .temporaryBytes)
+        defer { withExtendedLifetime((vectorPayload, valuesPayload)) {} }
+        try numerical.budget.chargeScheduledWork(UInt64(vectorCount.partialValue))
+        try numerical.budget.chargeScheduledWork(UInt64(a.values.count))
         var diagonal = Array(repeating: 0.0, count: n)
         var values = Array(repeating: 0.0, count: a.values.count)
         let sparseWork = a.values.count.addingReportingOverflow(n)
@@ -206,6 +233,13 @@ internal struct NativeSTAConservativeSparseNumerics {
         let operationWork = f.values.count.addingReportingOverflow(n)
         guard !operationWork.overflow else { throw invalid("comparison weight operation count overflow") }
         try numerical.slots(n, times: 2); try numerical.slots(f.values.count)
+        let vectorCount = n.multipliedReportingOverflow(by: 2)
+        guard !vectorCount.overflow else { throw invalid("comparison scratch count overflow") }
+        let vectorPayload = try numerical.budget.reservePayload(Double.self, capacity: vectorCount.partialValue, kind: .temporaryBytes)
+        let valuesPayload = try numerical.budget.reservePayload(Double.self, capacity: f.values.count, kind: .temporaryBytes)
+        defer { withExtendedLifetime((vectorPayload, valuesPayload)) {} }
+        try numerical.budget.chargeScheduledWork(UInt64(vectorCount.partialValue))
+        try numerical.budget.chargeScheduledWork(UInt64(f.values.count))
         var diagonal = Array(repeating: 0.0, count: n)
         var values = Array(repeating: 0.0, count: f.values.count)
         var weights = Array(repeating: 0.0, count: n)

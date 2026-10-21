@@ -6,7 +6,7 @@ internal enum STASourceRoleInventory {
     static func scenario(design: TimingDesign, source: OwnedLibertySource, library: ArtifactReference,
                          mode: String, corner: String, limits: STAExecutionLimits,
                          resources: any LibertySourceResourceAccounting, stateBudget: NativeSTAStateBudget,
-                         work: inout UInt64) throws -> [STASourceEvidence.Role] {
+                         work: inout UInt64, transformStorage: NativeSTATransformStorage? = nil) throws -> [STASourceEvidence.Role] {
         var roles: [STASourceEvidence.Role] = []
         func append(_ role: STASourceEvidence.Role) throws {
             try resources.check(); try Task.checkCancellation()
@@ -18,7 +18,9 @@ internal enum STASourceRoleInventory {
                 throw STAPreparationError.capacity("Source role inventory exceeds the state allowance")
             }
             try stateBudget.reserve(1); try resources.chargeWork(1)
-            work = next.partialValue; roles.append(role)
+            work = next.partialValue
+            if let transformStorage { try transformStorage.append(role, to: &roles) }
+            else { roles.append(role) }
         }
         for instance in design.instances {
             try resources.check()

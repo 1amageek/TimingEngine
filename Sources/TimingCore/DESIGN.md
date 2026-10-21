@@ -204,3 +204,19 @@ and public-reader roundtrip. Original immutable and output-symlink tests remain.
 The actual public CLI missing-output failure and actual public post-init drift
 receipt are the pre-fix counterexamples. Only this artifact path and its API/CLI
 save/reload consumer require requalification; no timing numerical model changes.
+
+Child [SourceTransforms](SourceTransforms/DESIGN.md) owns additive controlled artifact intake and paired byte retention. Its capability does not remove Native strict-transform refusal before all transform owners are wired.
+
+### Characterized Matching During Controlled Native Execution
+
+`CharacterizedTimingLibrary` resolves checks, propagation/control arcs, source
+tables and pulse laws by ordered count/first scans over retained source arrays.
+No matching array is materialized. Fixed two-coordinate/rise-fall validation
+uses ordered scalar calls, and the singleton zero axis uses a direct count/value
+condition. Each scan spends the existing source
+accountant before examining its next element; missing/duplicate classifications,
+source identities, lookup operands and point/range arithmetic remain unchanged.
+`LibertySourceSampleTests`, `CharacterizedRangeEvaluationTests` and
+`LibertyPulseWidthTests` own the affected source evaluation behavior. The Native
+strict transform tests compose those same owners with the cumulative payload
+ledger; this change grants no new characterization or source-family authority.

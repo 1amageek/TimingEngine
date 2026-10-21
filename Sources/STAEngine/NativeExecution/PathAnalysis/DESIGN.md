@@ -423,3 +423,35 @@ cache generations, Q-before-clock refusal, unsupported-control/power facts,
 qualified Q hold/skip behavior and exact required receiver/source coverage.
 
 The [initial source context](../ConservativeCoupling/SourceFamilies/DESIGN.md) uses the same constants, loads and initial source selection before response preparation. Its separate initialRoots operation does not run refinement or derived history publication.
+
+## Strict Native Transform Payloads
+
+The caller's optional Native state-budget transform ledger is propagated into
+actual graph, route, source-evidence and sequential execution owners. Concrete
+array/map/set element payloads and newly constructed UTF-8 strings are admitted
+before growth; old and replacement logical buffers coexist during copying.
+Scratch leases follow the graph or lexical workspace, while published path and
+source-observation payloads retain their own leases through final result copies.
+Logical state-slot admission remains separate from typed byte admission, and
+loop/copy work spends the same cumulative caller allowance with bounded checks.
+No maximum element stride or unproved source-byte multiplier represents this graph.
+
+ConservativeWires source/context/observation arrays and history-map output owners
+retain their typed transform reservations; numerical implementation and lifetimes
+follow the [ConservativeCoupling](../ConservativeCoupling/DESIGN.md) child contract.
+This change adds resource admission and retention only; source roles, timing
+math, endpoint classification and numerical certification retain their existing
+owners and exact semantics. Nil transform accounting keeps legacy behavior.
+
+The component-local transform storage builder is construction-confined. It admits
+its concrete reservation/parent-owner table before growing that table, and moves
+that table into an immutable retention carrier at publication. Scratch builders
+end at the lexical analysis workspace boundary; a successful finish drops the
+construction-only array-owner lookup backing before refunding its temporary
+metadata lease. The completed result already retains every actual buffer anchor,
+so the lookup is not part of published payload ownership. Result builders are
+retained by scenario results, STAPayload and STAExecutionResult. Carrier identity is excluded
+from semantic equality, hashing and Codable. A detached public Array requires the
+caller to keep the corresponding whole result alive; Array-only copies do not
+transport this separate admission authority. Numerical observation owners may
+contribute their existing immutable anchors without re-admitting their buffers.

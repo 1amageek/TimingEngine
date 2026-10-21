@@ -164,3 +164,32 @@ new external history input or duplicate Boolean evaluator is introduced. The nil
 distributed/observed modes retain their existing behavior. Verification covers
 shared/inverted cones, frontier ordering, wrong-root and whole-band fallback,
 unknown histories, cumulative limits and exact fresh replay.
+
+
+## Strict Transform Payload Ownership
+
+Optional transform accounting is borrowed from the original scenario state
+budget. Exact clock topology collections and per-event segment arrays are
+admitted by their concrete element types before filling or concatenating. Local
+cone/frontier scratch ends at its lexical operation; escaping wave/observation
+owners retain their reservations across copies. Text concatenations admit their
+actual source UTF-8 lengths before allocation. The same accountant receives
+scheduled work and pre/post callback cancellation checks, without a new budget.
+
+Nil-accountant propagation, edge identity, polarity, phase, interval arithmetic
+and guards remain unchanged. New `NativeStrictNumerical` tests cover actual
+propagated clock construction and refusal/refund boundaries. Qualification waits
+for the stable combined source and runtime; no source-family scope is extended.
+
+Preparation occurs before a Native logical-state owner exists. Its trailing
+`transformResources` is the original intake accountant, not a new budget.
+`NativeSTAClockCharacterization` retains its exact sorted inventories and receiver
+UTF-8 names across copies; lexical cone/set/sort buffers return on exit. Runtime
+uses the existing state budget. Each event owns its typed segment array and a
+separate immutable text lineage; copying a path preserves shared text admission
+without retaining dead predecessor array reservations. `finishTransformRetention`
+seals the final map/observation carrier after all queries. PulsePropagation uses
+the same segment construction contract. Source pin and arc scans use stored
+collections or bounded admitted filters rather than unadmitted computed arrays.
+The direct accountant uses the same check/work/cancel ordering without inventing
+a preparation logical-state ceiling.

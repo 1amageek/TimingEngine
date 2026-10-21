@@ -11,6 +11,10 @@ internal struct NativeSTAConservativeResidualCandidate {
         let start: Double
         let end: Double
         let bernstein: [N.Matrix]
+        let payload: LibertySourceStorageReservation?
+        init(start: Double, end: Double, bernstein: [N.Matrix], payload: LibertySourceStorageReservation? = nil) {
+            self.start = start; self.end = end; self.bernstein = bernstein; self.payload = payload
+        }
     }
 
     struct Session: ~Copyable {
@@ -48,6 +52,7 @@ internal struct NativeSTAConservativeResidualCandidate {
         private struct Block {
             let rows: [Int]
             let lower: [Double]
+            let payload: LibertySourceStorageReservation?
         }
         private let reduced: NativeSTAConservativeSparseGraph.Reduced
         private let numerical: N
@@ -71,6 +76,11 @@ internal struct NativeSTAConservativeResidualCandidate {
         private var f0: [Double] = []
         private var f1: [Double] = []
         private var coefficients: [N.Matrix] = []
+        private var scalarPayload: LibertySourceStorageReservation?
+        private var workPayload: LibertySourceStorageReservation?
+        private var blockPayload: LibertySourceStorageReservation?
+        private var blockScratchPayload: LibertySourceStorageReservation?
+        private var coefficientPayload: LibertySourceStorageReservation?
         private var closed = false
 
         init(reduced: NativeSTAConservativeSparseGraph.Reduced, numerical: N, work: inout UInt64) throws {
@@ -85,18 +95,27 @@ internal struct NativeSTAConservativeResidualCandidate {
                 try gFactor!.factor(conductanceScale: 1, capacitanceScale: 0, work: &work)
                 try numerical.slots(reduced.conductance.values.count + reduced.capacitance.values.count)
                 try numerical.tick(&work, reduced.conductance.values.count + reduced.capacitance.values.count)
+                let scalarCount = reduced.conductance.values.count.addingReportingOverflow(reduced.capacitance.values.count)
+                guard !scalarCount.overflow else { throw Self.invalid("candidate scalar storage overflow") }
+                scalarPayload = try numerical.budget.reservePayload(Double.self, capacity: scalarCount.partialValue, kind: .temporaryBytes)
                 gValues = reduced.conductance.values.map { $0.lowerBound / 2 + $0.upperBound / 2 }
                 cValues = reduced.capacitance.values.map { $0.lowerBound / 2 + $0.upperBound / 2 }
                 try prepareBlocks(work: &work)
                 let count = rows.multipliedReportingOverflow(by: columns)
                 guard !count.overflow else { throw Self.invalid("candidate workspace overflow") }
                 try numerical.slots(count.partialValue, times: 11)
+                let workspaceCount = count.partialValue.multipliedReportingOverflow(by: 11)
+                guard !workspaceCount.overflow else { throw Self.invalid("candidate workspace payload overflow") }
+                workPayload = try numerical.budget.reservePayload(Double.self, capacity: workspaceCount.partialValue, kind: .temporaryBytes)
+                try numerical.budget.chargeScheduledWork(UInt64(workspaceCount.partialValue))
                 gScratch = Array(repeating: 0, count: count.partialValue)
                 x0 = Array(repeating: 0, count: count.partialValue); x1 = x0
                 y1 = x0; y2 = x0; mass = x0; gy1 = x0; gy2 = x0; rhs = x0; f0 = x0; f1 = x0
                 // Independent buffers become unique before the first numerical step.
                 for i in x0.indices { x1[i] = 0; y1[i] = 0; y2[i] = 0; mass[i] = 0; gy1[i] = 0; gy2[i] = 0; rhs[i] = 0; f0[i] = 0; f1[i] = 0 }
                 try numerical.slots(4)
+                coefficientPayload = try numerical.budget.reservePayload(N.Matrix.self, capacity: 4, kind: .temporaryBytes)
+                coefficients.reserveCapacity(4)
                 for _ in 0..<4 { coefficients.append(try numerical.matrix(rows, columns)) }
             } catch { close(); throw error }
         }
@@ -165,7 +184,15 @@ internal struct NativeSTAConservativeResidualCandidate {
                     coefficients[2][row, column] = try Self.point(x1[i] - dt / 3 * f1[i])
                     coefficients[3][row, column] = try I(point: x1[i])
                 } }
-                try consume(Segment(start: start, end: end, bernstein: coefficients), &work)
+                if numerical.budget.transformResources != nil {
+                    let payload = try numerical.budget.reservePayload(N.Matrix.self, capacity: coefficients.count, kind: .liveOwnedBytes)
+                    var snapshot: [N.Matrix] = []
+                    snapshot.reserveCapacity(coefficients.count)
+                    for coefficient in coefficients { snapshot.append(try numerical.copy(coefficient)) }
+                    try consume(Segment(start: start, end: end, bernstein: snapshot, payload: payload), &work)
+                } else {
+                    try consume(Segment(start: start, end: end, bernstein: coefficients), &work)
+                }
                 try numerical.tick(&work, rhs.count)
                 for i in rhs.indices { x0[i] = x1[i]; f0[i] = f1[i] }
             }
@@ -212,6 +239,9 @@ internal struct NativeSTAConservativeResidualCandidate {
 
         private func prepareBlocks(work: inout UInt64) throws {
             try numerical.slots(rows)
+            let ownerPayload = try numerical.budget.reservePayload(Int.self, capacity: rows, kind: .temporaryBytes)
+            defer { withExtendedLifetime(ownerPayload) {} }
+            try numerical.budget.chargeScheduledWork(UInt64(rows))
             var owner = Array(repeating: -1, count: rows); var maximum = 0
             for (index, ids) in reduced.capBlocks.enumerated() {
                 guard !ids.isEmpty else { throw Self.invalid("empty candidate C block") }
@@ -222,12 +252,19 @@ internal struct NativeSTAConservativeResidualCandidate {
                 maximum = max(maximum, ids.count)
             }
             guard owner.allSatisfy({ $0 >= 0 }) else { throw Self.invalid("incomplete candidate C partition") }
-            try numerical.slots(maximum); blockScratch = Array(repeating: 0, count: maximum)
+            try numerical.slots(maximum)
+            blockScratchPayload = try numerical.budget.reservePayload(Double.self, capacity: maximum, kind: .temporaryBytes)
+            try numerical.budget.chargeScheduledWork(UInt64(maximum))
+            blockScratch = Array(repeating: 0, count: maximum)
             try numerical.slots(reduced.capBlocks.count)
+            blockPayload = try numerical.budget.reservePayload(Block.self, capacity: reduced.capBlocks.count, kind: .temporaryBytes)
+            blocks.reserveCapacity(reduced.capBlocks.count)
             for (blockIndex, ids) in reduced.capBlocks.enumerated() {
                 let size = ids.count, count = size.multipliedReportingOverflow(by: size)
                 guard !count.overflow else { throw Self.invalid("candidate local C storage overflow") }
                 try numerical.slots(count.partialValue)
+                let payload = try numerical.budget.reservePayload(Double.self, capacity: count.partialValue, kind: .temporaryBytes)
+                try numerical.budget.chargeScheduledWork(UInt64(count.partialValue))
                 var lower = Array(repeating: 0.0, count: count.partialValue)
                 for (i, row) in ids.enumerated() {
                     for offset in reduced.capacitance.rowOffsets[row]..<reduced.capacitance.rowOffsets[row + 1] {
@@ -247,7 +284,7 @@ internal struct NativeSTAConservativeResidualCandidate {
                         lower[i * size + j] = value.squareRoot()
                     } else { lower[i * size + j] = value / lower[j * size + j] }
                 } }
-                blocks.append(Block(rows: ids, lower: lower))
+                blocks.append(Block(rows: ids, lower: lower, payload: payload))
             }
         }
 
@@ -255,6 +292,13 @@ internal struct NativeSTAConservativeResidualCandidate {
             guard !closed else { return }; closed = true
             shiftFactor?.close(); shiftFactor = nil
             gFactor?.close(); gFactor = nil
+            if numerical.budget.transformResources != nil {
+                gValues = []; cValues = []; blocks = []; gScratch = []; blockScratch = []
+                x0 = []; x1 = []; y1 = []; y2 = []; mass = []; gy1 = []; gy2 = []
+                rhs = []; f0 = []; f1 = []; coefficients = []
+                scalarPayload = nil; workPayload = nil; blockPayload = nil
+                blockScratchPayload = nil; coefficientPayload = nil
+            }
         }
 
         private static func point(_ value: Double) throws -> I {

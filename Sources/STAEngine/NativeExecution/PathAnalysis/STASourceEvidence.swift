@@ -227,15 +227,22 @@ public struct STASourceEvidence: Sendable, Hashable, Codable {
         hasher.combine(staticStateSamples); hasher.combine(normalPowerSamples)
     }
 
-    internal func validateStructure(maximumStates: Int, maximumWork: UInt64) throws {
+    internal func validateStructure(maximumStates: Int, maximumWork: UInt64, stateBudget: NativeSTAStateBudget? = nil) throws {
+        let temporary = stateBudget.map { NativeSTATransformStorage(budget: $0, kind: .temporaryBytes) }
         let roleSlots = roles.count.multipliedReportingOverflow(by: 4)
         let pulseSlots = pulseWidthSamples.count.addingReportingOverflow(staticStateSamples.count)
         let powerSlots = pulseSlots.partialValue.addingReportingOverflow(normalPowerSamples.count)
         let sampleSlots = samples.count.addingReportingOverflow(powerSlots.partialValue)
         let slots = roleSlots.partialValue.addingReportingOverflow(sampleSlots.partialValue)
         guard !roleSlots.overflow, !pulseSlots.overflow, !powerSlots.overflow, !sampleSlots.overflow, !slots.overflow, slots.partialValue <= maximumStates,
-              UInt64(slots.partialValue) <= maximumWork,
-              version == 3, Set(roles).count == roles.count, coverage.count == roles.count,
+              UInt64(slots.partialValue) <= maximumWork else { throw Self.invalid() }
+        try temporary?.reserveSet(Role.self, capacity: roles.count)
+        try temporary?.reserveSet(Int.self, capacity: coverage.count)
+        try temporary?.reserveSet(Int.self, capacity: roles.count)
+        try temporary?.reserve(Int.self, capacity: coverage.count)
+        try temporary?.reserve(Bool.self, capacity: roles.count)
+        try stateBudget?.chargeScheduledWork(UInt64(slots.partialValue))
+        guard version == 3, Set(roles).count == roles.count, coverage.count == roles.count,
               Set(coverage.map(\.role)) == Set(roles.indices) else { throw Self.invalid() }
         var retainedSlots = slots.partialValue
         func retain(_ count: Int) throws {
@@ -252,8 +259,10 @@ public struct STASourceEvidence: Sendable, Hashable, Codable {
             for function in sample.observation.functions { try retain(function.queries.count) }
         }
         try Task.checkCancellation()
+        try temporary?.reserve(Double.self, capacity: 7)
         var sampled = Array(repeating: false, count: roles.count)
         for sample in samples {
+            try stateBudget?.chargeScheduledWork(1)
             try Task.checkCancellation()
             guard roles.indices.contains(sample.role) else { throw Self.invalid() }
             let role = roles[sample.role], value = sample.observation
@@ -289,6 +298,7 @@ public struct STASourceEvidence: Sendable, Hashable, Codable {
             }
         }
         for sample in pulseWidthSamples {
+            try stateBudget?.chargeScheduledWork(1)
             try Task.checkCancellation()
             guard roles.indices.contains(sample.role), roles[sample.role].kind == .pulseWidth,
                   roles[sample.role].source == sample.observation.source,
@@ -313,24 +323,33 @@ public struct STASourceEvidence: Sendable, Hashable, Codable {
                       Self.validRange(range.result), range.result.lowerBound >= 0,
                       range.inputSlew == nil || (Self.validRange(range.inputSlew!) && range.inputSlew!.contains(sample.openingSlew)) else { throw Self.invalid() }
             }
-            for segment in sample.openingSegments + sample.closingSegments {
+            for segment in sample.openingSegments {
+                try stateBudget?.chargeScheduledWork(1)
+                guard !segment.physicalIdentity.isEmpty, segment.earlyDelay.isFinite, segment.lateDelay.isFinite else { throw Self.invalid() }
+            }
+            for segment in sample.closingSegments {
+                try stateBudget?.chargeScheduledWork(1)
                 guard !segment.physicalIdentity.isEmpty, segment.earlyDelay.isFinite, segment.lateDelay.isFinite else { throw Self.invalid() }
             }
             sampled[sample.role] = true
         }
         for sample in normalPowerSamples {
+            try stateBudget?.chargeScheduledWork(1)
             guard roles.indices.contains(sample.role), roles[sample.role].kind == .normalPower,
                   sample.observation.cell == roles[sample.role].cell,
                   sample.observation.cellLine > 0, sample.observation.cellByteOffset >= 0,
                   !sampled[sample.role] else { throw Self.invalid() }
             for value in sample.observation.pgValues {
+                try stateBudget?.chargeScheduledWork(1)
                 guard !value.condition.pin.isEmpty, !value.condition.sourcePGType.isEmpty,
                       value.line > 0, value.byteOffset >= 0 else { throw Self.invalid() }
             }
             for function in sample.observation.functions {
+                try stateBudget?.chargeScheduledWork(1)
                 guard !function.result, function.origin.functionLine > 0, function.origin.functionByteOffset >= 0,
                       function.origin.ownerLine > 0, function.origin.ownerByteOffset >= 0 else { throw Self.invalid() }
                 for query in function.queries {
+                    try stateBudget?.chargeScheduledWork(1)
                     guard !query.symbol.isEmpty, query.domain == .binary,
                           query.binding != .powerPin || query.value != nil else { throw Self.invalid() }
                 }
@@ -342,6 +361,7 @@ public struct STASourceEvidence: Sendable, Hashable, Codable {
                   (sample.effect != .clear && sample.effect != .preset) || !sample.outputConstants.isEmpty else { throw Self.invalid() }
         }
         for entry in coverage {
+            try stateBudget?.chargeScheduledWork(1)
             try Task.checkCancellation()
             guard !entry.witness.isEmpty, entry.disposition != .unknown,
                   entry.disposition == .evaluated ? sampled[entry.role] : !sampled[entry.role] else { throw Self.invalid() }

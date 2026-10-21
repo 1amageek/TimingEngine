@@ -350,3 +350,260 @@ source-domain contract uses full-domain owned characterization, rather than poin
 lookups. A parser-created default slew has no source-authority status.
 
 The direct STAInitialSourceContextPreparing protocol is owned by [SourceFamilies](../NativeExecution/ConservativeCoupling/SourceFamilies/DESIGN.md). It consumes this exact retained owner without source rereads and leaves existing result schemas unchanged.
+
+
+## Strict Transform Accounting
+
+Status: the selected Native host prepare/execute and saved-result paths passed
+the finite qualification below. `requiresStrictTransformAccounting` composes the
+following cumulative resource contracts. This work changes resource
+admission and lifetime, not parsing semantics, STA equations, source applicability,
+effective configuration, or saved-result authority.
+
+```text
+one caller source accountant / cancellation / cumulative work
+  -> controlled exact artifact read
+  -> controlled design + SDC + SPEF intake / PDK manifest intake
+  -> canonical joins + reduction + configuration + source inventory
+  -> retained PreparedSTAExecution
+  -> same native graph / scenario execution
+  -> retained actual result + bounded artifact encoding
+```
+
+### Owning boundaries and required handoffs
+
+| Owner | Required strict operation | Implemented boundary |
+|---|---|---|
+| TimingCore artifact I/O | Admit destination and simultaneous read-page payload before growth; preserve exact digest/size and asynchronous close failures | Additive controlled reader requirement; unsupported legacy conformers refuse |
+| TimingCore CanonicalModel / PathConstraints / SPEF | Same admitted grammar and diagnostics, with checked capacity before every owned buffer growth and charged bounded traversal | Controlled grammar overloads retain their actual payload and failure owners |
+| PDKDiscovery | Source-faithful manifest decoding and semantic validation using caller-controlled storage/work/cancellation | Public audited raw-span and controlled-manifest APIs retain document/failure owners |
+| ProcessCorners | Exact existing manifest/corner/library joins, using the same accountant and retaining selected input owners | Consumes the controlled PDK handoff without duplicating PDK grammar or semantics |
+| PreparedExecution | Input/configuration/inventory construction and retained publication | Retains actual admitted input payloads and reservations through the last prepared copy |
+| NativeExecution | Actual graph/scenario/output construction, sorting and traversal, using the existing algorithms | Concrete payload/work admissions share the original caller accountant |
+
+The existing `LibertySourceResourceAccounting` is the cumulative Timing-side
+resource authority. New strict operations must use this same instance; they may
+not create a fresh deadline, counter, or hidden unlimited budget. Existing Liberty
+owned-source accounting remains separate ownership of the same caller budget,
+without duplicate charges for shared retained payloads.
+
+Admission measures declared managed payload capacities using checked counts and
+concrete element strides, including simultaneously live source, destination,
+copy-on-write migration and scratch buffers. It does not infer allocator capacity,
+object overhead, physical memory, or RSS from a byte multiplier. Input byte and
+logical element limits remain independently enforced. Foundation JSONDecoder internal parser workspace and allocator/runtime overhead
+are outside this managed-payload contract, as they are outside the existing
+Liberty logical-capacity contract. The source/schema owner must nevertheless
+pre-admit the actual decoded DTO, string, array and map payloads from checked
+source-proved counts/envelopes before decoding. A post-decode walk or an arbitrary
+input-byte multiplier cannot establish this guarantee. Work and cancellation
+claims cover the explicit admitted source/schema and transformation operations;
+Foundation-internal instruction counts or interruptibility are not invented.
+
+Every external resource callback is followed by a cancellation/deadline check
+before the next allocation, traversal or publication. Work is admitted before the
+operation, including fixed buffer initialization and copies. The retained owner
+keeps both actual immutable payloads and their reservations; failure releases
+invocation-local workspace and publishes no prepared/result authority. Prepared
+and result copies share their respective owners. Raw extracted mutable values
+remain caller-owned and require the corresponding retained owner, as for
+`OwnedLibertySource`; this is not an automatic accounting claim for arbitrary
+caller copies or mutations.
+
+Legacy nonstrict overloads and injected conformers retain their current behavior.
+Any additive controlled protocol requirement must refuse explicitly by default
+when a legacy conformer has no controlled implementation. A custom reader or
+parser cannot gain strict capability from its type name or from an outer guessed
+reservation. Controlled file intake reuses the selected CircuiteFoundation controlled source
+discovery and its immutable page/copy ownership. The host uses the agreed audited raw-Span PDK handoff;
+the selected Native success/refusal paths passed the qualification below.
+
+### Falsifiable completion evidence
+
+- The existing real prepared fixture succeeds under strict accounting and produces
+  the identical full STA payload/configuration/source evidence as the nonstrict
+  path. Existing ordinary behavior and grammar/refusal fixtures remain unchanged.
+- Tiny source, decoded-value, graph and scenario capacities refuse before the
+  corresponding growth; no successful post-growth accounting is accepted.
+- Repeated operations share cumulative work and storage admission. Cancellation
+  triggered by the first caller reservation/work callback prevents subsequent
+  allocation/work, using the same live caller context.
+- Failure publishes no prepared/result/artifact; reservations for actual retained
+  payloads survive copies and return after the final owner, including failed
+  publication and cancellation. Temporary workspace is independently released.
+- Custom legacy parser/reader conformers fail strict admission explicitly. Exact
+  process/corner validation, full payload equality, saved-input replay and typed
+  lower failures remain independently checked; saved metrics never replace STA.
+
+### Strict Native qualification scope
+
+The reviewed final public graph selects CF/TQ `26.1021.1`, LogicDesign
+`9fbffcb1dfbf37517dfc05aa0f37f53c6a5e7659`, PDKKit
+`82fddd548af704b3f0723eada8e5b09df2dad6e4` and unchanged SignoffToolSupport.
+Its actual clean lock also binds CoreSpice `2b22cd47` and SDK `1.2.2` transitively.
+The fixed Swift 6.4.0 / macOS 27 Native product builds and runtime gates passed:
+
+| Selected product | Declarations | Expanded cases | Suites | Skips / issues |
+|---|---:|---:|---:|---:|
+| LibertyCodecTests | 35 | 66 | 5 | 0 / 0 |
+| TimingEngineTests | 34 | 42 | 4 | 0 / 0 |
+| STAPreparedExecutionTests | 9 | 14 | 2 | 0 / 0 |
+
+These 78 declarations and 122 cases compose two unchanged final-graph product
+runs with the final Prepared run after its test-helper cardinality correction;
+they are not one monolithic full-suite run. The original failed helper check,
+resource-control failures and genuine T1/T2 RED observations remain preserved.
+The ONE comprehensive review and its finding-limited T1/T2/T3 recheck closed
+without remaining findings. Final source changes after that execution remove
+only fulfilled qualification comments and update documentation; functional Swift,
+tests, package and lock bytes remain bound to the compiled freeze.
+
+This evidence covers only selected host Native logical managed-payload intake,
+graph/scenario transforms, rich failures and saved-result resource/lifetime
+composition. It does not cover allocator/RSS ceilings, WASM/Embedded execution,
+all-phase/root-domain/history/corner guarantees, physical qualification or the
+separate genuine whole-flow CLI/public consumer. Existing unsupported semantic
+branches and their markers remain authoritative.
+
+
+### Audited host JSON specialization
+
+STAEngine uses PDKDiscovery's existing audited raw-Span decoder for TimingDesign
+and TimingParasitics. TimingCore receives the typed host decoder dependency; it
+never imports PDKDiscovery or duplicates JSON grammar. Raw decoded documents have
+nil sourceReference and grant no content authority. The actual controlled input
+binding/byte owner stays retained independently. Custom schema constructors,
+CodingKeys and derived validation remain Timing-owned accounting obligations.
+
+The thin PDK bridge forwards parserWork, decoded-element/scalar and diagnostic
+traversals to the existing cumulative work owner, and forwards exact live/temporary
+byte extents. Balanced decodeNesting is finite and uses the caller-selected
+sourceLimits.maximumNestingDepth for strict JSON grammar too. Other PDK capture or
+profile dimensions are not used by this raw specialization and explicitly refuse.
+The first underlying caller failure is retained under a common Mutex; callbacks
+run outside it, and are checked before and after. This adapter never changes the
+existing PDK counter version or resets caller work/deadline.
+
+## Strict Native Transform Retention
+
+Strict intake supplies the same optional `transformResources` to the existing
+prepared initializer. Nil preserves legacy construction. Native graph/execution
+payload admission is owned by [NativeExecution](../NativeExecution/DESIGN.md),
+not by a new budget allowance. Prepared copies retain admitted role/consumption
+payloads and the original source owners; a decoded record cannot reconstruct a
+strict accounting owner. Public value copies separated from their owning prepared
+or result value remain caller-owned accounting responsibilities.
+
+Input-identity construction uses the CF-owned Data-copy and SHA managed-cost
+contracts. Their temporary payloads coexist during the original hash call; the
+returned digest backing is retained by the prepared value. Planning adds no new
+encoding or SHA implementation, and copy/hash work is charged once to the same
+original transform accountant before execution.
+
+
+### Saved DTO Custom Construction
+
+#### CF digest normalization on saved-result decode (T3)
+
+The saved-result composition uses CF's checked ContentDigest Codable control and
+PDK's explicit additionalUserInfo overload. Its actual saved-result path passed
+the six new cases within the selected Native qualification above.
+It adds no JSON parser, saved DTO, hash, validation authority or resource budget.
+The existing legacy/custom decoder branches and semantic result replay stay intact.
+
+```text
+original LibertySourceResourceAccounting
+    -> SAME NativeSTAPDKAccounting (first original caller error + typed sentinel)
+        -> NativeSTAContentDigestControl
+            -> explicit CF decoding context in SAME PDK raw decoder
+                -> CF-owned Unicode normalization and validation
+                    -> (document, control) success owner
+                    -> whole lower error + control failure owner
+```
+
+The private control forwards check, scheduled work, temporary capacity and retained
+normalized backing to the same PDK accountant. Its callbacks throw the existing
+PDKAdmissionResourceError, so PDK's typed resource catch preserves that layer;
+the accountant's first-error slot retains the original Liberty/caller error.
+CF owns its exact mapping scratch, conversion overlap, normalization/validation
+work and original Unicode/ContentDigestError semantics. Timing admits the control's
+actual stored fields, Mutex<State>, receipt array backing and one-entry context
+dictionary before constructing or growing them. The type-erased temporary lease's
+concrete pair of payload/metadata receipts is admitted before constructing its
+opaque returned value. Class pointer stride is not used as the control's
+stored-payload size. Object headers and allocator rounding remain
+outside the existing logical-payload contract.
+
+Receipt growth separately admits the replacement backing while the old backing
+and receipts stay held. It publishes under Mutex only after successful admission;
+concurrent changes retry against the same cumulative work/cancellation owner.
+Only short state access, reserveCapacity and append happen under this Mutex.
+Upstream callbacks, post-callback checks and old/rejected-backing release happen
+outside it. No release callback checks cancellation.
+
+Success retains the complete PDK document and digest control inside the existing
+TimingTransformValue. On failure, an already-admitted fixed Error slot in the
+control retains the complete existing lower error; the original failure metadata
+constructs TimingControlledTransformFailure without new admission or cancellation
+callbacks. Its cause priority stays first original caller error, then the existing
+audited originalFailure/domainCause, then the complete lower error. The control's
+first-error ancestor never records the new outer failure, avoiding a control cycle.
+Whole failure copies retain raw syntax/source strings and normalized reservations
+until their final owner ends. Freely detached values/causes remain caller-owned.
+
+PDK's generic catch still maps unrecognized custom Decodable failures to its
+existing unsupportedValue. Timing's preexisting originalFailure capture can
+expose the original CF domain cause while retaining that whole PDK failure; this
+does not claim PDK itself preserves arbitrary CF errors. Other decode callers keep
+the original preservingCause overload and behavior.
+
+The STAPreparedExecutionTests owner adds actual saved-result uppercase/many-digest
+parity, independent original-path work comparison, tiny cumulative work/storage,
+callback cancellation, invalid long/Unicode cause parity and copied-failure final
+refund. The fixture mutates only encoded digest text, preserving every numerical
+token and the same actual prepared/executed result. The fixture checks exactly the two structured ContentDigest fields in effective configuration and provenance environment; artifact IDs use their existing single-string codec. These tests and actual replay
+passed under the composed public graph within the finite scope above.
+
+| State | Storage / isolation | Mutation / release |
+|---|---|---|
+| Digest receipts, backing and terminal lower error | One concrete Storage with Mutex<State> | Atomic publication; replaced backing releases outside lock; final shared control release refunds |
+| Original caller failure | Existing NativeSTAPDKAccounting Mutex<State> | First underlying caller error only; never the outer control-owning failure |
+| Mapping/conversion workspace | CF-scoped concrete lease wrapper around the admitted temporary owner | Same callback/check path and scope unwind |
+
+No target condition changes storage or synchronization. This STAEngine composition
+is the existing host Native lane; CF Core's separately qualified portable control
+does not imply that the host PDK/Timing integration runs on WASM or Embedded.
+
+The public bounded decode entry retains the PDK raw document. Its nested Decodable
+initializers read PDKAdmissionDecodingContext.accountingKey, using the decoder's
+existing retained accountant via NativeSTADecodingResources. Work, concrete scratch
+and owned payload reservations return to the same original Timing invocation; no
+second quota or userInfo authority is created. Missing context preserves legacy
+generic Decoder behavior. A present malformed context refuses. Each custom
+initializer must explicitly admit derived collections/hashes; generic arena
+accounting is not claimed to cover those operations. Saved DTOs remain proposals
+until prepare/execute/source-evidence replay succeeds on actual retained sources.
+
+The controlled saved-result entry and reverse decoder accountant share the actual
+PDK admission context. Custom STA DTO validation delegates to the owning
+[NativeExecution](../NativeExecution/DESIGN.md) contract for its derived buffers;
+raw JSON field admission does not stand in for those constructor allocations.
+
+
+### Effective Configuration Wire
+
+The controlled initializer preserves the existing configuration fields and wire
+framing. Sorting compares the same ordered fields directly, avoiding temporary
+comparison-key arrays. Each modes/defaults/source-clock table has its concrete
+requested capacity admitted before filling. Configuration framing retains one
+growing Data owner; old and newly requested buffers coexist under both leases
+during growth. Scalar decimal scratch is represented before String construction;
+JSON frames borrow the admitted encoded bytes without a Data→String copy. The
+CF-owned scalar digest construction-cost contract is composed on the selected
+public graph. No identity version or legacy digest bytes change.
+
+### Controlled canonical and replay diagnostics
+
+Strict preparation invokes the controlled canonical validator using the same source accountant. The one-library argument array and finding-code ordering workspace are admitted before construction. A retained report remains alive through diagnostic inspection.
+
+Strict replay retains its numerical replay owners through comparison and constructs the original detailed mismatch text using a construction-local owned text buffer. Each replacement capacity is admitted while the previous payload remains live; numeric hexadecimal/decimal temporaries and UTF-8 replacement decoding have explicit representation bounds before construction. The original 96-byte field and 4096-byte message clipping semantics remain unchanged. The terminal replay error retains the final text reservation. Strict preparation prepays a failure boundary retaining its loaded source owners before subsequent joins; failure metadata is prepaid before error construction, and no accounting callback is required after throwing. Legacy replay keeps its existing path.

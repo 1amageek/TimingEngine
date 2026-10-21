@@ -95,12 +95,9 @@ public struct CharacterizedTimingLibrary: Sendable {
         constrainedEdge: TimingEdge, relatedEdge: TimingEdge,
         constrainedSlew: Double, relatedSlew: Double
     ) throws -> TimingSourceEvaluationSample {
-        let checks = try library.cell(named: cell).sequentialModel?.timingChecks ?? []
-        let matches = checks.filter { $0.kind == kind && $0.constrainedPin == constrainedPin
-            && $0.relatedPin == relatedPin && $0.constrainedEdge == constrainedEdge && $0.relatedEdge == relatedEdge }
-        guard matches.count == 1, let check = matches.first, let identity = check.sourceIdentity else {
-            throw TimingCharacterizationError.missingSourceFact("unique source constraint group")
-        }
+        let check = try exactCheck(cell: cell, kind: kind, constrainedPin: constrainedPin, relatedPin: relatedPin,
+            constrainedEdge: constrainedEdge, relatedEdge: relatedEdge)
+        guard let identity = check.sourceIdentity else { throw TimingCharacterizationError.missingSourceFact("unique source constraint group") }
         return try observation(check.table, source: identity,
             table: constrainedEdge == .rise ? "rise_constraint" : "fall_constraint", quantity: .constraint,
             first: constrainedSlew, second: relatedSlew)
@@ -148,7 +145,7 @@ public struct CharacterizedTimingLibrary: Sendable {
                 inputSlew: nil, minimumSlew: nil, maximumSlew: nil, result: value)
         case .relatedPinTransition(let lut):
             // The constant second coordinate is private representation, not a source axis or receipt operand.
-            guard lut.outputLoads == [0] else { throw TimingCharacterizationError.unsupportedSemantic("pulse LUT dimensions") }
+            guard lut.outputLoads.count == 1, lut.outputLoads[0] == 0 else { throw TimingCharacterizationError.unsupportedSemantic("pulse LUT dimensions") }
             try storage?.step(UInt64(lut.inputSlews.count) + 1)
             let value = try lut.lookupChecked(inputSlew: inputSlew, outputLoad: 0)
             return .init(source: sourceIdentity, table: table, openingEdge: openingEdge, inputSlew: inputSlew,
@@ -206,34 +203,48 @@ public struct CharacterizedTimingLibrary: Sendable {
         let cell = try library.cell(named: source.cell)
         let table: TimingLUT
         if quantity == .constraint {
-            let checks = (cell.sequentialModel?.timingChecks ?? []).filter {
-                $0.sourceIdentity == source
-                    && name == ($0.constrainedEdge == .rise ? "rise_constraint" : "fall_constraint")
+            var matched: TimingCheckArc?; var count = 0
+            for check in cell.sequentialModel?.timingChecks ?? [] {
+                try storage?.step(UInt64(source.tables.count) + 1)
+                if check.sourceIdentity == source && name == (check.constrainedEdge == .rise ? "rise_constraint" : "fall_constraint") {
+                    count += 1; if matched == nil { matched = check }
+                }
             }
-            guard checks.count == 1, let check = checks.first,
+            guard count == 1, let check = matched,
                   name == (check.constrainedEdge == .rise ? "rise_constraint" : "fall_constraint") else {
                 throw TimingCharacterizationError.missingSourceFact("retained constraint identity")
             }
             table = check.table
-        } else if let arc = cell.directionalControlArcs.first(where: { $0.sourceIdentity == source }) {
-            guard cell.directionalControlArcs.filter({ $0.sourceIdentity == source }).count == 1 else {
-                throw TimingCharacterizationError.ambiguousSource("retained directional control identity")
-            }
-            table = try controlTable(arc, quantity: quantity, name: name)
         } else {
-            guard propagationCells.contains(cell.name) else {
-                throw TimingCharacterizationError.unsupportedSemantic("unqualified propagation cell")
+            var control: TimingDirectionalControlArc?; var controlCount = 0
+            for arc in cell.directionalControlArcs {
+                try storage?.step(UInt64(source.tables.count) + 1)
+                if arc.sourceIdentity == source { controlCount += 1; if control == nil { control = arc } }
             }
-            let arcs = cell.arcs.filter { !$0.isConstraint && $0.sourceIdentity == source }
-            guard arcs.count == 1, let arc = arcs.first else {
-                throw TimingCharacterizationError.missingSourceFact("retained propagation identity")
-            }
-            switch (quantity, name) {
-            case (.cellDelay, "cell_rise"): table = arc.delayRise
-            case (.cellDelay, "cell_fall"): table = arc.delayFall
-            case (.outputSlew, "rise_transition"): table = arc.transitionRise
-            case (.outputSlew, "fall_transition"): table = arc.transitionFall
-            default: throw TimingCharacterizationError.missingSourceFact("retained table identity")
+            if let arc = control {
+                guard controlCount == 1 else {
+                    throw TimingCharacterizationError.ambiguousSource("retained directional control identity")
+                }
+                table = try controlTable(arc, quantity: quantity, name: name)
+            } else {
+                guard propagationCells.contains(cell.name) else {
+                    throw TimingCharacterizationError.unsupportedSemantic("unqualified propagation cell")
+                }
+                var matched: TimingArc?; var count = 0
+                for arc in cell.arcs {
+                    try storage?.step(UInt64(source.tables.count) + 1)
+                    if !arc.isConstraint && arc.sourceIdentity == source { count += 1; if matched == nil { matched = arc } }
+                }
+                guard count == 1, let arc = matched else {
+                    throw TimingCharacterizationError.missingSourceFact("retained propagation identity")
+                }
+                switch (quantity, name) {
+                case (.cellDelay, "cell_rise"): table = arc.delayRise
+                case (.cellDelay, "cell_fall"): table = arc.delayFall
+                case (.outputSlew, "rise_transition"): table = arc.transitionRise
+                case (.outputSlew, "fall_transition"): table = arc.transitionFall
+                default: throw TimingCharacterizationError.missingSourceFact("retained table identity")
+                }
             }
         }
         return table
@@ -256,17 +267,9 @@ public struct CharacterizedTimingLibrary: Sendable {
     private func observation(_ lut: TimingLUT, source: LibertyTimingSourceIdentity, table name: String,
                              quantity: TimingSourceEvaluationSample.Quantity,
                              first: Double, second: Double) throws -> TimingSourceEvaluationSample {
-        let matches = source.tables.filter { $0.name == name }
-        guard matches.count == 1, let table = matches.first else {
-            throw TimingCharacterizationError.missingSourceFact("actual source table " + name)
-        }
-        for (axis, value, samples) in [("firstInput", first, lut.inputSlews), ("secondInput", second, lut.outputLoads)] {
-            guard value.isFinite, value >= 0 else { throw TimingCharacterizationError.invalidValue(axis) }
-            guard value >= samples[0], value <= samples[samples.count - 1] else {
-                throw TimingCharacterizationError.inputOutOfRange(axis: axis, value: value,
-                    minimum: samples[0], maximum: samples[samples.count - 1])
-            }
-        }
+        let table = try exactTable(source: source, name: name)
+        try validatePoint(first, axis: "firstInput", samples: lut.inputSlews)
+        try validatePoint(second, axis: "secondInput", samples: lut.outputLoads)
         let value = lut.lookup(inputSlew: first, outputLoad: second)
         guard value.isFinite, quantity == .constraint || value >= 0 else {
             throw TimingCharacterizationError.invalidValue("interpolated source value")
@@ -280,14 +283,44 @@ public struct CharacterizedTimingLibrary: Sendable {
         guard propagationCells.contains(cell) else {
             throw TimingCharacterizationError.unsupportedSemantic("capacitance-only cell \(cell)")
         }
-        let matches = try library.cell(named: cell).arcs(from: fromPin, to: toPin)
-        guard matches.count == 1, let model = matches.first else {
-            if matches.isEmpty {
+        var matched: TimingArc?; var count = 0
+        for arc in try library.cell(named: cell).arcs {
+            try storage?.step()
+            if arc.fromPin == fromPin && arc.toPin == toPin && !arc.isConstraint {
+                count += 1; if matched == nil { matched = arc }
+            }
+        }
+        guard count == 1, let model = matched else {
+            if count == 0 {
                 throw TimingCharacterizationError.missingSourceFact("arc \(cell).\(fromPin)->\(toPin)")
             }
             throw TimingCharacterizationError.ambiguousSource("arc \(cell).\(fromPin)->\(toPin)")
         }
         return model
+    }
+
+    private func exactCheck(cell: String, kind: TimingCheckArc.Kind, constrainedPin: String, relatedPin: String,
+        constrainedEdge: TimingEdge, relatedEdge: TimingEdge) throws -> TimingCheckArc {
+        var matched: TimingCheckArc?; var count = 0
+        for check in try library.cell(named: cell).sequentialModel?.timingChecks ?? [] {
+            try storage?.step()
+            if check.kind == kind && check.constrainedPin == constrainedPin && check.relatedPin == relatedPin
+                && check.constrainedEdge == constrainedEdge && check.relatedEdge == relatedEdge {
+                count += 1; if matched == nil { matched = check }
+            }
+        }
+        guard count == 1, let matched else { throw TimingCharacterizationError.missingSourceFact("unique source constraint group") }
+        return matched
+    }
+
+    private func exactTable(source: LibertyTimingSourceIdentity, name: String) throws -> LibertyTimingTableIdentity {
+        var matched: LibertyTimingTableIdentity?; var count = 0
+        for table in source.tables {
+            try storage?.step(UInt64(table.name.utf8.count) + 1)
+            if table.name == name { count += 1; if matched == nil { matched = table } }
+        }
+        guard count == 1, let matched else { throw TimingCharacterizationError.missingSourceFact("actual source table " + name) }
+        return matched
     }
 }
 
@@ -324,12 +357,9 @@ extension CharacterizedTimingLibrary {
         constrainedEdge: TimingEdge, relatedEdge: TimingEdge,
         constrainedSlew: ClosedRange<Double>, relatedSlew: ClosedRange<Double>
     ) throws -> TimingSourceEvaluationRangeSample {
-        let checks = try library.cell(named: cell).sequentialModel?.timingChecks ?? []
-        let matches = checks.filter { $0.kind == kind && $0.constrainedPin == constrainedPin
-            && $0.relatedPin == relatedPin && $0.constrainedEdge == constrainedEdge && $0.relatedEdge == relatedEdge }
-        guard matches.count == 1, let check = matches.first, let identity = check.sourceIdentity else {
-            throw TimingCharacterizationError.missingSourceFact("unique source constraint group")
-        }
+        let check = try exactCheck(cell: cell, kind: kind, constrainedPin: constrainedPin, relatedPin: relatedPin,
+            constrainedEdge: constrainedEdge, relatedEdge: relatedEdge)
+        guard let identity = check.sourceIdentity else { throw TimingCharacterizationError.missingSourceFact("unique source constraint group") }
         return try rangeObservation(check.table, source: identity,
             table: constrainedEdge == .rise ? "rise_constraint" : "fall_constraint", quantity: .constraint,
             first: constrainedSlew, second: relatedSlew)
@@ -365,10 +395,14 @@ extension CharacterizedTimingLibrary {
             return .init(source: point.source, table: point.table, openingEdge: openingEdge,
                          inputSlew: nil, slewDomain: nil, result: point.result...point.result)
         }
-        let matches = try pulseWidthConstraints(cell: cell).filter {
-            $0.pin == pin && $0.openingEdge == openingEdge && $0.sourceIdentity == sourceIdentity
+        var matched: TimingPulseWidthConstraint?; var count = 0
+        for law in try pulseWidthConstraints(cell: cell) {
+            try storage?.step(UInt64(sourceIdentity.tables.count) + 1)
+            if law.pin == pin && law.openingEdge == openingEdge && law.sourceIdentity == sourceIdentity {
+                count += 1; if matched == nil { matched = law }
+            }
         }
-        guard matches.count == 1, let law = matches.first, case .relatedPinTransition(let lut) = law.limit else {
+        guard count == 1, let law = matched, case .relatedPinTransition(let lut) = law.limit else {
             throw TimingCharacterizationError.missingSourceFact("exact pulse range law")
         }
         let sample = try rangeObservation(lut, source: sourceIdentity, table: point.table.name,
@@ -395,8 +429,7 @@ extension CharacterizedTimingLibrary {
         let arc = try exactControlArc(cell: cell, fromPin: fromPin, toPin: toPin,
                                       kind: kind, sourceIdentity: sourceIdentity)
         var minimum = Double.infinity, maximum = -Double.infinity
-        for (delay, transition, name) in [(arc.delayRise, arc.transitionRise, "rise_transition"),
-                                           (arc.delayFall, arc.transitionFall, "fall_transition")] {
+        func include(delay: TimingLUT?, transition: TimingLUT?, name: String) throws {
             try storage?.step()
             guard (delay == nil) == (transition == nil) else {
                 throw TimingCharacterizationError.missingSourceFact("directional transition slope authority")
@@ -406,6 +439,8 @@ extension CharacterizedTimingLibrary {
                 minimum = min(minimum, range.lowerBound); maximum = max(maximum, range.upperBound)
             }
         }
+        try include(delay: arc.delayRise, transition: arc.transitionRise, name: "rise_transition")
+        try include(delay: arc.delayFall, transition: arc.transitionFall, name: "fall_transition")
         guard minimum.isFinite, maximum.isFinite else {
             throw TimingCharacterizationError.missingSourceFact("directional transition slope authority")
         }
@@ -466,12 +501,16 @@ extension CharacterizedTimingLibrary {
     }
 
     private func validateRange(_ range: ClosedRange<Double>, axis: String, samples: [Double]) throws {
-        for value in [range.lowerBound, range.upperBound] {
-            guard value.isFinite, value >= 0 else { throw TimingCharacterizationError.invalidValue(axis) }
-            guard value >= samples[0], value <= samples[samples.count - 1] else {
-                throw TimingCharacterizationError.inputOutOfRange(axis: axis, value: value,
-                    minimum: samples[0], maximum: samples[samples.count - 1])
-            }
+        try validatePoint(range.lowerBound, axis: axis, samples: samples)
+        try validatePoint(range.upperBound, axis: axis, samples: samples)
+    }
+
+    private func validatePoint(_ value: Double, axis: String, samples: [Double]) throws {
+        try storage?.step()
+        guard value.isFinite, value >= 0 else { throw TimingCharacterizationError.invalidValue(axis) }
+        guard value >= samples[0], value <= samples[samples.count - 1] else {
+            throw TimingCharacterizationError.inputOutOfRange(axis: axis, value: value,
+                minimum: samples[0], maximum: samples[samples.count - 1])
         }
     }
 
@@ -479,10 +518,7 @@ extension CharacterizedTimingLibrary {
         _ lut: TimingLUT, source: LibertyTimingSourceIdentity, table name: String,
         quantity: TimingSourceEvaluationSample.Quantity, first: ClosedRange<Double>, second: ClosedRange<Double>
     ) throws -> TimingSourceEvaluationRangeSample {
-        let matches = source.tables.filter { $0.name == name }
-        guard matches.count == 1, let table = matches.first else {
-            throw TimingCharacterizationError.missingSourceFact("actual source table " + name)
-        }
+        let table = try exactTable(source: source, name: name)
         try validateRange(first, axis: "firstInput", samples: lut.inputSlews)
         try validateRange(second, axis: "secondInput", samples: lut.outputLoads)
         var minimum = Double.infinity, maximum = -Double.infinity

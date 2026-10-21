@@ -50,6 +50,38 @@ public struct TimingArtifactBinding: Sendable, Hashable, Codable {
         }
     }
 
+    /// Stable controlled diagnostic display; legacy wire/display text is unchanged.
+    package var controlledMaterializationDescription: String {
+        switch availability {
+        case .local:
+            return materializationDescription
+        case .service(_, let resource):
+            return "service:\(resource.serviceID.rawValue)/\(resource.namespaceID.rawValue)/\(resource.resourceID.rawValue)@\(resource.generation)"
+        }
+    }
+
+    /// The final service text and its simultaneously live decimal intermediate.
+    /// This computes public value sizes without first rendering the resource.
+    package func controlledServiceDescriptionCost() throws -> (output: UInt64, temporary: UInt64) {
+        guard case .service(_, let resource) = availability else {
+            throw LibertySourceError.invalidCapacity
+        }
+        var remaining = resource.generation
+        var decimalBytes: UInt64 = 1
+        while remaining >= 10 { remaining /= 10; decimalBytes += 1 }
+        var output = UInt64("service://@".utf8.count)
+        func add(_ bytes: UInt64) throws {
+            let next = output.addingReportingOverflow(bytes)
+            guard !next.overflow else { throw LibertySourceError.arithmeticOverflow }
+            output = next.partialValue
+        }
+        try add(UInt64(resource.serviceID.rawValue.utf8.count))
+        try add(UInt64(resource.namespaceID.rawValue.utf8.count))
+        try add(UInt64(resource.resourceID.rawValue.utf8.count))
+        try add(decimalBytes)
+        return (output, decimalBytes)
+    }
+
     public func requireLocalAvailability() throws -> (
         rootID: ArtifactRootID,
         relativePath: ArtifactRelativePath

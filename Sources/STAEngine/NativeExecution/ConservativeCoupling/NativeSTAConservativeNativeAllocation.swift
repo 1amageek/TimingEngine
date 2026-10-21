@@ -1,3 +1,4 @@
+import Foundation
 import Synchronization
 import TimingCore
 #if os(macOS) && canImport(Darwin)
@@ -26,7 +27,7 @@ internal enum NativeSTAConservativeNativeAllocation {
         var address: UInt = 0
         var bytes: Int = 0
     }
-    private enum FailureKind: Sendable { case backend, quota, records }
+    private enum FailureKind: Sendable, Equatable { case backend, quota, records }
     private struct Routing: Sendable {
         var active = false
         var quota = 0
@@ -40,14 +41,46 @@ internal enum NativeSTAConservativeNativeAllocation {
         var failAfter: Int? = nil
         var requestedBytes = 0
         var records: [Record] = []
+        var diagnostics: TimingControlledDiagnostics<NativeSTAStateBudget>?
     }
-    private static let gate = Mutex(())
+    private struct PermitState: Sendable {
+        var owner: ObjectIdentifier?
+    }
+    private static let gate = Mutex(PermitState())
+    // NSCondition supplies blocking wake/wait only. The canonical owner is in gate.
+    private static let wake = NSCondition()
+
+    private static func acquire() throws {
+        let identity = ObjectIdentifier(Thread.current)
+        wake.lock()
+        defer { wake.unlock() }
+        while true {
+            let acquired = try gate.withLock { state in
+                guard state.owner != identity else { throw invalid("recursive native allocation lease") }
+                guard state.owner == nil else { return false }
+                state.owner = identity
+                return true
+            }
+            if acquired { return }
+            wake.wait()
+        }
+    }
+
+    private static func releasePermit() {
+        wake.lock()
+        gate.withLock { $0.owner = nil }
+        wake.broadcast()
+        wake.unlock()
+    }
     private static let routing = Mutex(Routing())
 
     static func withLease<R>(dimension: Int, nonzeros: Int, numerical: N,
                              policy: Policy = .init(), work: inout UInt64,
                              body: (inout UInt64) throws -> R) throws -> (R, Statistics) {
         try numerical.tick(&work, 0)
+        let diagnostics = try numerical.diagnostics(retaining: numerical.budget)
+        // Routing may drop its copy under its lock; this frame keeps the final owner outside it.
+        defer { withExtendedLifetime(diagnostics) {} }
         let count = dimension.addingReportingOverflow(nonzeros)
         guard dimension > 0, nonzeros >= 0, !count.overflow else { throw invalid("native quota dimensions") }
         let reservedSlots = numerical.limits.maximumPathStates / 4
@@ -63,14 +96,21 @@ internal enum NativeSTAConservativeNativeAllocation {
         let rounded = quota.addingReportingOverflow(7)
         guard !rounded.overflow else { throw self.capacity("native quota slot overflow", limit: quota) }
         try numerical.slots(rounded.partialValue / 8)
-        return try gate.withLock { _ in
-            try numerical.tick(&work, 0)
-            routing.withLock { state in
+        let metadataPayload = try numerical.budget.reservePayload(Record.self, capacity: capacity, kind: .temporaryBytes)
+        defer { withExtendedLifetime(metadataPayload) {} }
+        try acquire()
+        defer { releasePermit() }
+        // Resource callbacks are deliberately outside both synchronization locks.
+        try numerical.tick(&work, 0)
+        try numerical.budget.chargeScheduledWork(UInt64(capacity))
+        var records = Array(repeating: Record(), count: capacity)
+        routing.withLock { state in
                 state = Routing()
-                state.records = Array(repeating: Record(), count: capacity)
+                swap(&state.records, &records)
                 state.quota = quota; state.metadataBytes = metadata.partialValue
                 state.cumulative = metadata.partialValue; state.live = metadata.partialValue
                 state.peak = metadata.partialValue; state.failAfter = policy.failAfterAllocations
+                state.diagnostics = diagnostics
                 state.active = true
             }
             do {
@@ -84,22 +124,42 @@ internal enum NativeSTAConservativeNativeAllocation {
                 _ = finish()
                 throw error
             }
-        }
     }
 
     static func check() throws {
         let snapshot = routing.withLock { state in
             (state.active, state.failure, state.requestedBytes, state.cumulative, state.live,
-             state.peak, state.quota, state.nextRecord, state.records.count, state.failureKind)
+             state.peak, state.quota, state.nextRecord, state.records.count, state.failureKind, state.diagnostics)
         }
         guard snapshot.0 else { throw invalid("native operation outside allocation lease") }
         if let failure = snapshot.1 {
-            let detail = "\(failure); requested=\(snapshot.2), cumulative=\(snapshot.3), live=\(snapshot.4), peak=\(snapshot.5), quota=\(snapshot.6), allocations=\(snapshot.7), records=\(snapshot.8)"
-            switch snapshot.9 {
-            case .backend: throw invalid(detail)
-            case .quota: throw capacity("native quota bytes: " + detail, limit: snapshot.6)
-            case .records: throw capacity("native callback allocation records: " + detail, limit: snapshot.8)
+            func construct() -> any Error {
+                let detail = "\(failure); requested=\(snapshot.2), cumulative=\(snapshot.3), live=\(snapshot.4), peak=\(snapshot.5), quota=\(snapshot.6), allocations=\(snapshot.7), records=\(snapshot.8)"
+                switch snapshot.9 {
+                case .backend: return invalid(detail)
+                case .quota: return capacity("native quota bytes: " + detail, limit: snapshot.6)
+                case .records: return capacity("native callback allocation records: " + detail, limit: snapshot.8)
+                }
             }
+            if let diagnostics = snapshot.10 {
+                let detail = try TimingDiagnosticTextCapacity.description(literal: "; requested=, cumulative=, live=, peak=, quota=, allocations=, records=",
+                    ints: 7, doubles: 0, booleans: 0, additionalUTF8: UInt64(failure.utf8.count))
+                let bytes: UInt64
+                switch snapshot.9 {
+                case .backend: bytes = detail
+                case .quota, .records:
+                    let three = detail.multipliedReportingOverflow(by: 3)
+                    guard !three.overflow else { throw LibertySourceError.arithmeticOverflow }
+                    let prefix: UInt64 = snapshot.9 == .quota
+                        ? UInt64("native quota bytes: native quota bytes: conservative RC ".utf8.count)
+                        : UInt64("native callback allocation records: native callback allocation records: conservative RC ".utf8.count)
+                    let sum = three.partialValue.addingReportingOverflow(prefix)
+                    guard !sum.overflow else { throw LibertySourceError.arithmeticOverflow }
+                    bytes = sum.partialValue
+                }
+                throw try diagnostics.sourceFailure(utf8ByteCount: bytes, construct)
+            }
+            throw construct()
         }
     }
 

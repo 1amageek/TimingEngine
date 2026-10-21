@@ -45,6 +45,7 @@ extension NativeSTASequentialExecution {
         var inputSlewBounds: ClosedRange<Double>? = nil
     }
     struct TransferRequest: Sendable {
+        var transformRetention: NativeSTATransformRetention? = nil
         let cell: String
         let output: String
         let causalInput: Transition
@@ -80,12 +81,15 @@ extension NativeSTASequentialExecution {
         try validate(input: input, load: outputLoad)
         try validate(window: window)
         try stateBudget.reserve(5)
+        let retained = NativeSTATransformStorage(budget: stateBudget, kind: .liveOwnedBytes)
         let early = try latchCandidates(plan: plan, cell: cell, output: output, outputEdge: outputEdge,
-            input: input, window: window, load: outputLoad, early: true, certified: certified)
+            input: input, window: window, load: outputLoad, early: true, certified: certified, storage: retained)
         let late = try latchCandidates(plan: plan, cell: cell, output: output, outputEdge: outputEdge,
-            input: input, window: window, load: outputLoad, early: false, certified: certified)
+            input: input, window: window, load: outputLoad, early: false, certified: certified, storage: retained)
         guard !early.isEmpty, !late.isEmpty else { throw Failure.inconsistent("Latch interval has no periodic branch") }
-        return .init(cell: cell.name, output: output, causalInput: input, earlyCandidates: early, lateCandidates: late)
+        var result = TransferRequest(cell: cell.name, output: output, causalInput: input, earlyCandidates: early, lateCandidates: late)
+        result.transformRetention = try retained.finish()
+        return result
     }
 
     static func requestFF(plan: Plan, cell: TimingCell, output: String, outputEdge: TimingEdge,
@@ -107,8 +111,13 @@ extension NativeSTASequentialExecution {
                   sourceIdentity: arc.sourceIdentity,
                   inputSlewBounds: NativeSTATimingBounds.slew(clock.earlySlew, clock.lateSlew))
         }
-        return .init(cell: cell.name, output: output, causalInput: clock,
+        let retained = NativeSTATransformStorage(budget: stateBudget, kind: .liveOwnedBytes)
+        try retained.reserve(SampleRequest.self, capacity: 1)
+        try retained.reserve(SampleRequest.self, capacity: 1)
+        var result = TransferRequest(cell: cell.name, output: output, causalInput: clock,
                      earlyCandidates: [bound(clock.early, clock.earlySlew)], lateCandidates: [bound(clock.late, clock.lateSlew)])
+        result.transformRetention = try retained.finish()
+        return result
     }
 
     /// Every possible branch extreme consumes its own actual characterized sample and receipt.
@@ -171,8 +180,15 @@ extension NativeSTASequentialExecution {
               earlyRanges.isEmpty || (earlyRanges.count == earlySamples.count && lateRanges.count == lateSamples.count),
               let selectedEarly = early, let selectedLate = late else { throw Failure.inconsistent("Sequential range receipt count") }
         if !earlyRanges.isEmpty {
-            let minimum = (earlyRanges + lateRanges).map { $0.outputSlew.result.lowerBound }.min()!
-            let maximum = (earlyRanges + lateRanges).map { $0.outputSlew.result.upperBound }.max()!
+            var minimum = Double.infinity; var maximum = -Double.infinity
+            for range in earlyRanges {
+                minimum = min(minimum, range.outputSlew.result.lowerBound)
+                maximum = max(maximum, range.outputSlew.result.upperBound)
+            }
+            for range in lateRanges {
+                minimum = min(minimum, range.outputSlew.result.lowerBound)
+                maximum = max(maximum, range.outputSlew.result.upperBound)
+            }
             early = .init(request: selectedEarly.request, arrival: selectedEarly.arrival, rawDelay: selectedEarly.rawDelay,
                 appliedDelay: selectedEarly.appliedDelay, outputSlew: minimum, receiptIndex: selectedEarly.receiptIndex)
             late = .init(request: selectedLate.request, arrival: selectedLate.arrival, rawDelay: selectedLate.rawDelay,
@@ -187,7 +203,8 @@ extension NativeSTASequentialExecution {
 
     /// A fixed maximum of two branch extremes per context, independent of signed epoch distance.
     private static func latchCandidates(plan: Plan, cell: TimingCell, output: String, outputEdge: TimingEdge,
-                                        input: Transition, window: Window, load: Double, early: Bool, certified: Bool) throws -> [SampleRequest] {
+                                        input: Transition, window: Window, load: Double, early: Bool, certified: Bool,
+                                        storage: NativeSTATransformStorage) throws -> [SampleRequest] {
         let a = input.early, b = input.late, p = window.period
         let oe = window.open.early, ol = window.open.late, ce = window.close.early, cl = window.close.late
         func epoch(_ value: Double) throws -> Int {
@@ -224,6 +241,7 @@ extension NativeSTASequentialExecution {
             }
             return (opening, latest, closing, last, previous)
         }
+        try storage.reserve(SampleRequest.self, capacity: 2)
         var result: [SampleRequest] = []
         result.reserveCapacity(2)
         let firstData = try epoch(epochRounding(a, cl, up: false) + 1)
@@ -272,8 +290,11 @@ extension NativeSTASequentialExecution {
 
     private static func selectedArc(cell: TimingCell, pin: String, output: String, inputEdge: TimingEdge,
                                     outputEdge: TimingEdge, clock: Bool, sourceRequired: Bool) throws -> TimingArc {
-        let matches = cell.arcs.filter { !$0.isConstraint && $0.fromPin == pin && $0.toPin == output }
-        guard matches.count == 1, let arc = matches.first else { throw Failure.missing("Unique sequential propagation arc") }
+        var first: TimingArc?; var count = 0
+        for arc in cell.arcs where !arc.isConstraint && arc.fromPin == pin && arc.toPin == output {
+            count += 1; if first == nil { first = arc }
+        }
+        guard count == 1, let arc = first else { throw Failure.missing("Unique sequential propagation arc") }
         if sourceRequired {
             guard let source = arc.sourceIdentity else { throw Failure.missing("Positioned sequential propagation arc") }
             if clock {
@@ -290,14 +311,14 @@ extension NativeSTASequentialExecution {
     }
 
     private static func validate(input: Transition, load: Double) throws {
-        guard [input.early, input.late, input.earlySlew, input.lateSlew, load].allSatisfy({ $0.isFinite }),
+        guard input.early.isFinite, input.late.isFinite, input.earlySlew.isFinite, input.lateSlew.isFinite, load.isFinite,
               input.early <= input.late, input.earlySlew >= 0, input.lateSlew >= 0, load >= 0,
               input.parentRouteIndex >= 0 else { throw Failure.nonfinite("Sequential transition/load") }
     }
     private static func validate(window: Window) throws {
-        guard [window.open.early, window.open.late, window.close.early, window.close.late,
-               window.open.earlySlew, window.open.lateSlew, window.close.earlySlew,
-               window.close.lateSlew, window.period].allSatisfy({ $0.isFinite }),
+        guard window.open.early.isFinite, window.open.late.isFinite, window.close.early.isFinite, window.close.late.isFinite,
+              window.open.earlySlew.isFinite, window.open.lateSlew.isFinite, window.close.earlySlew.isFinite,
+              window.close.lateSlew.isFinite, window.period.isFinite,
               window.period > 0, window.open.early <= window.open.late,
               window.close.early <= window.close.late, window.open.late < window.close.early,
               window.close.late < window.open.early + window.period,

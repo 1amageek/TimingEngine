@@ -8,6 +8,7 @@ struct STATimingProcessInputs: Sendable {
     let librariesByCorner: [String: TimingLibrary]
     let selection: STAProcessSelection
     let sourcesByCorner: [String: OwnedLibertySource]
+    var transformRetention: NativeSTATransformRetention? = nil
 
     static func load(
         _ request: STARequest,
@@ -15,6 +16,9 @@ struct STATimingProcessInputs: Sendable {
         parser: any LibertySourceParsing,
         resources: STAExecutionResources
     ) async throws -> Self {
+        if resources.requiresStrictTransformAccounting {
+            return try await loadControlled(request, reader: reader, parser: parser, resources: resources)
+        }
         guard request.pdkManifest.descriptor.role == .input,
               request.pdkManifest.descriptor.format == .json,
               request.pdkManifest.digest.algorithm == .sha256 else {
